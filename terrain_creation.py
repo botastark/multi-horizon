@@ -16,6 +16,7 @@ class terrain:
       y = np.arange(0, grid.y, grid.length)
       self.x, self.y = np.meshgrid(x, y,indexing='ij')
       self.map = np.ones(self.x.shape)*0.5
+      self.grid = grid
       self.y_range = (0, grid.y)
       self.x_range = (0, grid.x)
       self.z_range = (0, 1)
@@ -31,6 +32,34 @@ class terrain:
     
     def get_ranges(self):
       return self.x_range, self.y_range, self.z_range
+    
+    def pos2grid(self, pos):
+    # Ensure the position is within the defined x_range and y_range
+      if not (self.x_range[0] <= pos[0] <= self.x_range[1]) or not (self.y_range[0] <= pos[1] <= self.y_range[1]):
+          raise ValueError("Position is outside the valid range defined by x_range and y_range.")
+
+      # Convert position in meters into grid coordinates
+      grid_x = int((pos[0] - self.x_range[0]) / self.grid.length)
+      grid_y = int((pos[1] - self.y_range[0]) / self.grid.length)
+
+      # Ensure the grid coordinates are within the bounds of the grid shape
+      grid_x = min(max(grid_x, 0), self.map.shape[0] - 1)
+      grid_y = min(max(grid_y, 0), self.map.shape[1] - 1)
+
+      return grid_x, grid_y
+
+    def grid2pos(self, coords):
+      # Convert grid coordinates back to positions in meters using x_range and y_range
+      pos_x = self.x_range[0] + coords[0] * self.grid.length
+      pos_y = self.y_range[0] + coords[1] * self.grid.length
+      return pos_x, pos_y
+
+    # def pos2grid(self, pos):
+    #   # from position in meters into grid coordinates
+    #   return min(max(int(pos[0]/self.grid.length),0), self.grid.shape[0]-1), min(max(int(pos[1]/self.grid.length),0), self.grid.shape[1]-1)
+    
+    # def grid2pos(self, coords):
+    #   return coords[0]*self.grid.length, coords[1]*self.grid.length
 
 
     def set_map(self, z, x=[], y=[]):
@@ -41,6 +70,14 @@ class terrain:
           self.x=x
           self.y=y
           self.map=z
+          # Check if x and y shapes match the shape of z
+          if self.x.shape != self.y.shape or self.x.shape != z.shape:
+            raise ValueError("Shapes of x, y, and z must match.")
+
+            # Update x_range and y_range based on the new x and y meshgrid
+          self.x_range = (np.min(self.x), np.max(self.x))
+          self.y_range = (np.min(self.y), np.max(self.y))
+
         else:
           raise TypeError("Grid and Map sizes don't match and no grid is passed")
 

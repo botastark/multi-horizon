@@ -21,6 +21,9 @@ class camera2map():
       return self.camera_altitude
 
     def get_range(self, index_form = False):
+      """
+      calculates indices of camera footprints (part of terrain (therefore terrain indices) seen by camera at a given UAV pos and alt)
+      """
       x_angle = self.fov/2 #degree
       y_angle = self.fov/2 #degree
       x_dist = self.camera_altitude*math.tan(x_angle/180*3.14)
@@ -42,6 +45,9 @@ class camera2map():
       return [[x_min, x_max], [y_min, y_max]]
 
     def get_observation(self, map):
+      """
+      returns submap of terrain (z) to be seen by camera, x,y are position(not indices) wrt terrain
+      """
       [[x_min_id, x_max_id], [y_min_id, y_max_id]] = self.get_range(index_form=True)
       submap = map[x_min_id:x_max_id+1,y_min_id:y_max_id+1]
 
@@ -61,41 +67,36 @@ class camera2map():
       return coords[0]*self.grid.length, coords[1]*self.grid.length
 
 
-def prob_sensor_model(obs_map, h):
-    # probability of observation z given cell state m and uav position x
-    a = 1
-    b = 0.015
-    sigma_s_squared = a * (1 - np.exp(-2* b * h))
-    sigma_s = np.sqrt(sigma_s_squared)
+# def prob_sensor_model(obs_map, h):
+#     # probability of observation z given cell state m and uav position x
+#     a = 1
+#     b = 0.015
+#     sigma_s_squared = a * (1 - np.exp(-2* b * h))
+#     sigma_s = np.sqrt(sigma_s_squared)
     
-    # Generate noisy measurements
-    noisy_obs_map = np.random.normal(obs_map, sigma_s)
-    # Clip the noisy measurements to ensure they are between 0 and 1
-    noisy_obs_map = np.clip(noisy_obs_map, 0, 1)
-    return noisy_obs_map
+#     # Generate noisy measurements
+#     noisy_obs_map = np.random.normal(obs_map, sigma_s)
+#     # Clip the noisy measurements to ensure they are between 0 and 1
+#     noisy_obs_map = np.clip(noisy_obs_map, 0, 1)
+#     return noisy_obs_map
 
 
-# Add sampling with probability distr for z==m and z!=m acc to (2)
-def sample_observation(obs_map, h):
-    # probability of observation z given cell state m ande uav position x
-    a = 1
-    b = 0.015
-    sigma_s = a * (1 - np.exp(- b * h))
-    # Get the probability of observing the correct value at this altitude
-    P_correct = 1 - sigma_s
+
+
+# # Add sampling with probability distr for z==m and z!=m acc to (2)
+# def sample_observation(obs_map, h):
+#     # Dimensions of the grid
+#     rows, cols = obs_map.shape
     
-    # Dimensions of the grid
-    rows, cols = obs_map.shape
+#     # Initialize the observed map
+#     observed_map = np.copy(obs_map)
     
-    # Initialize the observed map
-    observed_map = np.copy(obs_map)
+#     # Loop through each cell in the grid
+#     for i in range(rows):
+#         for j in range(cols):
+#             # Sample whether the observation is correct or wrong
+#             if np.random.random() > P_correct:
+#                 # If wrong, replace with a random value within the range of true_map
+#                 observed_map[i, j] = np.random.uniform(0, 1)
     
-    # Loop through each cell in the grid
-    for i in range(rows):
-        for j in range(cols):
-            # Sample whether the observation is correct or wrong
-            if np.random.random() > P_correct:
-                # If wrong, replace with a random value within the range of true_map
-                observed_map[i, j] = np.random.uniform(0, 1)
-    
-    return observed_map
+#     return observed_map
