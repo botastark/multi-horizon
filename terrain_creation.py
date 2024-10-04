@@ -58,13 +58,6 @@ class terrain:
         pos_y = self.y_range[0] + coords[1] * self.grid.length
         return pos_x, pos_y
 
-    # def pos2grid(self, pos):
-    #   # from position in meters into grid coordinates
-    #   return min(max(int(pos[0]/self.grid.length),0), self.grid.shape[0]-1), min(max(int(pos[1]/self.grid.length),0), self.grid.shape[1]-1)
-
-    # def grid2pos(self, coords):
-    #   return coords[0]*self.grid.length, coords[1]*self.grid.length
-
     def set_map(self, z, x=[], y=[]):
         if self.x.shape == z.shape:
             self.map = z

@@ -100,39 +100,6 @@ def normalize_2d_grid(grid):
     return normalized_grid
 
 
-from itertools import product
-
-
-# Calculate the partition function Z(s)
-def calculate_partition_function(s, m_values):
-    k = len(s)  # Number of hidden variables (same as length of observed variables)
-
-    # Get all possible configurations of m (m_1, m_2, ..., m_k)
-    all_m_configs = list(product(m_values, repeat=k))
-
-    # Initialize partition function Z(s)
-    Z_s = 0.0
-
-    # Iterate over all possible configurations of m
-    for m_config in all_m_configs:
-        # Compute the product of potentials for the current configuration
-        potential_product = 1.0
-
-        # Compute the local potentials for each m_k and s_k
-        for i in range(k):
-            potential_product *= local_potential(m_config[i], s[i])
-
-        # Compute the pairwise potentials for neighboring m_k's
-        # (Assume neighbors are consecutive elements in the chain for simplicity)
-        for i in range(k - 1):
-            potential_product *= pairwise_potential(m_config[i], m_config[i + 1])
-
-        # Add to the partition function sum
-        Z_s += potential_product
-
-    return Z_s
-
-
 def get_neighbors(map, pos):
     i, j = pos[0], pos[1]
     rows = len(map)
@@ -147,9 +114,6 @@ def get_neighbors(map, pos):
         (ni, nj) for ni, nj in possible_neighbors if 0 <= ni < rows and 0 <= nj < cols
     ]
     return neighbors
-
-
-import numpy as np
 
 
 def normalize_probabilities(current_probs):

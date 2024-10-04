@@ -84,8 +84,7 @@ class planning:
             1 - posterior_mi
         ) * math.log2(1 - posterior_mi)
 
-
-# z_{i+1} = 1
+        # z_{i+1} = 1
 
 
 list(itertools.product(range(1, k), repeat=2))

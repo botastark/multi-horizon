@@ -68,36 +68,3 @@ class camera2map:
 
     def grid2pos(self, coords):
         return coords[0] * self.grid.length, coords[1] * self.grid.length
-
-
-# def prob_sensor_model(obs_map, h):
-#     # probability of observation z given cell state m and uav position x
-#     a = 1
-#     b = 0.015
-#     sigma_s_squared = a * (1 - np.exp(-2* b * h))
-#     sigma_s = np.sqrt(sigma_s_squared)
-
-#     # Generate noisy measurements
-#     noisy_obs_map = np.random.normal(obs_map, sigma_s)
-#     # Clip the noisy measurements to ensure they are between 0 and 1
-#     noisy_obs_map = np.clip(noisy_obs_map, 0, 1)
-#     return noisy_obs_map
-
-
-# # Add sampling with probability distr for z==m and z!=m acc to (2)
-# def sample_observation(obs_map, h):
-#     # Dimensions of the grid
-#     rows, cols = obs_map.shape
-
-#     # Initialize the observed map
-#     observed_map = np.copy(obs_map)
-
-#     # Loop through each cell in the grid
-#     for i in range(rows):
-#         for j in range(cols):
-#             # Sample whether the observation is correct or wrong
-#             if np.random.random() > P_correct:
-#                 # If wrong, replace with a random value within the range of true_map
-#                 observed_map[i, j] = np.random.uniform(0, 1)
-
-#     return observed_map
