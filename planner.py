@@ -90,3 +90,11 @@ class planning:
                 self.future_obs_prob(z_future, x_future) * entropy_posterior_mi
             )
         return expected_entropy
+    
+    def x_future(self, x, action):
+
+        
+    def select_action(self):
+        for action in actions:
+
+            self.info_gain(m_i_id, x_future)
