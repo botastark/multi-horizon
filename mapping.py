@@ -1,99 +1,3 @@
-# pairwise_factor_weights: equal, biased, adaptive
-import random
-import numpy as np
-
-import math
-
-
-def collect_sample_set(grid):
-    rows, cols = grid.shape
-    D = []
-
-    # Calculate number of complete 3x3 grids
-    num_blocks_row = rows // 3
-    num_blocks_col = cols // 3
-
-    # Iterate over the grid in steps of 3 to access central cells of each 3x3 block
-    for block_i in range(num_blocks_row):
-        for block_j in range(num_blocks_col):
-            # Central cell in a 3x3 block
-            central_i = block_i * 3 + 1
-            central_j = block_j * 3 + 1
-            c = grid[central_i, central_j]
-
-            # Collect Von Neumann neighbors
-            neighbors = [
-                grid[central_i - 1, central_j],  # North
-                grid[central_i + 1, central_j],  # South
-                grid[central_i, central_j - 1],  # West
-                grid[central_i, central_j + 1],  # East
-            ]
-
-            n = sum(neighbors)
-
-            # Append the central cell value and the sum of neighbors
-            D.append((c, n))
-    return D
-
-
-def pearson_correlation_coeff(d_sampled):
-    c_values = [c for c, n in d_sampled]
-    n_values = [n for c, n in d_sampled]
-    avg_c = np.mean(c_values)
-    avg_n = np.mean(n_values)
-    p = 0
-    numerator = 0
-    sum_sq_central_diff = 0
-    sum_sq_neighbors_diff = 0
-    for c, n in d_sampled:
-        c_diff = c - avg_c
-        n_diff = n - avg_n
-        numerator += n_diff * c_diff
-        sum_sq_central_diff += c_diff**2
-        sum_sq_neighbors_diff += n_diff**2
-    denominator = np.sqrt(sum_sq_central_diff * sum_sq_neighbors_diff)
-    p = numerator / denominator if denominator != 0 else 0
-    return p
-
-
-def adaptive_weights(m_i, m_j, obs_map):
-
-    d_sampled = collect_sample_set(obs_map)
-    p = pearson_correlation_coeff(d_sampled)
-    exp = np.exp(-p)
-
-    if m_i == m_j:
-        return 1 / (1 + exp)
-    else:
-        return exp / (1 + exp)
-
-
-def pairwise_factor(m_i, m_j, obs_map=[], type="equal"):
-    if type == "equal":
-        return 0.5
-    elif type == "biased":
-        if m_i == m_j:
-            return 0.7
-        else:
-            return 0.3
-    else:
-        return adaptive_weights(m_i, m_j, obs_map)
-
-
-def sensor_model(m, z, altitude):
-    # probability of measurement z given cell state m ande uav position x
-    a = 1
-    b = 0.015
-    sigma_s = a * (1 - np.exp(-b * altitude))
-
-    if z == m:
-        return (
-            1 - sigma_s
-        )  # Get the probability of observing the true state value at this altitude
-    else:
-        return sigma_s
-
-
 def get_edges(m0, i, j):
     rows = len(m0)
     cols = len(m0[0]) if rows > 0 else 0
@@ -111,18 +15,6 @@ def get_edges(m0, i, j):
 
 def mapping(belief_map, obs_map, altitude):
     belief_z = belief_map.get_map()
-    # obs_x_min, obs_x_max = obs_map.x_range
-    # obs_y_min, obs_y_max = obs_map.y_range
-    # for i in range(belief_z.shape[0]):
-    #     for j in range(belief_z.shape[1]):
-    #         m_pos = belief_map.grid2pos((i, j))
-    #         m = belief_z[i][j]
-    #         if obs_x_min <= m_pos[0] <= obs_x_max and obs_y_min <= m_pos[1] <= obs_y_max: # if m was observed
-    #             z_coords = obs_map.pos2grid(m_pos)
-    #             z = obs_map.map[z_coords[0], z_coords[1]]
-    #             evidence_factor = sensor_model(m, z)
-    #             # print("M pos {}-{} and coord {}-{}".format(m_pos[0], m_pos[1], i, j))
-    #             # print("Z pos {}-{} and coord {}-{}".format(m_pos[0], m_pos[1], z_coords[0], z_coords[1]))
 
     obs_z = obs_map.get_map()
     # observed_belief = obs_map
@@ -159,7 +51,6 @@ def id_converter(map_s, coord_s, map_f):
     return corresponding coordinates of map2 (i_f, j_f)
     """
     pos = map_s.grid2pos(coord_s)  # (x, y) for (i_s, j_s)
-    print(pos)
     return map_f.pos2grid(pos)
 
 
@@ -239,17 +130,14 @@ def calc_prob(belief_prob, belief_map, obs_map, uav, observed_k):
     return belief_map_new
 
 
-def calc_future_obs_prob(belief_prob, belief_map, obs_map, uav, observed_k):
-    for i, (i_b, j_b) in enumerate(observed_k):
-        m_i = belief_map.map[i_b, j_b]
-        i_o, j_o = id_converter(belief_map, (i_b, j_b), obs_map)
-        z_i = obs_map.map[i_o, j_o]
-        evidence_factor = sensor_model(m_i, z_i, uav.altitude)
+def calc_future_obs_prob(belief_map, m, z, uav):
+    # terrain_area = belief_map.map.shape[0] * belief_map.map.shape[1]
+    # obs_area = obs_map.map.shape[0] * obs_map.map.shape[1]
+    # prob_tobe_observed = obs_area / terrain_area
 
-        prior_m_i = belief_prob.map[i_b, j_b]  # prob of m_i
-        prob_future_observation = evidence_factor * prob_candidate_uav_position(
-            uav, belief_map
-        )
+    P_z_given_x = sensor_model(m, z, uav.altitude)
+
+    return P_z_given_x * prob_candidate_uav_position(uav, belief_map)
 
 
 def map_(belief_map, obs_map, uav, belief_prob=[]):
@@ -263,10 +151,6 @@ def map_(belief_map, obs_map, uav, belief_prob=[]):
     [observed_belief_i_max, observed_belief_j_max] = id_converter(
         obs_map, [obs_map.map.shape[0] - 1, obs_map.map.shape[1] - 1], belief_map
     )
-    # print("obs_pos x{} - y{}".format( x_o_pos, y_o_pos))
-    # print("obs_bel coord x{}-{} - y{}-{}".format( observed_belief_i_min, observed_belief_i_max, observed_belief_j_min, observed_belief_j_max))
-    # print("obs_bel pos x{}-{}".format( belief_map.x[observed_belief_i_min, observed_belief_i_max], belief_map.x[observed_belief_j_min, observed_belief_j_max]))
-    # print("obs_bel pos y{}-{}".format( belief_map.y[observed_belief_i_min, observed_belief_i_max], belief_map.y[observed_belief_j_min, observed_belief_j_max]))
     observed_k = []
 
     for i_b, i_o in zip(
@@ -279,21 +163,32 @@ def map_(belief_map, obs_map, uav, belief_prob=[]):
             observed_k.append((i_b, j_b))
 
     future_belief = calc_prob(belief_prob, belief_map, obs_map, uav, observed_k)
+
     for i, (i_b, j_b) in enumerate(observed_k):
         m_i = belief_map.map[i_b, j_b]
         i_o, j_o = id_converter(belief_map, (i_b, j_b), obs_map)
         z_i = obs_map.map[i_o, j_o]
+
         evidence_factor = sensor_model(m_i, z_i, uav.altitude)
-        prior_m_i = belief_prob.map[i_b, j_b]  # prob of m_i
+        prior_m_i = belief_prob.map[i_b, j_b]  # prob of m_i = 1
         prob_future_observation = evidence_factor * prob_candidate_uav_position(
             uav, belief_map
         )
         posterior_m_i = future_belief.map[i_b, j_b]
-        entropy = -prior_m_i * math.log2(prior_m_i) - (1 - prior_m_i) * math.log2(
-            1 - prior_m_i
-        )
 
         entropy_post = -posterior_m_i * math.log2(posterior_m_i) - (
             1 - posterior_m_i
         ) * math.log2(1 - posterior_m_i)
         expected_entropy = prob_future_observation * entropy_post
+
+    prior_m_i = belief_prob.map[i_b, j_b]  # prob- of m_i = 1
+
+    entropy_m_i = -prior_m_i * math.log2(prior_m_i) - (1 - prior_m_i) * math.log2(
+        1 - prior_m_i
+    )
+
+    # expected_entropy
+    posterior_m_i = future_belief.map[i_b, j_b]  # prob+ of m_i = 1
+    entropy_post = -posterior_m_i * math.log2(posterior_m_i) - (
+        1 - posterior_m_i
+    ) * math.log2(1 - posterior_m_i)
