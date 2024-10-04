@@ -116,6 +116,18 @@ def get_neighbors(map, pos):
     return neighbors
 
 
+def observed_m_ids(new_z, P_m_given_s):
+    [obsd_m_i_min, obsd_m_j_min] = id_converter(new_z, [0, 0], P_m_given_s)
+    [obsd_m_i_max, obsd_m_j_max] = id_converter(
+        new_z, [new_z.map.shape[0] - 1, new_z.map.shape[1] - 1], P_m_given_s
+    )
+    observed_m = []
+    for i_b in range(obsd_m_i_min, obsd_m_i_max):
+        for j_b in range(obsd_m_j_min, obsd_m_j_max):
+            observed_m.append((i_b, j_b))
+    return observed_m
+
+
 def normalize_probabilities(current_probs):
     # Calculate unnormalized joint probability
     joint_prob = 1.0
@@ -128,3 +140,42 @@ def normalize_probabilities(current_probs):
     normalized_probs = current_probs / normalization_factor  # Normalize
 
     return normalized_probs, joint_prob
+
+
+def count_possible_states(uav_pos, map):
+    # possible_actions = {"up", "down", "front","back", "left","right", "hover"}
+    count = 1  # hover
+    max_h = 20
+    min_h = 5
+    step_h = 5
+    step_xy = map.grid.length
+
+    if uav_pos.altitude + step_h <= max_h:  # up
+        count += 1
+    if uav_pos.altitude - step_h >= min_h:  # down
+        count += 1
+    if uav_pos.position[1] + step_xy <= map.y_range[1]:  # front (+y)
+        count += 1
+    if uav_pos.position[1] - step_xy <= map.y_range[0]:  # back (-y)
+        count += 1
+    if uav_pos.position[0] + step_xy <= map.x_range[1]:  # right (+x)
+        count += 1
+    if uav_pos.position[0] - step_xy <= map.x_range[0]:  # left (-x)
+        count += 1
+    return count
+
+
+def prob_uav_position(uav_pos, map):
+    if not uav_pos.position[0] in map.x_range or not uav_pos.position[1] in map.y_range:
+        return 0
+    else:
+        return 1 / len(map)[0] / len(map)[1]
+
+
+def prob_candidate_x(uav_pos, map):
+    """
+    P(x_{t+1}) = P(x_{t+1} | x_{t}) * P(x_{t})
+    P(x_{t+1} | x_{t}) = 1 over all possible future positions from the current position
+    """
+    prob_candidate_given_current = 1 / count_possible_states(uav_pos, map)
+    return prob_candidate_given_current * prob_uav_position(uav_pos, map)

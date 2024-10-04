@@ -1,4 +1,3 @@
-import itertools
 import numpy as np
 import math
 from helper import (
@@ -6,6 +5,8 @@ from helper import (
     id_converter,
     get_neighbors,
     normalize_probabilities,
+    observed_m_ids,
+    prob_candidate_x,
 )
 
 
@@ -38,20 +39,9 @@ class planning:
         else:
             return sigma(x.altitude)
 
-    def observed_m_ids(self, new_z):
-        [obsd_m_i_min, obsd_m_j_min] = id_converter(new_z, [0, 0], self.P_m_given_s)
-        [obsd_m_i_max, obsd_m_j_max] = id_converter(
-            new_z, [new_z.map.shape[0] - 1, new_z.map.shape[1] - 1], self.P_m_given_s
-        )
-        observed_m = []
-        for i_b in range(obsd_m_i_min, obsd_m_i_max):
-            for j_b in range(obsd_m_j_min, obsd_m_j_max):
-                observed_m.append((i_b, j_b))
-        return observed_m
-
     def CRF(self, z_future, x_future):
         posterior_m_given_s = self.P_m_given_s
-        observed_m = self.observed_m_ids(z_future)
+        observed_m = observed_m_ids(z_future, self.P_m_given_s)
 
         for m_i_pos in observed_m:
             pairwise_product = 1
@@ -75,16 +65,28 @@ class planning:
         posterior_m_given_s = normalize_probabilities(posterior_m_given_s.map)
         return posterior_m_given_s
 
+    def future_obs_prob(self, z_future, x_future):
+        # terrain_area = belief_map.map.shape[0] * belief_map.map.shape[1]
+        # obs_area = obs_map.map.shape[0] * obs_map.map.shape[1]
+        # prob_tobe_observed = obs_area / terrain_area
+
+        # P_z_given_x = sensor_model(m, z, x_future.altitude) @ TODO
+        P_z_given_x = (z_future, x_future)
+
+        return P_z_given_x * prob_candidate_x(x_future, self.P_m_given_s)
+
     def expected_entropy(self, m_i_id, x_future):
-        # z_{i+1} or z_i_future = 0
-        posterior_m = self.CRF(z_future, x_future)
-        posterior_mi = posterior_m.map[m_i_id]
+        # z_{t+1}
+        expected_entropy = 0
+        for z_future in z_futures:  # @ TODO
+            posterior_m = self.CRF(z_future, x_future)
+            posterior_mi = posterior_m.map[m_i_id]
 
-        entropy_posterior_mi = -posterior_mi * math.log2(posterior_mi) - (
-            1 - posterior_mi
-        ) * math.log2(1 - posterior_mi)
+            entropy_posterior_mi = -posterior_mi * math.log2(posterior_mi) - (
+                1 - posterior_mi
+            ) * math.log2(1 - posterior_mi)
 
-        # z_{i+1} = 1
-
-
-list(itertools.product(range(1, k), repeat=2))
+            expected_entropy += (
+                self.future_obs_prob(z_future, x_future) * entropy_posterior_mi
+            )
+        return expected_entropy
