@@ -142,40 +142,82 @@ def normalize_probabilities(current_probs):
     return normalized_probs, joint_prob
 
 
-def count_possible_states(uav_pos, map):
-    # possible_actions = {"up", "down", "front","back", "left","right", "hover"}
-    count = 1  # hover
-    max_h = 20
-    min_h = 5
-    step_h = 5
-    step_xy = map.grid.length
+class uav:
+    def __init__(
+        self,
+        position=(0, 0),
+        altitude=5,
+        x_range=(0, 50),
+        y_range=(50, 50),
+        xy_step=0.75,
+        h_range=(5, 20),
+        h_step=1,
+    ):
+        self.position = position
+        self.altitude = altitude
+        self.x_range = x_range
+        self.y_range = y_range
+        self.xy_step = xy_step
+        self.h_range = h_range
+        self.h_step = h_step
+        self.actions = {"up", "down", "front", "back", "left", "right", "hover"}
 
-    if uav_pos.altitude + step_h <= max_h:  # up
-        count += 1
-    if uav_pos.altitude - step_h >= min_h:  # down
-        count += 1
-    if uav_pos.position[1] + step_xy <= map.y_range[1]:  # front (+y)
-        count += 1
-    if uav_pos.position[1] - step_xy <= map.y_range[0]:  # back (-y)
-        count += 1
-    if uav_pos.position[0] + step_xy <= map.x_range[1]:  # right (+x)
-        count += 1
-    if uav_pos.position[0] - step_xy <= map.x_range[0]:  # left (-x)
-        count += 1
-    return count
+    def count_possible_states(self):
+        count = 1  # hover
+        if self.altitude + self.step_h <= self.h_range[1]:  # up
+            count += 1
+        if self.altitude - self.step_h >= self.h_range[0]:  # down
+            count += 1
+        if self.position[1] + self.xy_step <= self.y_range[1]:  # front (+y)
+            count += 1
+        if self.position[1] - self.xy_step <= self.y_range[0]:  # back (-y)
+            count += 1
+        if self.position[0] + self.xy_step <= self.x_range[1]:  # right (+x)
+            count += 1
+        if self.position[0] - self.xy_step <= self.x_range[0]:  # left (-x)
+            count += 1
+        return count
 
+    def prob_candidate_x(self):
+        """
+        P(x_{t+1}) = P(x_{t+1} | x_{t}) * P(x_{t})
+        P(x_{t+1} | x_{t}) = 1 over all possible future positions from the current position
+        """
+        prob_candidate_given_current = 1 / self.count_possible_states()
+        return prob_candidate_given_current  # * self.prob_uav_position()
 
-def prob_uav_position(uav_pos, map):
-    if not uav_pos.position[0] in map.x_range or not uav_pos.position[1] in map.y_range:
-        return 0
-    else:
-        return 1 / len(map)[0] / len(map)[1]
+    def prob_uav_position(self):
+        if not self.position[0] in self.x_range or not self.position[1] in self.y_range:
+            return 0
+        else:
+            number_cell = (
+                (self.x_range[1] - self.x_range[0])
+                / self.xy_step
+                * (self.y_range[1] - self.y_range[0])
+                / self.xy_step
+            )
+            return 1 / number_cell
 
+    def x_future(self, action, map):
+        # possible_actions = {"up", "down", "front", "back", "left", "right", "hover"}
 
-def prob_candidate_x(uav_pos, map):
-    """
-    P(x_{t+1}) = P(x_{t+1} | x_{t}) * P(x_{t})
-    P(x_{t+1} | x_{t}) = 1 over all possible future positions from the current position
-    """
-    prob_candidate_given_current = 1 / count_possible_states(uav_pos, map)
-    return prob_candidate_given_current * prob_uav_position(uav_pos, map)
+        if action == "up" and self.altitude + self.h_step <= self.h_range[1]:
+            return self.position, self.altitude + self.h_step
+        elif action == "down" and self.altitude - self.h_step >= self.h_range[0]:
+            return (self.position, self.altitude - self.h_step)
+        elif (
+            action == "front" and self.position[0] + self.xy_step <= self.y_range[1]
+        ):  # front (+y)
+            return (self.position[0], self.position[1] + self.xy_step), self.altitude
+        elif action == "back" and self.position[0] - self.xy_step >= self.y_range[0]:
+            return (
+                self.position[0],
+                self.position[1] + self.xy_step,
+            ), self.altitude  # back (-y)
+
+        if self.position[1] - self.xy_step <= self.y_range[0]:  # back (-y)
+            count += 1
+        if self.position[0] + self.xy_step <= self.x_range[1]:  # right (+x)
+            count += 1
+        if self.position[0] - self.xy_step <= self.x_range[0]:  # left (-x)
+            count += 1
