@@ -83,7 +83,6 @@ def id_converter(map_s, coord_s, map_f):
     return corresponding coordinates of map2 (i_f, j_f)
     """
     pos = map_s.grid2pos(coord_s)  # (x, y) for (i_s, j_s)
-    print(pos)
     return map_f.pos2grid(pos)
 
 

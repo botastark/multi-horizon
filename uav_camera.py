@@ -1,5 +1,6 @@
 import math
 import numpy as np
+from helper import id_converter
 
 
 class camera:
@@ -24,6 +25,8 @@ class camera:
         self.xy_step = xy_step
         self.h_range = h_range
         self.h_step = h_step
+        self.a = 1
+        self.b = 0.015
         self.actions = {"up", "down", "front", "back", "left", "right", "hover"}
 
     def set_position(self, pos):
@@ -65,11 +68,13 @@ class camera:
 
         return [[x_min, x_max], [y_min, y_max]]
 
-    def get_observation(self, map):
+    def get_observation(self, map, position=None, altitude=None):
         """
         returns submap of terrain (z) to be seen by camera, x,y are position(not indices) wrt terrain
         """
-        [[x_min_id, x_max_id], [y_min_id, y_max_id]] = self.get_range(index_form=True)
+        [[x_min_id, x_max_id], [y_min_id, y_max_id]] = self.get_range(
+            position=position, altitude=altitude, index_form=True
+        )
         submap = map[x_min_id : x_max_id + 1, y_min_id : y_max_id + 1]
 
         x_min_, x_max_ = self.grid2pos((x_min_id, x_max_id + 1))
@@ -79,6 +84,38 @@ class camera:
 
         x, y = np.meshgrid(x, y, indexing="ij")
         return submap, x, y
+
+    def sensor_model(self, m_i, z_i, x):
+        sigma = self.a * (1 - np.exp(-self.b * x.altitude))
+        if z_i == m_i:
+            return 1 - sigma(
+                x.altitude
+            )  # Get the probability of observing the true state value at this altitude
+        else:
+            return sigma(x.altitude)
+
+    def sample_from_prob(self, prob_map_z, threshold=0.5):
+        return (prob_map_z > threshold).astype(int)
+
+    def sample_observation(self, belief_prob, x):
+        sampled_belief_map = belief_prob
+        prob_z = belief_prob
+        sampled_belief_map.set_map(self.sample_from_prob(belief_prob.map))
+
+        z_measurement, z_x, z_y = self.get_observation(
+            sampled_belief_map.map, position=x.position, altitude=x.altitude
+        )
+        prob_z.set_map(z_measurement, x=z_x, y=z_y)
+
+        for z_i_id in prob_z:
+            z_i = prob_z.map[z_i_id]
+            m_i_id = id_converter(prob_z, z_i_id, sampled_belief_map)
+            m_i = sampled_belief_map.map[m_i_id]
+            prob_z.map[z_i_id] = self.sensor_model(m_i, z_i, x)
+
+        sampled_z = prob_z
+        sampled_z.map = self.sample_from_prob(prob_z.map)
+        return sampled_z
 
     def pos2grid(self, pos):
         # from position in meters into grid coordinates

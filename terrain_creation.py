@@ -20,6 +20,7 @@ class terrain:
         self.y_range = (0, grid.y)
         self.x_range = (0, grid.x)
         self.z_range = (0, 1)
+        self._current = 0  # internal index for iteration
 
     def __len__(self):
         return self.map.shape
@@ -76,6 +77,20 @@ class terrain:
 
             else:
                 raise TypeError("Grid and Map sizes don't match and no grid is passed")
+
+    def __iter__(self):
+        self._current = 0
+        return self
+
+    def __next__(self):
+        num_rows, num_cols = self.map.shape
+        if self._current >= num_rows * num_cols:
+            raise StopIteration
+        row = self._current // num_cols
+        col = self._current % num_cols
+
+        self._current += 1
+        return (row, col)
 
     def plot_map(self, fit=True):
         # Plot both the 3D and 2D maps in subplots
