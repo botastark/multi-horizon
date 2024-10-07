@@ -6,6 +6,7 @@ from helper import (
     get_neighbors,
     normalize_probabilities,
     observed_m_ids,
+    sensor_model,
 )
 
 from uav_camera import camera
@@ -20,26 +21,17 @@ class planning:
         self.uav = uav_camera
         self.z = []  # last measurement at x
         self.last_observation = (self.x, self.z)
-        self.a = 1
-        self.b = 0.015
 
-    def info_gain(self, m_i_id, x_future):
-        return self.entropy_mi(m_i_id) - self.expected_entropy(m_i_id, x_future)
+    def info_gain(self, m_i_id, x_future, z_future):
+        return self.entropy_mi(m_i_id) - self.expected_entropy(
+            m_i_id, x_future, z_future
+        )
 
     def entropy_mi(self, m_i_id):
         prior_m_i = self.P_m_given_s.map[m_i_id[0], m_i_id[1]]  # prob- of m_i = 1
         return -prior_m_i * math.log2(prior_m_i) - (1 - prior_m_i) * math.log2(
             1 - prior_m_i
         )
-
-    def sensor_model(self, m_i, z_i, x):
-        sigma = self.a * (1 - np.exp(-self.b * x.altitude))
-        if z_i == m_i:
-            return 1 - sigma(
-                x.altitude
-            )  # Get the probability of observing the true state value at this altitude
-        else:
-            return sigma(x.altitude)
 
     def CRF(self, z_future, x_future):
         posterior_m_given_s = self.P_m_given_s
@@ -50,7 +42,7 @@ class planning:
             m_i = self.m.map[m_i_pos]  # value of m_i
             z_i_future_pos = id_converter(self.P_m_given_s, m_i_pos, z_future)
 
-            evidence_factors = self.sensor_model(
+            evidence_factors = self.uav.sensor_model(
                 m_i, z_future.map[z_i_future_pos], x_future
             )
 
@@ -67,24 +59,25 @@ class planning:
         posterior_m_given_s = normalize_probabilities(posterior_m_given_s.map)
         return posterior_m_given_s
 
-    def expected_entropy(self, m_i_id, x_future):
-        # z_{t+1}
-        expected_entropy = 0
-        for z_future in z_futures:  # @ TODO
-            posterior_m = self.CRF(z_future, x_future)
-            posterior_mi = posterior_m.map[m_i_id]
+    def expected_entropy(self, m_i_id, x_future, z_futures):
 
-            entropy_posterior_mi = -posterior_mi * math.log2(posterior_mi) - (
-                1 - posterior_mi
-            ) * math.log2(1 - posterior_mi)
+        posterior_m = self.CRF(z_futures, x_future)
+        posterior_mi = posterior_m.map[m_i_id]
 
-            expected_entropy += (
-                self.uav.prob_future_observation(x_future, z_future)
-                * entropy_posterior_mi
-            )
+        entropy_posterior_mi = -posterior_mi * math.log2(posterior_mi) - (
+            1 - posterior_mi
+        ) * math.log2(1 - posterior_mi)
+        z_future_i = z_futures.map[id_converter(self.P_m_given_s, m_i_id, z_futures)]
+        expected_entropy = (
+            self.uav.prob_future_observation(x_future, z_future_i)
+            * entropy_posterior_mi
+        )
         return expected_entropy
 
     def select_action(self):
-        for action in actions:
+        for action in self.uav.actions:
+            # self.uav.
 
-            self.info_gain(m_i_id, x_future)
+            # z_futures = self.uav.sample_observation(self.P_m_given_s, x_future)
+
+            self.info_gain(m_i_id, x_future, z_future)
