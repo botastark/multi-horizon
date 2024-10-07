@@ -3,13 +3,6 @@ import numpy as np
 import copy
 from mpl_toolkits.mplot3d import Axes3D  # Ensure this is imported
 
-# class grid_info:
-#   x = 30
-#   y = 30
-#   length = 0.75
-#   shape = (int(x/length), int(y/length))
-# grid = grid_info
-
 
 class terrain:
     def __init__(self, grid):
