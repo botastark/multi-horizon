@@ -6,13 +6,16 @@ from helper import (
     get_neighbors,
     normalize_probabilities,
     observed_m_ids,
+    uav_position,
+    point,
 )
 
 
 class planning:
     def __init__(self, true_map, uav_camera):
         self.m = true_map
-        self.P_m_given_s = np.zeros_like(true_map)  # prob of m_i = 1
+        self.P_m_given_s = true_map  # prob of m_i = 1
+        self.P_m_given_s.map = 0.5 * np.ones_like(self.P_m_given_s.map)
         self.s = []  # history of observations
         self.x = (0, 0, 5)  # uav position, default 0, 0 at alt 5m
         self.uav = uav_camera
@@ -31,7 +34,7 @@ class planning:
         )
 
     def _CRF(self, z_future, x_future):
-        posterior_m_given_s = self.P_m_given_s
+        posterior_m_given_s = self.P_m_given_s.copy()
         observed_m = observed_m_ids(z_future, self.P_m_given_s)
 
         for m_i_pos in observed_m:
@@ -53,7 +56,7 @@ class planning:
                     type="equal",
                 )
             posterior_m_given_s.map[m_i_pos] = pairwise_product * evidence_factors
-        posterior_m_given_s = normalize_probabilities(posterior_m_given_s.map)
+        posterior_m_given_s.set_map(normalize_probabilities(posterior_m_given_s.map))
         return posterior_m_given_s
 
     def _expected_entropy(self, m_i_id, x_future, z_futures):
@@ -65,6 +68,11 @@ class planning:
             1 - posterior_mi
         ) * math.log2(1 - posterior_mi)
         z_future_i = z_futures.map[id_converter(self.P_m_given_s, m_i_id, z_futures)]
+        z_future_i = point()
+        z_i_id = id_converter(self.P_m_given_s, m_i_id, z_futures)
+        z_future_i.z = z_futures.map[z_i_id]
+        z_future_i.x = z_futures.x[z_i_id]
+        z_future_i.y = z_futures.y[z_i_id]
         expected_entropy = (
             self.uav.prob_future_observation(x_future, z_future_i)
             * entropy_posterior_mi
@@ -72,14 +80,21 @@ class planning:
         return expected_entropy
 
     def select_action(self):
+
         info_gain_action = {}
-        permitted_actions = self.uav.permitted_actions(self.x)  # at UAV position x
+        permitted_actions = self.uav.permitted_actions(self.uav)  # at UAV position x
+
         for action in permitted_actions:
-            x_future = self.uav.x_future(action)  # UAV position after taking action a
+            x_future = uav_position()
+            # UAV position after taking action a
+            x_future.position, x_future.altitude = self.uav.x_future(action)
             z_futures = self.uav.sample_observation(self.P_m_given_s, x_future)
+
             info_gain_action_a = 0
             m_s = observed_m_ids(z_futures, self.P_m_given_s)
             for m_i_id in m_s:  # observed m cells
                 info_gain_action_a += self.info_gain(m_i_id, x_future, z_futures)
             info_gain_action[action] = info_gain_action_a
         print(info_gain_action)
+
+    # def take_action(self)""

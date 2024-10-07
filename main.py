@@ -49,4 +49,5 @@ camera.set_position(uav_.position)
 # noisy_obs_map = obs_map
 # noisy_obs_map.set_map(noisy_obs, x=xo, y=yo)
 # noisy_obs_map.plot_map(fit = True)
-plan1 = planning()
+plan1 = planning(true_map, camera)
+plan1.select_action()
