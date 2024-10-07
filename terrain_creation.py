@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
+import copy
 from mpl_toolkits.mplot3d import Axes3D  # Ensure this is imported
 
 # class grid_info:
@@ -91,6 +92,9 @@ class terrain:
 
         self._current += 1
         return (row, col)
+
+    def copy(self):
+        return copy.deepcopy(self)
 
     def plot_map(self, fit=True):
         # Plot both the 3D and 2D maps in subplots

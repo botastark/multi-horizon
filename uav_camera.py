@@ -17,7 +17,7 @@ class camera:
         h_step=1,
     ):
         self.grid = grid
-        self.camera_altitude = camera_altitude
+        self.altitude = camera_altitude
         self.position = camera_pos
         self.fov = fov_angle
         self.x_range = x_range
@@ -33,20 +33,20 @@ class camera:
         self.position = pos
 
     def set_altitude(self, alt):
-        self.camera_altitude = alt
+        self.altitude = alt
 
     def get_position(self):
         return self.position
 
     def get_altitude(self):
-        return self.camera_altitude
+        return self.altitude
 
     def get_range(self, position=None, altitude=None, index_form=False):
         """
         calculates indices of camera footprints (part of terrain (therefore terrain indices) seen by camera at a given UAV pos and alt)
         """
         position = position if position is not None else self.position
-        altitude = altitude if altitude is not None else self.camera_altitude
+        altitude = altitude if altitude is not None else self.altitude
 
         x_angle = self.fov / 2  # degree
         y_angle = self.fov / 2  # degree
@@ -88,18 +88,18 @@ class camera:
     def sensor_model(self, m_i, z_i, x):
         sigma = self.a * (1 - np.exp(-self.b * x.altitude))
         if z_i == m_i:
-            return 1 - sigma(
-                x.altitude
+            return (
+                1 - sigma
             )  # Get the probability of observing the true state value at this altitude
         else:
-            return sigma(x.altitude)
+            return sigma
 
     def sample_from_prob(self, prob_map_z, threshold=0.5):
         return (prob_map_z > threshold).astype(int)
 
     def sample_observation(self, belief_prob, x):
-        sampled_belief_map = belief_prob
-        prob_z = belief_prob
+        sampled_belief_map = belief_prob.copy()
+        prob_z = belief_prob.copy()
         sampled_belief_map.set_map(self.sample_from_prob(belief_prob.map))
 
         z_measurement, z_x, z_y = self.get_observation(
@@ -128,9 +128,9 @@ class camera:
 
     def _count_possible_states(self):
         count = 1  # hover
-        if self.altitude + self.step_h <= self.h_range[1]:  # up
+        if self.altitude + self.h_step <= self.h_range[1]:  # up
             count += 1
-        if self.altitude - self.step_h >= self.h_range[0]:  # down
+        if self.altitude - self.h_step >= self.h_range[0]:  # down
             count += 1
         if self.position[1] + self.xy_step <= self.y_range[1]:  # front (+y)
             count += 1

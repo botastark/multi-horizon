@@ -128,14 +128,18 @@ def observed_m_ids(new_z, P_m_given_s):
 
 
 def normalize_probabilities(current_probs):
-    # Calculate unnormalized joint probability
-    joint_prob = 1.0
-    for current_prob in current_probs:
-        if current_prob > 0:  # Avoiding log(0)
-            joint_prob *= current_prob if current_prob < 1 else (1 - current_prob)
-
     # Normalization
     normalization_factor = np.sum(current_probs)  # Sum of probabilities
     normalized_probs = current_probs / normalization_factor  # Normalize
+    return normalized_probs
 
-    return normalized_probs, joint_prob
+
+class uav_position:
+    position = (0, 0)
+    altitude = 0
+
+
+class point:
+    x = None
+    y = None
+    z = None
