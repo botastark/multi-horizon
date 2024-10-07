@@ -187,3 +187,21 @@ class camera:
         # hover
         else:
             return self.position, self.altitude
+
+    def permitted_actions(self, x):
+        # possible_actions = {"up", "down", "front", "back", "left", "right", "hover"}
+        permitted_actions = ["hover"]
+        for action in self.actions:
+            if action == "up" and x.altitude + self.h_step <= self.h_range[1]:
+                permitted_actions.append(action)
+            elif action == "down" and x.altitude - self.h_step >= self.h_range[0]:
+                permitted_actions.append(action)
+            elif action == "front" and x.position[1] + self.xy_step <= self.y_range[1]:
+                permitted_actions.append(action)
+            elif action == "back" and x.position[1] - self.xy_step >= self.y_range[0]:
+                permitted_actions.append(action)
+            elif action == "right" and x.position[0] + self.xy_step <= self.x_range[1]:
+                permitted_actions.append(action)
+            elif action == "left" and x.position[0] - self.xy_step >= self.x_range[0]:
+                permitted_actions.append(action)
+        return permitted_actions

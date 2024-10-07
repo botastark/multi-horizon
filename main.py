@@ -1,5 +1,6 @@
 from terrain_creation import terrain, generate_n_peaks
 from uav_camera import camera
+from planner import planning
 
 
 class grid_info:
@@ -37,10 +38,10 @@ uav = uav_
 camera = camera(grid_info, camera_params.fov_angle)
 camera.set_altitude(uav_.altitude)
 camera.set_position(uav_.position)
-zo, xo, yo = camera.get_observation(true_map.get_map())
+# zo, xo, yo = camera.get_observation(true_map.get_map())
 
-obs_map = terrain(grid_info)
-obs_map.set_map(zo, x=xo, y=yo)
+# obs_map = terrain(grid_info)
+# obs_map.set_map(zo, x=xo, y=yo)
 # obs_map.plot_map(fit = True)
 
 # # Add Gaussian noise dep on altitude to observation z
@@ -48,3 +49,4 @@ obs_map.set_map(zo, x=xo, y=yo)
 # noisy_obs_map = obs_map
 # noisy_obs_map.set_map(noisy_obs, x=xo, y=yo)
 # noisy_obs_map.plot_map(fit = True)
+plan1 = planning()
