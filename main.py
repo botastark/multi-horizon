@@ -1,5 +1,5 @@
 from terrain_creation import terrain, generate_n_peaks
-from observation_collection import camera2map
+from uav_camera import camera
 from mapping import mapping, map_
 
 
@@ -35,7 +35,7 @@ class uav_:
 
 uav = uav_
 
-camera = camera2map(grid_info, camera_params.fov_angle)
+camera = camera(grid_info, camera_params.fov_angle)
 camera.set_altitude(uav_.altitude)
 camera.set_position(uav_.position)
 zo, xo, yo = camera.get_observation(true_map.get_map())

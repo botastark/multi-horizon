@@ -6,16 +6,18 @@ from helper import (
     get_neighbors,
     normalize_probabilities,
     observed_m_ids,
-    prob_candidate_x,
 )
+
+from uav_camera import camera
 
 
 class planning:
-    def __init__(self, true_map):
+    def __init__(self, true_map, uav_camera):
         self.m = true_map
         self.P_m_given_s = np.zeros_like(true_map)  # prob of m_i = 1
         self.s = []  # history of observations
         self.x = (0, 0, 5)  # uav position, default 0, 0 at alt 5m
+        self.uav = uav_camera
         self.z = []  # last measurement at x
         self.last_observation = (self.x, self.z)
         self.a = 1
@@ -65,16 +67,6 @@ class planning:
         posterior_m_given_s = normalize_probabilities(posterior_m_given_s.map)
         return posterior_m_given_s
 
-    def future_obs_prob(self, z_future, x_future):
-        # terrain_area = belief_map.map.shape[0] * belief_map.map.shape[1]
-        # obs_area = obs_map.map.shape[0] * obs_map.map.shape[1]
-        # prob_tobe_observed = obs_area / terrain_area
-
-        # P_z_given_x = sensor_model(m, z, x_future.altitude) @ TODO
-        P_z_given_x = (z_future, x_future)
-
-        return P_z_given_x * prob_candidate_x(x_future, self.P_m_given_s)
-
     def expected_entropy(self, m_i_id, x_future):
         # z_{t+1}
         expected_entropy = 0
@@ -87,13 +79,11 @@ class planning:
             ) * math.log2(1 - posterior_mi)
 
             expected_entropy += (
-                self.future_obs_prob(z_future, x_future) * entropy_posterior_mi
+                self.uav.prob_future_observation(x_future, z_future)
+                * entropy_posterior_mi
             )
         return expected_entropy
-    
-    def x_future(self, x, action):
 
-        
     def select_action(self):
         for action in actions:
 
