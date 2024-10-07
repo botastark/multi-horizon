@@ -30,7 +30,7 @@ true_map.set_map(z)
 # Get observation at certain pos and altitude
 class uav_:
     position = (0, 15)
-    altitude = 10
+    altitude = 19
 
 
 uav = uav_
@@ -50,4 +50,5 @@ camera.set_position(uav_.position)
 # noisy_obs_map.set_map(noisy_obs, x=xo, y=yo)
 # noisy_obs_map.plot_map(fit = True)
 plan1 = planning(true_map, camera)
-plan1.select_action()
+next_action = plan1.select_action()
+plan1.take_action(next_action, true_map.map)

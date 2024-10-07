@@ -195,6 +195,14 @@ class camera:
             if action == "up" and x.altitude + self.h_step <= self.h_range[1]:
                 permitted_actions.append(action)
             elif action == "down" and x.altitude - self.h_step >= self.h_range[0]:
+                # print(
+                #     "alt {} -  step {} = diff {} >== hrange 0{} ".format(
+                #         x.altitude,
+                #         self.h_step,
+                #         x.altitude - self.h_step,
+                #         self.h_range[0],
+                #     )
+                # )
                 permitted_actions.append(action)
             elif action == "front" and x.position[1] + self.xy_step <= self.y_range[1]:
                 permitted_actions.append(action)

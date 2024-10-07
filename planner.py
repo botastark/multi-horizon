@@ -13,14 +13,13 @@ from helper import (
 
 class planning:
     def __init__(self, true_map, uav_camera):
-        self.m = true_map
-        self.P_m_given_s = true_map  # prob of m_i = 1
+        self.m = true_map.copy()
+        self.P_m_given_s = true_map.copy()  # prob of m_i = 1
         self.P_m_given_s.map = 0.5 * np.ones_like(self.P_m_given_s.map)
         self.s = []  # history of observations
-        self.x = (0, 0, 5)  # uav position, default 0, 0 at alt 5m
         self.uav = uav_camera
         self.z = []  # last measurement at x
-        self.last_observation = (self.x, self.z)
+        self.last_observation = ()
 
     def info_gain(self, m_i_id, x_future, z_future):
         return self._entropy_mi(m_i_id) - self._expected_entropy(
@@ -96,5 +95,16 @@ class planning:
                 info_gain_action_a += self.info_gain(m_i_id, x_future, z_futures)
             info_gain_action[action] = info_gain_action_a
         print(info_gain_action)
+        next_action = max(info_gain_action, key=info_gain_action.get)
+        print(next_action)
+        return next_action
 
-    # def take_action(self)""
+    def take_action(self, next_action, truth_map):
+        x_future = uav_position()
+        # UAV position after taking action a
+        x_future.position, x_future.altitude = self.uav.x_future(next_action)
+        self.uav.set_position(x_future.position)
+        self.uav.set_altitude(x_future.altitude)
+        self.z = self.uav.sample_observation(self.P_m_given_s, x_future)
+        self.z = self.uav.get_observation(truth_map)
+        self.P_m_given_s = self._CRF(self.z, x_future)
