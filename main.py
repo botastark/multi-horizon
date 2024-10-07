@@ -1,6 +1,5 @@
 from terrain_creation import terrain, generate_n_peaks
 from uav_camera import camera
-from mapping import mapping, map_
 
 
 class grid_info:
@@ -49,6 +48,3 @@ obs_map.set_map(zo, x=xo, y=yo)
 # noisy_obs_map = obs_map
 # noisy_obs_map.set_map(noisy_obs, x=xo, y=yo)
 # noisy_obs_map.plot_map(fit = True)
-
-mapping(belief_map, obs_map, uav_.altitude)
-map_(belief_map, obs_map, uav)
