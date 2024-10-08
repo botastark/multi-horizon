@@ -115,11 +115,22 @@ def get_neighbors(map, pos):
     return neighbors
 
 
-def observed_m_ids(new_z, P_m_given_s):
-    [obsd_m_i_min, obsd_m_j_min] = id_converter(new_z, [0, 0], P_m_given_s)
-    [obsd_m_i_max, obsd_m_j_max] = id_converter(
-        new_z, [new_z.map.shape[0] - 1, new_z.map.shape[1] - 1], P_m_given_s
-    )
+def observed_m_ids(uav=None, uav_pos=None, new_z=None, m_terrain=None):
+
+    if new_z != None and m_terrain != None:
+        [obsd_m_i_min, obsd_m_j_min] = id_converter(new_z, [0, 0], m_terrain)
+
+        [obsd_m_i_max, obsd_m_j_max] = id_converter(
+            new_z, [new_z.map.shape[0] - 1, new_z.map.shape[1] - 1], m_terrain
+        )
+
+    elif uav != None and uav_pos != None:
+        [[obsd_m_i_min, obsd_m_i_max], [obsd_m_j_min, obsd_m_j_max]] = uav.get_range(
+            position=uav_pos.position, altitude=uav_pos.altitude, index_form=True
+        )
+    else:
+        raise TypeError("Pass either z or uav_position")
+
     observed_m = []
     for i_b in range(obsd_m_i_min, obsd_m_i_max):
         for j_b in range(obsd_m_j_min, obsd_m_j_max):
@@ -134,12 +145,44 @@ def normalize_probabilities(current_probs):
     return normalized_probs
 
 
+def normalize_probabilities_(P):
+    """
+    Normalize the probabilities in the matrix P so that P[0, i, j] + P[1, i, j] = 1
+    for all i, j.
+    """
+    # Sum of the probabilities for each element
+    total = P[0, :, :] + P[1, :, :]
+
+    # Normalize by dividing each probability by the total sum
+    P[0, :, :] /= total
+    P[1, :, :] /= total
+
+    return P
+
+
+def sample_event_matrix(P):
+    "P should have shape (2, m, n) with probabilities for 0 and 1."
+    P = normalize_probabilities_(P)
+    assert P.shape[0] == 2
+    m, n = P.shape[1], P.shape[2]
+    A = np.zeros((m, n), dtype=int)
+    for i in range(m):
+        for j in range(n):
+            # Sample a 0 or 1 based on the probabilities in P
+            A[i, j] = np.random.choice([0, 1], p=[P[0, i, j], P[1, i, j]])
+    return A
+
+
 class uav_position:
-    position = (0, 0)
-    altitude = 0
+    def __init__(self, input) -> None:
+
+        self.position = input[0]
+        self.altitude = input[1]
 
 
 class point:
-    x = None
-    y = None
-    z = None
+    def __init__(self, x=None, y=None, z=None, p=None) -> None:
+        self.x = x
+        self.y = y
+        self.z = z
+        self.probability = p

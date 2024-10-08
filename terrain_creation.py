@@ -10,6 +10,9 @@ class terrain:
         y = np.arange(0, grid.y, grid.length)
         self.x, self.y = np.meshgrid(x, y, indexing="ij")
         self.map = np.ones(self.x.shape) * 0.5
+        self.probability = np.array(
+            [np.ones(self.x.shape) * 0.5, np.ones(self.x.shape) * 0.5]
+        )
         self.grid = grid
         self.y_range = (0, grid.y)
         self.x_range = (0, grid.x)
@@ -55,6 +58,7 @@ class terrain:
         return pos_x, pos_y
 
     def set_map(self, z, x=[], y=[]):
+        self.map = np.array([])
         if self.x.shape == z.shape:
             self.map = z
         else:
@@ -62,6 +66,7 @@ class terrain:
                 self.x = x
                 self.y = y
                 self.map = z
+
                 # Check if x and y shapes match the shape of z
                 if self.x.shape != self.y.shape or self.x.shape != z.shape:
                     raise ValueError("Shapes of x, y, and z must match.")
@@ -70,6 +75,10 @@ class terrain:
                 self.x_range = (np.min(self.x), np.max(self.x))
                 self.y_range = (np.min(self.y), np.max(self.y))
 
+                # if map shape changes, prob must change as well to 0.5 with shape [2, map.shape[0], map.shape[1]]
+                self.probability = np.array(
+                    [0.5 * np.ones_like(self.map), 0.5 * np.ones_like(self.map)]
+                )
             else:
                 raise TypeError("Grid and Map sizes don't match and no grid is passed")
 
