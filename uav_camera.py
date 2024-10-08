@@ -1,6 +1,6 @@
 import math
 import numpy as np
-from helper import id_converter
+from helper import id_converter, sample_event_matrix
 
 
 class camera:
@@ -35,11 +35,8 @@ class camera:
     def set_altitude(self, alt):
         self.altitude = alt
 
-    def get_position(self):
-        return self.position
-
-    def get_altitude(self):
-        return self.altitude
+    def get_x(self):
+        return (self.position, self.altitude)
 
     def get_range(self, position=None, altitude=None, index_form=False):
         """
@@ -94,28 +91,27 @@ class camera:
         else:
             return sigma
 
-    def sample_from_prob(self, prob_map_z, threshold=0.5):
-        return (prob_map_z > threshold).astype(int)
+    def sample_observation(self, belief, x):
+        sampled_M = belief.copy()
+        sampled_M.set_map(sample_event_matrix(belief.probability))
 
-    def sample_observation(self, belief_prob, x):
-        sampled_belief_map = belief_prob.copy()
-        prob_z = belief_prob.copy()
-        sampled_belief_map.set_map(self.sample_from_prob(belief_prob.map))
-
-        z_measurement, z_x, z_y = self.get_observation(
-            sampled_belief_map.map, position=x.position, altitude=x.altitude
+        # creating z as a terrain object, disregard z_
+        z = belief.copy()
+        z_, z_x, z_y = self.get_observation(
+            sampled_M.map, position=x.position, altitude=x.altitude
         )
-        prob_z.set_map(z_measurement, x=z_x, y=z_y)
+        z.set_map(z_, x=z_x, y=z_y)
+        for z_i_id in z:
+            for z_i in range(2):
+                m_i_id = id_converter(z, z_i_id, sampled_M)
+                m_i = sampled_M.map[m_i_id]
+                # P(z_i|m_i, x)
+                z.probability[z_i, z_i_id[0], z_i_id[1]] = self.sensor_model(
+                    m_i, z_i, x
+                )
 
-        for z_i_id in prob_z:
-            z_i = prob_z.map[z_i_id]
-            m_i_id = id_converter(prob_z, z_i_id, sampled_belief_map)
-            m_i = sampled_belief_map.map[m_i_id]
-            prob_z.map[z_i_id] = self.sensor_model(m_i, z_i, x)
-
-        sampled_z = prob_z
-        sampled_z.map = self.sample_from_prob(prob_z.map)
-        return sampled_z
+        z.map = sample_event_matrix(z.probability)
+        return z
 
     def pos2grid(self, pos):
         # from position in meters into grid coordinates
@@ -162,7 +158,11 @@ class camera:
         y_min_, y_max_ = self.grid2pos((y_min_id, y_max_id + 1))
         if x_min_ <= z_future.x <= x_max_:
             if y_min_ <= z_future.y <= y_max_:
-                return self._prob_candidate_x()
+                return self._prob_candidate_x() * z_future.probability
+            else:
+                raise TypeError("check prob_future_observation y out of range")
+        else:
+            raise TypeError("check prob_future_observation: x out of range")
         return 0
 
     def x_future(self, action):
@@ -195,14 +195,6 @@ class camera:
             if action == "up" and x.altitude + self.h_step <= self.h_range[1]:
                 permitted_actions.append(action)
             elif action == "down" and x.altitude - self.h_step >= self.h_range[0]:
-                # print(
-                #     "alt {} -  step {} = diff {} >== hrange 0{} ".format(
-                #         x.altitude,
-                #         self.h_step,
-                #         x.altitude - self.h_step,
-                #         self.h_range[0],
-                #     )
-                # )
                 permitted_actions.append(action)
             elif action == "front" and x.position[1] + self.xy_step <= self.y_range[1]:
                 permitted_actions.append(action)
