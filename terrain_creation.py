@@ -42,8 +42,9 @@ class terrain:
         grid_y = int((pos[1] - self.y_range[0]) / self.grid.length)
 
         # Ensure the grid coordinates are within the bounds of the grid shape
-        grid_x = min(max(grid_x, 0), self.map.shape[0] - 1)
-        grid_y = min(max(grid_y, 0), self.map.shape[1] - 1)
+
+        grid_x = min(max(grid_x, 0), self.map.shape[-2] - 1)
+        grid_y = min(max(grid_y, 0), self.map.shape[-1] - 1)
 
         return grid_x, grid_y
 
@@ -77,7 +78,7 @@ class terrain:
         return self
 
     def __next__(self):
-        num_rows, num_cols = self.map.shape
+        num_rows, num_cols = self.map.shape[-2], self.map.shape[-1]
         if self._current >= num_rows * num_cols:
             raise StopIteration
         row = self._current // num_cols
