@@ -19,11 +19,11 @@ class planning:
             [0.5 * np.ones_like(self.M.map), 0.5 * np.ones_like(self.M.map)]
         )
         self.M.map = sample_event_matrix(self.M.probability)
-
+        self.curr_entropy = 0
         self.s = []  # history of observations
         self.uav = uav_camera
         self.z = true_map.copy()  # last measurement at x
-        self.last_observation = ()
+        self.last_observation = ([], [])
 
     def info_gain(self, m_i_id, x_future):
         # print("IG check: H- ", self._entropy_mi(m_i_id))
@@ -37,6 +37,12 @@ class planning:
         return -prior_m_i_0 * math.log2(prior_m_i_0) - (1 - prior_m_i_1) * math.log2(
             1 - prior_m_i_1
         )
+
+    def _entropy(self):
+        total_entropy = 0
+        for m_i_id in self.M.map:
+            total_entropy += self._entropy_mi(m_i_id)
+        return total_entropy
 
     def _CRF_elementwise(self, z_future, x_future, m_i_pos, Z):
         posterior_mi_given_s = []
@@ -164,6 +170,7 @@ class planning:
         self.s.append(self.last_observation)
 
         # update belief matrix M
+        self.curr_entropy = self._entropy()
         self.M.map = sample_event_matrix(self.M.probability)
 
     def get_current_state(self):
@@ -177,6 +184,12 @@ class planning:
 
     def get_prob(self):
         return self.M.probability
+
+    def get_entropy(self):
+        return self.curr_entropy
+
+    def get_last_observation(self):
+        return self.last_observation
 
     # def __getattribute__(self, name):
     #     # Custom behavior: print the attribute being accessed

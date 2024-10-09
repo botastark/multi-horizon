@@ -11,10 +11,10 @@ class camera:
         camera_altitude=0,
         camera_pos=(0.0, 0.0),
         x_range=(0, 50),
-        y_range=(50, 50),
-        xy_step=0.75,
+        y_range=(0, 50),
+        xy_step=1,
         h_range=(5, 20),
-        h_step=1,
+        h_step=5,
     ):
         self.grid = grid
         self.altitude = camera_altitude
@@ -36,7 +36,7 @@ class camera:
         self.altitude = alt
 
     def get_x(self):
-        return (self.position, self.altitude)
+        return uav_position((self.position, self.altitude))
 
     def get_range(self, position=None, altitude=None, index_form=False):
         """
