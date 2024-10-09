@@ -1,6 +1,6 @@
 import math
 import numpy as np
-from helper import id_converter, sample_event_matrix
+from helper import id_converter, sample_event_matrix, uav_position
 
 
 class camera:
@@ -91,12 +91,14 @@ class camera:
         else:
             return sigma
 
-    def sample_observation(self, belief, x):
-        sampled_M = belief.copy()
-        sampled_M.set_map(sample_event_matrix(belief.probability))
+    def sample_observation(self, sampled_M, x=None):
+        if x == None:
+            x = uav_position((self.position, self.altitude))
+        # sampled_M = belief.copy()
+        # sampled_M.set_map(sample_event_matrix(belief.probability))
 
         # creating z as a terrain object, disregard z_
-        z = belief.copy()
+        z = sampled_M.copy()
         z_, z_x, z_y = self.get_observation(
             sampled_M.map, position=x.position, altitude=x.altitude
         )

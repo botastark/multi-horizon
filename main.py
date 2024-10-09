@@ -1,3 +1,4 @@
+from helper import uav_position
 from terrain_creation import terrain, generate_n_peaks
 from uav_camera import camera
 from planner import planning
@@ -49,6 +50,22 @@ camera.set_position(uav_.position)
 # noisy_obs_map = obs_map
 # noisy_obs_map.set_map(noisy_obs, x=xo, y=yo)
 # noisy_obs_map.plot_map(fit = True)
+
 plan1 = planning(true_map, camera)
-next_action = plan1.select_action()
-plan1.take_action(next_action, true_map.map)
+actions = []
+for step in range(10):
+    current_x = uav_position(plan1.get_uav_current_pos())
+    print(
+        "uav x{}-y{}-z{}".format(
+            current_x.position[0], current_x.position[1], current_x.altitude
+        )
+    )
+    current_state = plan1.get_current_state()
+    current_state.plot_map("/home/bota/Desktop/step_" + str(step) + ".png", fit=False)
+
+    next_action = plan1.select_action()
+    plan1.take_action(next_action, true_map)
+    actions.append(next_action)
+
+current_state = plan1.get_current_state()
+current_state.plot_map(fit=True)

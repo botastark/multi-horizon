@@ -99,7 +99,7 @@ class terrain:
     def copy(self):
         return copy.deepcopy(self)
 
-    def plot_map(self, fit=True):
+    def plot_map(self, filename, fit=True):
         # Plot both the 3D and 2D maps in subplots
         fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(12, 5))
         vmin = 0
@@ -147,7 +147,8 @@ class terrain:
         cbar2 = fig.colorbar(contour, ax=ax2, label="Elevation")
         plt.tight_layout()
         # Show the plots
-        plt.show()
+        # plt.show(block=False)
+        plt.savefig(filename)
 
 
 def generate_n_peaks(n_peaks, map):

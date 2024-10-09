@@ -6,6 +6,7 @@ from helper import (
     get_neighbors,
     normalize_probabilities,
     observed_m_ids,
+    sample_event_matrix,
     uav_position,
     point,
 )
@@ -17,6 +18,7 @@ class planning:
         self.M.probability = np.array(  # P(m|s)
             [0.5 * np.ones_like(self.M.map), 0.5 * np.ones_like(self.M.map)]
         )
+        self.M.map = sample_event_matrix(self.M.probability)
 
         self.s = []  # history of observations
         self.uav = uav_camera
@@ -35,6 +37,23 @@ class planning:
         return -prior_m_i_0 * math.log2(prior_m_i_0) - (1 - prior_m_i_1) * math.log2(
             1 - prior_m_i_1
         )
+
+    def _CRF_elementwise(self, z_future, x_future, m_i_pos, Z):
+        posterior_mi_given_s = []
+        for m_i in range(self.M.probability.shape[0]):  # m_i=0 and m_i=1
+            pairwise_product = 1
+            evidence_factors = self.uav.sensor_model(m_i, z_future.z, x_future)
+            edges = get_neighbors(self.M.map, m_i_pos)
+
+            for m_j_pos in edges:
+                pairwise_product *= pairwise_factor_(
+                    m_i,
+                    self.M.map[m_j_pos],
+                    obs_map=Z,
+                    type="equal",
+                )
+            posterior_mi_given_s.append(pairwise_product * evidence_factors)
+        return np.array(posterior_mi_given_s)
 
     def _CRF(self, z_future, x_future):
         posterior_m_given_s = self.M.probability.copy()
@@ -65,34 +84,24 @@ class planning:
 
     def _expected_entropy(self, m_i_id, x_future):
         expected_entropy = 0
-        # for z_futures
+        sampled_Z = self.uav.sample_observation(self.M, x_future)
+        z_i_id = id_converter(self.M, m_i_id, sampled_Z)
+
         for z_i in range(2):
             z_future = point(
                 z=z_i,
-                x=self.M.x[m_i_id],
-                y=self.M.y[m_i_id],
-                p=self.uav.sensor_model(self.M.map[m_i_id], z_i, x_future),
+                x=sampled_Z.x[z_i_id],
+                y=sampled_Z.y[z_i_id],
+                p=sampled_Z.probability[z_i, z_i_id[0], z_i_id[1]],
             )
 
-            posterior_m = self._CRF(z_future, x_future)
-            posterior_mi = posterior_m[:, m_i_id[0], m_i_id[1]]
+            posterior_mi = self._CRF_elementwise(
+                z_future, x_future, m_i_id, Z=sampled_Z
+            )
 
             entropy_posterior_mi = -posterior_mi[0] * math.log2(
                 posterior_mi[0]
             ) - posterior_mi[1] * math.log2(posterior_mi[1])
-
-            # z_i_id = id_converter(self.M, m_i_id, z_futures)
-
-            # z_future_i = point(
-            #     x=z_futures.x[z_i_id],
-            #     y=z_futures.y[z_i_id],
-            #     z=z_futures.map[z_i_id],
-            #     p=z_futures.probability[:, z_i_id[0], z_i_id[1]],
-            # )
-            # print(
-            #     "expected entropy: prob_o_future ",
-            #     self.uav.prob_future_observation(x_future, z_future_i),
-            # )
 
             expected_entropy += (
                 self.uav.prob_future_observation(x_future, z_future)
@@ -124,21 +133,17 @@ class planning:
         print(next_action)
         return next_action
 
-    def sample_from_prob(self, threshold=0.5):
-        self.m = (self.M.probability > threshold).astype(int)
-        # return (prob_map_z > threshold).astype(int)
-
     def take_action(self, next_action, truth_map):
         # x_{t+1} UAV position after taking action a
         x_future = uav_position(self.uav.x_future(next_action))
-        # x_future.position, x_future.altitude =
+
         self.uav.set_position(x_future.position)
         self.uav.set_altitude(x_future.altitude)
 
         # collect z_{t+1} observation @TODO add sensor model
+        self.z = self.uav.sample_observation(truth_map, x_future)
 
-        zo, xo, yo = self.uav.get_observation(truth_map)
-        self.z.set_map(zo, x=xo, y=yo)
+        # CRF to update belief probabilities
         m_s = observed_m_ids(uav=self.uav, uav_pos=x_future)
         for m_i_id in m_s:  # observed m cells
             z_i_id = id_converter(self.M, m_i_id, self.z)
@@ -147,21 +152,39 @@ class planning:
                 z=self.z.map[z_i_id],
                 x=self.z.x[z_i_id],
                 y=self.z.y[z_i_id],
-                p=self.uav.sensor_model(
-                    self.M.map[m_i_id], self.z.map[z_i_id], x_future
-                ),
+                p=self.z.probability[self.z.map[z_i_id], z_i_id[0], z_i_id[1]],
             )
-            posterior_m = self._CRF(z_future, x_future)
-            print("posterior_m shape ", posterior_m.shape)
-            self.M.probability[:, m_i_id[0], m_i_id[1]] = posterior_m
 
-            # info_gain_action_a += self.info_gain(m_i_id, x_future)
+            posterior_mi = self._CRF_elementwise(z_future, x_future, m_i_id, Z=self.z)
 
-        # CRF to update belief probabilities
-        # self.M.probability = self._CRF(z, x_future)
+            self.M.probability[:, m_i_id[0], m_i_id[1]] = posterior_mi
 
         # Store observations
-        # self.s.append(self.uav.get_x(), self.z)
+        self.last_observation = (self.uav.get_x(), self.z)
+        self.s.append(self.last_observation)
 
         # update belief matrix M
-        # self.m =
+        self.M.map = sample_event_matrix(self.M.probability)
+
+    def get_current_state(self):
+        return self.M
+
+    def get_uav_current_pos(self):
+        return (self.uav.position, self.uav.altitude)
+
+    def get_belief(self):
+        return self.M.map
+
+    def get_prob(self):
+        return self.M.probability
+
+    # def __getattribute__(self, name):
+    #     # Custom behavior: print the attribute being accessed
+    #     print(f"Accessing attribute '{name}'")
+
+    #     # Use the default behavior (avoid infinite recursion)
+    #     try:
+    #         return super().__getattribute__(name)
+    #     except AttributeError:
+    #         print(f"'{name}' attribute does not exist.")
+    #         return None
