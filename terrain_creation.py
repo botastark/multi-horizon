@@ -1,7 +1,9 @@
+from matplotlib import colors
 import matplotlib.pyplot as plt
 import numpy as np
 import copy
 from mpl_toolkits.mplot3d import Axes3D  # Ensure this is imported
+from scipy.spatial.distance import cdist
 
 
 class terrain:
@@ -150,6 +152,83 @@ class terrain:
         # plt.show(block=False)
         plt.savefig(filename)
 
+    def plot_terrain(self, filename, uav_pos, gt, obs_z, fit=True):
+
+        # Plot both the 3D and 2D maps in subplots
+        fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(15, 6))
+
+        # ---- Plot 1: uav position and ground truth 3D ----
+
+        ax1 = fig.add_subplot(131, projection="3d")
+        # Remove axes for the 3D plot
+
+        ax1.set_xlim([0, self.x_range[1]])
+        ax1.set_ylim([0, self.y_range[1]])
+        ax1.set_zlim([0, 20])
+        ax1.set_xlabel("X (m)")
+        ax1.set_ylabel("Y (m)")
+        ax1.set_zlabel("Altitude (m)")
+        ax1.set_title("Truth Terrain and UAV position")
+        # uav
+        x, y, z = zip(
+            *[(uav.position[0], uav.position[1], uav.altitude) for uav in uav_pos]
+        )
+        ax1.plot(x, y, z, marker="o", color="r", linestyle="-")
+        # Truth terrain map
+        ax1.plot_surface(
+            self.x,
+            self.y,
+            np.zeros_like(self.x),
+            facecolors=np.where(gt.map == 0, "green", "yellow"),
+            alpha=0.6,
+            edgecolor="none",
+        )
+
+        # ---- Plot 2: 2D last observation z_t ----
+        ax2 = fig.add_subplot(132, frameon=False)
+        ax2.set_xlabel("X-axis")
+        ax2.set_ylabel("Y-axis")
+        ax2.set_title("last observation z_t")
+        ax2.set_aspect("equal")
+        ax2.set_xlim([0, self.x_range[1]])
+        ax2.set_ylim([0, self.y_range[1]])
+
+        cmap = colors.ListedColormap(["green", "yellow"])
+        bounds = [0, 0.5, 1]
+        norm = colors.BoundaryNorm(bounds, cmap.N)
+
+        im1 = ax2.imshow(
+            obs_z.map.T,
+            cmap=cmap,
+            norm=norm,
+            extent=[obs_z.x.min(), obs_z.x.max(), obs_z.y.min(), obs_z.y.max()],
+            origin="lower",
+            aspect="auto",
+        )
+
+        # ---- Plot 3: Belief sampled map M----
+        ax3 = fig.add_subplot(133, frameon=False)
+        ax3.set_xlabel("X Axis")
+        ax3.set_ylabel("Y Axis")
+        ax3.set_title("Belief sampled map M")
+        ax3.set_xlim([0, self.x_range[1]])
+        ax3.set_ylim([0, self.y_range[1]])
+
+        im2 = ax3.imshow(self.map.T, cmap=cmap, norm=norm)
+
+        # Add a color bar for the 2D plot L
+        fig.colorbar(im2, ax=ax3, boundaries=bounds, ticks=[0, 1])
+
+        for ax in [axes[0]]:
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+            ax.spines["left"].set_visible(False)
+            ax.spines["bottom"].set_visible(False)
+        plt.tight_layout()
+
+        # Show the plots
+        plt.savefig(filename)
+
 
 def generate_n_peaks(n_peaks, map):
     x, y = map.get_grid()
@@ -184,3 +263,59 @@ def generate_n_peaks(n_peaks, map):
     )
 
     return z_combined
+
+
+from scipy.spatial.distance import cdist
+from scipy.linalg import cholesky
+
+
+def generate_correlated_gaussian_field(map, r, scale=10.0):
+    """
+    Generate a correlated Gaussian random field terrain parametrized by a cluster radius r.
+
+    Parameters:
+    - grid_size: Tuple (m, n) defining the size of the grid.
+    - r: Correlation cluster radius that controls the strength of spatial correlation.
+    - scale: Scaling factor for the Gaussian field (default is 1.0).
+
+    Returns:
+    - terrain: A (m, n) matrix representing the correlated Gaussian random field.
+    """
+    # Create grid coordinates
+
+    xx, yy = map.get_grid()
+    m, n = xx.shape
+    # Flatten the grid points into pairs of (x, y) coordinates
+    xy_grid = np.stack([xx.flatten(), yy.flatten()], axis=1)
+    if r == 0:
+        # If r = 0, generate an independent random Gaussian field (no spatial correlation)
+        terrain = np.random.normal(0, 1, (m, n))
+    else:
+
+        # Compute the pairwise Euclidean distance matrix for all grid points
+        distance_matrix = cdist(xy_grid, xy_grid)
+
+        # Define the covariance matrix using an exponential decay function based on distance and radius r
+        # Covariance decreases exponentially with distance, with r controlling the decay rate
+        covariance_matrix = np.exp(-distance_matrix / r)
+
+        # Perform Cholesky decomposition for the covariance matrix (to ensure it is positive semi-definite)
+        L = cholesky(covariance_matrix, lower=True)
+
+        # Generate independent Gaussian random values
+        z = np.random.normal(0, 1, xy_grid.shape[0])
+
+        # Apply Cholesky factorization to introduce spatial correlation
+        correlated_field = L @ z
+
+        # Reshape the correlated field back into the original (m, n) grid shape
+        terrain = correlated_field.reshape(m, n)
+
+        # Scale the field by the provided scale factor
+        terrain = scale * terrain
+
+        # Normalize terrain values between 0 and 1
+        terrain = (terrain - np.min(terrain)) / (np.max(terrain) - np.min(terrain))
+    terrain = (terrain > 0.5).astype(int)
+
+    return terrain

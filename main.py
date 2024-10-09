@@ -1,5 +1,8 @@
 from helper import uav_position
-from terrain_creation import terrain, generate_n_peaks
+from terrain_creation import (
+    generate_correlated_gaussian_field,
+    terrain,
+)
 from uav_camera import camera
 from planner import planning
 
@@ -7,7 +10,7 @@ from planner import planning
 class grid_info:
     x = 50
     y = 50
-    length = 0.75
+    length = 1
     shape = (int(x / length), int(y / length))
 
 
@@ -15,57 +18,46 @@ class camera_params:
     fov_angle = 60
 
 
-curr_grid = grid_info
-
-# Belief map that init with all 0.5
-belief_map = terrain(curr_grid)
-
-# Ground truth map with n gaussian peaks
-n_peaks = 100
-true_map = terrain(curr_grid)
-z = generate_n_peaks(n_peaks, true_map)
-true_map.set_map(z)
-# true_map.plot_map(fit= False)
-
-
-# Get observation at certain pos and altitude
-class uav_:
-    position = (0, 15)
-    altitude = 19
-
-
-uav = uav_
+uav_init = uav_position(((0, 15), 5))
 
 camera = camera(grid_info, camera_params.fov_angle)
-camera.set_altitude(uav_.altitude)
-camera.set_position(uav_.position)
-# zo, xo, yo = camera.get_observation(true_map.get_map())
+camera.set_altitude(uav_init.altitude)
+camera.set_position(uav_init.position)
 
-# obs_map = terrain(grid_info)
-# obs_map.set_map(zo, x=xo, y=yo)
-# obs_map.plot_map(fit = True)
-
-# # Add Gaussian noise dep on altitude to observation z
-# noisy_obs = prob_sensor_model(obs_map.get_map(), uav_altitude)
-# noisy_obs_map = obs_map
-# noisy_obs_map.set_map(noisy_obs, x=xo, y=yo)
-# noisy_obs_map.plot_map(fit = True)
-
+# Ground truth map with n gaussian peaks
+true_map = terrain(grid_info)
+true_map_m = generate_correlated_gaussian_field(true_map, 5)
+true_map.set_map(true_map_m)
+desktop = "/home/bota/Desktop/step_"
+true_map.plot_map(desktop + "gt.png", fit=False)
 plan1 = planning(true_map, camera)
+
+
 actions = []
-for step in range(10):
-    current_x = uav_position(plan1.get_uav_current_pos())
+current_x = uav_position(plan1.get_uav_current_pos())
+uav_positions = [current_x]
+for step in range(20):
+
     print(
-        "uav x{}-y{}-z{}".format(
-            current_x.position[0], current_x.position[1], current_x.altitude
+        "uav x{}-y{}-z{}  entropy:{}".format(
+            current_x.position[0],
+            current_x.position[1],
+            current_x.altitude,
+            plan1.get_entropy(),
         )
     )
-    current_state = plan1.get_current_state()
-    current_state.plot_map("/home/bota/Desktop/step_" + str(step) + ".png", fit=False)
 
+    # Act
     next_action = plan1.select_action()
     plan1.take_action(next_action, true_map)
     actions.append(next_action)
 
-current_state = plan1.get_current_state()
-current_state.plot_map(fit=True)
+    # collect observations
+    current_x, current_z = plan1.get_last_observation()
+    uav_positions.append(current_x)
+
+    # plot current state
+    current_state = plan1.get_current_state()
+    current_state.plot_terrain(
+        desktop + str(step) + "d.png", uav_positions, true_map, current_z, fit=True
+    )
