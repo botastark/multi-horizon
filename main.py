@@ -1,4 +1,4 @@
-from helper import uav_position
+from helper import observed_m_ids, uav_position
 from terrain_creation import (
     generate_correlated_gaussian_field,
     terrain,
@@ -55,9 +55,10 @@ for step in range(20):
     # collect observations
     current_x, current_z = plan1.get_last_observation()
     uav_positions.append(current_x)
+    ms = observed_m_ids(camera, current_x)
 
     # plot current state
     current_state = plan1.get_current_state()
-    current_state.plot_terrain(
-        desktop + str(step) + "d.png", uav_positions, true_map, current_z, fit=True
-    )
+    filename = desktop + str(step) + ".png"
+
+    current_state.plot_terrain(filename, uav_positions, true_map, current_z, ms)

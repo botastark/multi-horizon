@@ -190,14 +190,3 @@ class planning:
 
     def get_last_observation(self):
         return self.last_observation
-
-    # def __getattribute__(self, name):
-    #     # Custom behavior: print the attribute being accessed
-    #     print(f"Accessing attribute '{name}'")
-
-    #     # Use the default behavior (avoid infinite recursion)
-    #     try:
-    #         return super().__getattribute__(name)
-    #     except AttributeError:
-    #         print(f"'{name}' attribute does not exist.")
-    #         return None

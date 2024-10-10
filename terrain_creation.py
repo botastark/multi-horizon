@@ -5,6 +5,8 @@ import copy
 from mpl_toolkits.mplot3d import Axes3D  # Ensure this is imported
 from scipy.spatial.distance import cdist
 
+from matplotlib.lines import Line2D
+
 
 class terrain:
     def __init__(self, grid):
@@ -152,18 +154,30 @@ class terrain:
         # plt.show(block=False)
         plt.savefig(filename)
 
-    def plot_terrain(self, filename, uav_pos, gt, obs_z, fit=True):
+    def plot_terrain(self, filename, uav_pos, gt, obs_z, ms):
 
         # Plot both the 3D and 2D maps in subplots
         fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(15, 6))
-        axes[0].set_axis_off()
-        axes[1].set_axis_off()
-        axes[2].set_axis_off()
-        # axes[1].set_frame_on(True)
+        for ax in axes:
+            ax.set_axis_off()
+        # axes[0].set_axis_off()
+        # axes[1].set_axis_off()
+        # axes[2].set_axis_off()
+
+        # ox_min, ox_max = min(obs_z.x), max(obs_z.x)
+        # oy_min, oy_max = min(obs_z.y), max(obs_z.y)
+        ox_min = np.min(obs_z.x)
+        ox_max = np.max(obs_z.x)
+
+        oy_min = np.min(obs_z.y)
+        oy_max = np.max(obs_z.y)
+
+        o_x = [ox_min, ox_max, ox_max, ox_min, ox_min]
+        o_y = [oy_min, oy_min, oy_max, oy_max, oy_min]
+
         # ---- Plot 1: uav position and ground truth 3D ----
 
         ax1 = fig.add_subplot(131, projection="3d")
-        # Remove axes for the 3D plot
 
         ax1.set_xlim([0, self.x_range[1]])
         ax1.set_ylim([0, self.y_range[1]])
@@ -187,6 +201,10 @@ class terrain:
             alpha=0.6,
             edgecolor="none",
         )
+        o_z = np.zeros_like(o_x) + 0.01  # Slightly above z=0
+
+        # Plot the line in 3D
+        ax1.plot(o_x, o_y, o_z, color="red", lw=2)
 
         # ---- Plot 2: 2D last observation z_t ----
         ax2 = fig.add_subplot(132)
