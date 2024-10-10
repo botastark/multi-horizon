@@ -5,7 +5,7 @@ import copy
 from mpl_toolkits.mplot3d import Axes3D  # Ensure this is imported
 from scipy.spatial.distance import cdist
 
-from matplotlib.lines import Line2D
+from scipy.linalg import cholesky
 
 
 class terrain:
@@ -154,7 +154,7 @@ class terrain:
         # plt.show(block=False)
         plt.savefig(filename)
 
-    def plot_terrain(self, filename, uav_pos, gt, obs_z, ms):
+    def plot_terrain(self, filename, uav_pos, gt, obs_z):
 
         # Plot both the 3D and 2D maps in subplots
         fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(15, 6))
@@ -276,10 +276,6 @@ def generate_n_peaks(n_peaks, map):
     )
 
     return z_combined
-
-
-from scipy.spatial.distance import cdist
-from scipy.linalg import cholesky
 
 
 def generate_correlated_gaussian_field(map, r, scale=10.0):

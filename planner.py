@@ -34,14 +34,38 @@ class planning:
     def _entropy_mi(self, m_i_id):
         prior_m_i_0 = self.M.probability[0, m_i_id[0], m_i_id[1]]  # prob- of m_i = 0
         prior_m_i_1 = self.M.probability[1, m_i_id[0], m_i_id[1]]  # prob- of m_i = 1
+        sum_ = prior_m_i_0 + prior_m_i_1
+        prior_m_i_0 = prior_m_i_0 / sum_
+        prior_m_i_1 = prior_m_i_1 / sum_
         return -prior_m_i_0 * math.log2(prior_m_i_0) - (1 - prior_m_i_1) * math.log2(
             1 - prior_m_i_1
         )
 
     def _entropy(self):
         total_entropy = 0
-        for m_i_id in self.M.map:
+        # print("entropy test")
+        # print(self.M.probability[0, :, :])
+        for i, j in np.ndindex(self.M.map.shape):
+            m_i_id = (i, j)
+            prior_m_i_0 = self.M.probability[
+                0, m_i_id[0], m_i_id[1]
+            ]  # prob- of m_i = 0
+            prior_m_i_1 = self.M.probability[
+                1, m_i_id[0], m_i_id[1]
+            ]  # prob- of m_i = 1
+            sum_ = prior_m_i_0 + prior_m_i_1
+            prior_m_i_0 = prior_m_i_0 / sum_
+            prior_m_i_1 = prior_m_i_1 / sum_
+            # if prior_m_i_1 != 0.5 and prior_m_i_0 != 0.5:
+            #     print("m:{} 0: {}, 1:{}".format(m_i_id, prior_m_i_0, prior_m_i_1))
+
             total_entropy += self._entropy_mi(m_i_id)
+
+            # print(
+            #     "m:{} entropy: {}, total:{}".format(
+            #         m_i_id, self._entropy_mi(m_i_id), total_entropy
+            #     )
+            # )
         return total_entropy
 
     def _CRF_elementwise(self, z_future, x_future, m_i_pos, Z):
@@ -90,7 +114,7 @@ class planning:
 
     def _expected_entropy(self, m_i_id, x_future):
         expected_entropy = 0
-        sampled_Z = self.uav.sample_observation(self.M, x_future)
+        sampled_Z = self.uav.sample_observation(self.M, x=x_future, noise=True)
         z_i_id = id_converter(self.M, m_i_id, sampled_Z)
 
         for z_i in range(2):
@@ -134,7 +158,7 @@ class planning:
                 # print("observed m_i {}-{}".format())
                 info_gain_action_a += self.info_gain(m_i_id, x_future)
             info_gain_action[action] = info_gain_action_a
-        print(info_gain_action)
+        # print(info_gain_action)
         next_action = max(info_gain_action, key=info_gain_action.get)
         print(next_action)
         return next_action
@@ -151,8 +175,11 @@ class planning:
 
         # CRF to update belief probabilities
         m_s = observed_m_ids(uav=self.uav, uav_pos=x_future)
+        # print("testing take action ")
+        # print("observed m ids ", m_s)
         for m_i_id in m_s:  # observed m cells
             z_i_id = id_converter(self.M, m_i_id, self.z)
+            # print("observed m ids ", m_i_id)
 
             z_future = point(
                 z=self.z.map[z_i_id],

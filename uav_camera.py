@@ -91,7 +91,12 @@ class camera:
         else:
             return sigma
 
-    def sample_observation(self, sampled_M, x=None):
+    def sample_observation(
+        self,
+        sampled_M,
+        x=None,
+        noise=False,
+    ):
         if x == None:
             x = uav_position((self.position, self.altitude))
         # sampled_M = belief.copy()
