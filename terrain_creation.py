@@ -156,7 +156,10 @@ class terrain:
 
         # Plot both the 3D and 2D maps in subplots
         fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(15, 6))
-
+        axes[0].set_axis_off()
+        axes[1].set_axis_off()
+        axes[2].set_axis_off()
+        # axes[1].set_frame_on(True)
         # ---- Plot 1: uav position and ground truth 3D ----
 
         ax1 = fig.add_subplot(131, projection="3d")
@@ -169,6 +172,7 @@ class terrain:
         ax1.set_ylabel("Y (m)")
         ax1.set_zlabel("Altitude (m)")
         ax1.set_title("Truth Terrain and UAV position")
+        ax1.xaxis.grid(visible=True)
         # uav
         x, y, z = zip(
             *[(uav.position[0], uav.position[1], uav.altitude) for uav in uav_pos]
@@ -185,11 +189,11 @@ class terrain:
         )
 
         # ---- Plot 2: 2D last observation z_t ----
-        ax2 = fig.add_subplot(132, frameon=False)
+        ax2 = fig.add_subplot(132)
         ax2.set_xlabel("X-axis")
         ax2.set_ylabel("Y-axis")
         ax2.set_title("last observation z_t")
-        ax2.set_aspect("equal")
+        # ax2.set_aspect("equal")
         ax2.set_xlim([0, self.x_range[1]])
         ax2.set_ylim([0, self.y_range[1]])
 
@@ -203,11 +207,10 @@ class terrain:
             norm=norm,
             extent=[obs_z.x.min(), obs_z.x.max(), obs_z.y.min(), obs_z.y.max()],
             origin="lower",
-            aspect="auto",
         )
 
         # ---- Plot 3: Belief sampled map M----
-        ax3 = fig.add_subplot(133, frameon=False)
+        ax3 = fig.add_subplot(133)
         ax3.set_xlabel("X Axis")
         ax3.set_ylabel("Y Axis")
         ax3.set_title("Belief sampled map M")
@@ -216,14 +219,6 @@ class terrain:
 
         im2 = ax3.imshow(self.map.T, cmap=cmap, norm=norm)
 
-        # Add a color bar for the 2D plot L
-        fig.colorbar(im2, ax=ax3, boundaries=bounds, ticks=[0, 1])
-
-        for ax in [axes[0]]:
-            ax.spines["top"].set_visible(False)
-            ax.spines["right"].set_visible(False)
-            ax.spines["left"].set_visible(False)
-            ax.spines["bottom"].set_visible(False)
         plt.tight_layout()
 
         # Show the plots
