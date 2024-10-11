@@ -148,14 +148,9 @@ class planning:
             # UAV position after taking action a
             x_future = uav_position(self.uav.x_future(action))
 
-            # x_future.position, x_future.altitude = self.uav.x_future(action)
-            # z_futures = self.uav.sample_observation(self.M, x_future)
-
             info_gain_action_a = 0
-            # m_s = observed_m_ids(z_futures, self.M)
             m_s = observed_m_ids(uav=self.uav, uav_pos=x_future)
             for m_i_id in m_s:  # observed m cells
-                # print("observed m_i {}-{}".format())
                 info_gain_action_a += self.info_gain(m_i_id, x_future)
             info_gain_action[action] = info_gain_action_a
         # print(info_gain_action)
@@ -189,7 +184,6 @@ class planning:
             )
 
             posterior_mi = self._CRF_elementwise(z_future, x_future, m_i_id, Z=self.z)
-
             self.M.probability[:, m_i_id[0], m_i_id[1]] = posterior_mi
 
         # Store observations

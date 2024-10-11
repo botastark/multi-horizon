@@ -162,12 +162,15 @@ def normalize_probabilities_(P):
 
 def sample_event_matrix(P):
     "P should have shape (2, m, n) with probabilities for 0 and 1."
-    P = normalize_probabilities_(P)
+    # P = normalize_probabilities_(P)
     assert P.shape[0] == 2
     m, n = P.shape[1], P.shape[2]
     A = np.zeros((m, n), dtype=int)
     for i in range(m):
         for j in range(n):
+            total = P[0, i, j] + P[1, i, j]
+            P[0, i, j] = P[0, i, j] / total
+            P[1, i, j] = P[1, i, j] / total
             # Sample a 0 or 1 based on the probabilities in P
             A[i, j] = np.random.choice([0, 1], p=[P[0, i, j], P[1, i, j]])
     return A
