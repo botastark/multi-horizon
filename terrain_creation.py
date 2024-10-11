@@ -160,15 +160,9 @@ class terrain:
         fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(15, 6))
         for ax in axes:
             ax.set_axis_off()
-        # axes[0].set_axis_off()
-        # axes[1].set_axis_off()
-        # axes[2].set_axis_off()
 
-        # ox_min, ox_max = min(obs_z.x), max(obs_z.x)
-        # oy_min, oy_max = min(obs_z.y), max(obs_z.y)
         ox_min = np.min(obs_z.x)
         ox_max = np.max(obs_z.x)
-
         oy_min = np.min(obs_z.y)
         oy_max = np.max(obs_z.y)
 
@@ -181,7 +175,7 @@ class terrain:
 
         ax1.set_xlim([0, self.x_range[1]])
         ax1.set_ylim([0, self.y_range[1]])
-        ax1.set_zlim([0, 20])
+        ax1.set_zlim([0, 35])
         ax1.set_xlabel("X (m)")
         ax1.set_ylabel("Y (m)")
         ax1.set_zlabel("Altitude (m)")
@@ -235,12 +229,63 @@ class terrain:
         ax3.set_xlim([0, self.x_range[1]])
         ax3.set_ylim([0, self.y_range[1]])
 
-        im2 = ax3.imshow(self.map.T, cmap=cmap, norm=norm)
+        im2 = ax3.imshow(
+            self.map.T,
+            cmap=cmap,
+            norm=norm,
+            extent=[self.x.min(), self.x.max(), self.y.min(), self.y.max()],
+        )
 
         plt.tight_layout()
 
         # Show the plots
         plt.savefig(filename)
+
+    def plot_prob(self, filename):
+        fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(100, 100))
+
+        # Example 2D grid of probabilities (replace with your actual probability values)
+        probability_map_0 = self.probability[0, :, :]  # First probability map
+        probability_map_1 = self.probability[1, :, :]  # Second probability map
+
+        # Plot the first probability map in ax[0]
+        cax0 = ax[0].imshow(probability_map_0, cmap="Blues", interpolation="nearest")
+
+        # Add text annotations for the first probability map
+        for (i, j), prob in np.ndenumerate(probability_map_0):
+            ax[0].text(j, i, f"{prob:.2f}", ha="center", va="center", color="black")
+
+        # Add a colorbar for the first plot
+        # fig.colorbar(cax0, ax=ax[0])
+
+        # Set labels and title for the first plot
+        ax[0].set_title("Probability Map 0")
+        ax[0].set_xlabel("X-axis")
+        ax[0].set_ylabel("Y-axis")
+
+        # Plot the second probability map in ax[1]
+        cax1 = ax[1].imshow(probability_map_1, cmap="Blues", interpolation="nearest")
+
+        # Add text annotations for the second probability map
+        for (i, j), prob in np.ndenumerate(probability_map_1):
+            ax[1].text(j, i, f"{prob:.2f}", ha="center", va="center", color="black")
+
+        # Add a colorbar for the second plot
+        # fig.colorbar(cax1, ax=ax[1])
+
+        # Set labels and title for the second plot
+        ax[1].set_title("Probability Map 1")
+        ax[1].set_xlabel("X-axis")
+        ax[1].set_ylabel("Y-axis")
+
+        # Adjust the layout to make sure everything fits well
+        plt.tight_layout()
+
+        # Save the figure to a file
+        plt.savefig(filename)
+
+        # Display the plot
+        # plt.show()
 
 
 def generate_n_peaks(n_peaks, map):
@@ -278,7 +323,7 @@ def generate_n_peaks(n_peaks, map):
     return z_combined
 
 
-def generate_correlated_gaussian_field(map, r, scale=10.0):
+def generate_correlated_gaussian_field(map, r, scale=20.0):
     """
     Generate a correlated Gaussian random field terrain parametrized by a cluster radius r.
 

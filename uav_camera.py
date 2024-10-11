@@ -12,9 +12,8 @@ class camera:
         camera_pos=(0.0, 0.0),
         x_range=(0, 50),
         y_range=(0, 50),
-        xy_step=1,
-        h_range=(5, 20),
-        h_step=5,
+        h_range=(5.4, 32.4),
+        h_step=5.4,
     ):
         self.grid = grid
         self.altitude = camera_altitude
@@ -22,7 +21,7 @@ class camera:
         self.fov = fov_angle
         self.x_range = x_range
         self.y_range = y_range
-        self.xy_step = xy_step
+        self.xy_step = grid.length
         self.h_range = h_range
         self.h_step = h_step
         self.a = 1
@@ -109,13 +108,15 @@ class camera:
         )
         z.set_map(z_, x=z_x, y=z_y)
         for z_i_id in z:
-            for z_i in range(2):
-                m_i_id = id_converter(z, z_i_id, sampled_M)
-                m_i = sampled_M.map[m_i_id]
-                # P(z_i|m_i, x)
-                z.probability[z_i, z_i_id[0], z_i_id[1]] = self.sensor_model(
-                    m_i, z_i, x
-                )
+            m_i_id = id_converter(z, z_i_id, sampled_M)
+            m_i = sampled_M.map[m_i_id]
+            z_prob_0 = self.sensor_model(m_i, 0, x)
+            z.probability[:, z_i_id[0], z_i_id[1]] = [z_prob_0, 1 - z_prob_0]
+            # for z_i in range(2):
+            #     # P(z_i|m_i, x)
+            #     z.probability[z_i, z_i_id[0], z_i_id[1]] = self.sensor_model(
+            #         m_i, z_i, x
+            #     )
 
         z.map = sample_event_matrix(z.probability)
         return z

@@ -11,7 +11,7 @@ from planner import planning
 class grid_info:
     x = 50
     y = 50
-    length = 1
+    length = 0.5
     shape = (int(x / length), int(y / length))
 
 
@@ -19,7 +19,7 @@ class camera_params:
     fov_angle = 60
 
 
-uav_init = uav_position(((0, 15), 5))
+uav_init = uav_position(((0, 0), 5.4))
 
 camera = camera(grid_info, camera_params.fov_angle)
 camera.set_altitude(uav_init.altitude)
@@ -27,7 +27,7 @@ camera.set_position(uav_init.position)
 
 # Ground truth map with n gaussian peaks
 true_map = terrain(grid_info)
-true_map_m = generate_correlated_gaussian_field(true_map, 5)
+true_map_m = generate_correlated_gaussian_field(true_map, 20)
 true_map.set_map(true_map_m)
 desktop = "/home/bota/Desktop/step_"
 true_map.plot_map(desktop + "gt.png", fit=False)
@@ -38,17 +38,8 @@ actions = []
 current_x = uav_position(plan1.get_uav_current_pos())
 uav_positions = [current_x]
 entropies = []
-for step in range(100):
+for step in range(10):
 
-    # print(
-    #     "step{}:uav x{}-y{}-z{}  entropy:{}".format(
-    #         step,
-    #         current_x.position[0],
-    #         current_x.position[1],
-    #         current_x.altitude,
-    #         plan1.get_entropy(),
-    #     )
-    # )
     entropies.append(plan1.get_entropy())
 
     # Act
@@ -59,10 +50,12 @@ for step in range(100):
     # collect observations
     current_x, current_z = plan1.get_last_observation()
     uav_positions.append(current_x)
+    current_z.plot_prob(desktop + str(step) + "_prob_z.png")
 
     # plot current state
     current_state = plan1.get_current_state()
     filename = desktop + str(step) + ".png"
+    current_state.plot_prob(desktop + str(step) + "_prob.png")
 
     current_state.plot_terrain(filename, uav_positions, true_map, current_z)
 
