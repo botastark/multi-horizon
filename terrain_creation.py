@@ -234,6 +234,7 @@ class terrain:
             cmap=cmap,
             norm=norm,
             extent=[self.x.min(), self.x.max(), self.y.min(), self.y.max()],
+            origin="lower",
         )
 
         plt.tight_layout()
@@ -242,50 +243,29 @@ class terrain:
         plt.savefig(filename)
 
     def plot_prob(self, filename):
-        fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(100, 100))
 
-        # Example 2D grid of probabilities (replace with your actual probability values)
+        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(100, 100))
+
+        # # Example 2D grid of probabilities (replace with your actual probability values)
         probability_map_0 = self.probability[0, :, :]  # First probability map
-        probability_map_1 = self.probability[1, :, :]  # Second probability map
+        # probability_map_1 = self.probability[1, :, :]  # Second probability map
 
-        # Plot the first probability map in ax[0]
-        cax0 = ax[0].imshow(probability_map_0, cmap="Blues", interpolation="nearest")
+        # # Plot the first probability map in ax[0]
+        cax0 = ax.imshow(probability_map_0, cmap="Blues", interpolation="nearest")
 
-        # Add text annotations for the first probability map
+        # # Add text annotations for the first probability map
         for (i, j), prob in np.ndenumerate(probability_map_0):
-            ax[0].text(j, i, f"{prob:.2f}", ha="center", va="center", color="black")
+            ax.text(j, i, f"{prob:.2f}", ha="center", va="center", color="black")
 
-        # Add a colorbar for the first plot
-        # fig.colorbar(cax0, ax=ax[0])
+        ax.set_title("Probability Map 0")
+        ax.set_xlabel("X-axis")
+        ax.set_ylabel("Y-axis")
 
-        # Set labels and title for the first plot
-        ax[0].set_title("Probability Map 0")
-        ax[0].set_xlabel("X-axis")
-        ax[0].set_ylabel("Y-axis")
-
-        # Plot the second probability map in ax[1]
-        cax1 = ax[1].imshow(probability_map_1, cmap="Blues", interpolation="nearest")
-
-        # Add text annotations for the second probability map
-        for (i, j), prob in np.ndenumerate(probability_map_1):
-            ax[1].text(j, i, f"{prob:.2f}", ha="center", va="center", color="black")
-
-        # Add a colorbar for the second plot
-        # fig.colorbar(cax1, ax=ax[1])
-
-        # Set labels and title for the second plot
-        ax[1].set_title("Probability Map 1")
-        ax[1].set_xlabel("X-axis")
-        ax[1].set_ylabel("Y-axis")
-
-        # Adjust the layout to make sure everything fits well
+        # # Adjust the layout to make sure everything fits well
         plt.tight_layout()
 
-        # Save the figure to a file
+        # # Save the figure to a file
         plt.savefig(filename)
-
-        # Display the plot
-        # plt.show()
 
 
 def generate_n_peaks(n_peaks, map):
@@ -373,3 +353,57 @@ def generate_correlated_gaussian_field(map, r, scale=20.0):
     terrain = (terrain > 0.5).astype(int)
 
     return terrain
+
+
+import numpy as np
+from scipy.spatial.distance import pdist, squareform
+from scipy.stats import multivariate_normal
+
+import numpy as np
+from scipy.fftpack import fft2, ifft2, fftshift
+import matplotlib.pyplot as plt
+
+
+def fft_gaussian_random_field(map, radius, seed=None):
+    """
+    Generate a correlated Gaussian random field terrain using FFT for efficiency.
+
+    Parameters:
+        size (int): The size of the terrain (size x size grid).
+        radius (float): The correlation radius, ranging from 0 to 5.
+        seed (int): Random seed for reproducibility (default: None).
+
+    Returns:
+        np.ndarray: A size x size 2D array representing the terrain.
+    """
+    if seed is not None:
+        np.random.seed(seed)
+    xx, yy = map.get_grid()
+    m, n = xx.shape
+
+    # Generate uncorrelated Gaussian noise
+    noise = np.random.normal(size=(m, n))
+
+    # Create a distance matrix for a 2D grid
+    x = np.fft.fftfreq(m) * n
+    y = np.fft.fftfreq(m) * n
+    xv, yv = np.meshgrid(x, y, indexing="ij")
+    distances = np.sqrt(xv**2 + yv**2)
+
+    # Create the correlation filter in the frequency domain (Gaussian filter)
+    # Using exponential decay model: exp(-distance / radius)
+    correlation_filter = np.exp(-distances / radius)
+
+    # Apply the filter to the noise using FFT
+    noise_fft = fft2(noise)
+    filtered_noise_fft = noise_fft * correlation_filter
+    filtered_noise = np.real(ifft2(filtered_noise_fft))
+
+    # Normalize the output to have zero mean and unit variance
+    filtered_noise = (filtered_noise - np.mean(filtered_noise)) / np.std(filtered_noise)
+    filtered_noise = (filtered_noise - np.min(filtered_noise)) / (
+        np.max(filtered_noise) - np.min(filtered_noise)
+    )
+    filtered_noise = (filtered_noise > 0.5).astype(int)
+
+    return filtered_noise
