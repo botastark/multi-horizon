@@ -176,6 +176,21 @@ def sample_event_matrix(P):
     return A
 
 
+def argmax_event_matrix(P):
+    """
+    P should have shape (2, m, n) with probabilities for 0 and 1.
+    The function selects 0 or 1 based on which value is greater in P[0, i, j] or P[1, i, j].
+    Optimized for efficiency using vectorized operations.
+    """
+    assert P.shape[0] == 2
+    P = normalize_probabilities_(P)
+
+    # Create a matrix of 1's where P[1, :, :] > P[0, :, :]
+    A = (P[1] > P[0]).astype(int)
+
+    return A
+
+
 class uav_position:
     def __init__(self, input) -> None:
 
@@ -189,3 +204,45 @@ class point:
         self.y = y
         self.z = z
         self.probability = p
+
+
+def compute_mse(ground_truth_map, estimated_map):
+    if ground_truth_map.shape != estimated_map.shape:
+        raise ValueError("Input maps must have the same dimensions")
+
+    mse = np.mean((ground_truth_map - estimated_map) ** 2)
+    return mse
+
+
+def plot_metrics(entropy_list, mse_list):
+
+    # Ensure the lists have the same length
+    assert len(entropy_list) == len(
+        mse_list
+    ), "Entropy and MSE lists must have the same length."
+
+    # Number of steps
+    steps = range(len(entropy_list))
+
+    # Create figure and subplots
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 8))  # 2 rows, 1 column
+
+    # Plot entropy in the first subplot
+    ax1.plot(steps, entropy_list, "bo-", label="Entropy", markersize=5)
+    ax1.set_xlabel("Number of steps")
+    ax1.set_ylabel("Entropy")
+    ax1.set_title("Entropy over Steps")
+    ax1.grid(True)
+
+    # Plot MSE in the second subplot
+    ax2.plot(steps, mse_list, "r*-", label="MSE", markersize=5)
+    ax2.set_xlabel("Number of steps")
+    ax2.set_ylabel("MSE")
+    ax2.set_title("MSE over Steps")
+    ax2.grid(True)
+
+    # Adjust layout to avoid overlap
+    plt.tight_layout()
+
+    # Show the plot
+    plt.show()

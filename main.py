@@ -1,6 +1,6 @@
-from matplotlib import pyplot as plt
-from helper import observed_m_ids, uav_position
+from helper import observed_m_ids, plot_metrics, uav_position, compute_mse
 from terrain_creation import (
+    fft_gaussian_random_field,
     generate_correlated_gaussian_field,
     terrain,
 )
@@ -11,7 +11,7 @@ from planner import planning
 class grid_info:
     x = 50
     y = 50
-    length = 0.5
+    length = 0.125
     shape = (int(x / length), int(y / length))
 
 
@@ -19,59 +19,49 @@ class camera_params:
     fov_angle = 60
 
 
-uav_init = uav_position(((0, 0), 5.4))
-
 camera = camera(grid_info, camera_params.fov_angle)
-camera.set_altitude(uav_init.altitude)
-camera.set_position(uav_init.position)
 
 # Ground truth map with n gaussian peaks
 true_map = terrain(grid_info)
-true_map_m = generate_correlated_gaussian_field(true_map, 20)
+true_map_m = fft_gaussian_random_field(true_map, 10)
 true_map.set_map(true_map_m)
 desktop = "/home/bota/Desktop/step_"
 true_map.plot_map(desktop + "gt.png", fit=False)
 plan1 = planning(true_map, camera)
 
-
 actions = []
-current_x = uav_position(plan1.get_uav_current_pos())
-uav_positions = [current_x]
+uav_positions = []
 entropies = []
-for step in range(10):
+mse = []
+x = uav_position(((0, 0), 5.4))
+for step in range(5):
+    # Observe
+    uav_positions.append(x)
+    camera.set_altitude(x.altitude)
+    camera.set_position(x.position)
+    z = camera.sample_observation(true_map, x)
 
+    # Map
+    plan1.mapping(x, z)
     entropies.append(plan1.get_entropy())
+    current_state = plan1.get_current_state()
+    mse.append(compute_mse(true_map.map, current_state.map))
+
+    # Plan
+    next_action = plan1.select_action()
 
     # Act
-    next_action = plan1.select_action()
-    plan1.take_action(next_action, true_map)
+    # x_{t+1} UAV position after taking action a
+    x = uav_position(camera.x_future(next_action))
     actions.append(next_action)
 
-    # collect observations
+    # Check plots
+    # if step % 10 == 0:
     current_x, current_z = plan1.get_last_observation()
-    uav_positions.append(current_x)
     current_z.plot_prob(desktop + str(step) + "_prob_z.png")
-
-    # plot current state
-    current_state = plan1.get_current_state()
     filename = desktop + str(step) + ".png"
     current_state.plot_prob(desktop + str(step) + "_prob.png")
-
     current_state.plot_terrain(filename, uav_positions, true_map, current_z)
 
 
-plt.figure(figsize=(8, 6))
-steps = list(range(len(entropies)))
-plt.plot(steps, entropies, marker="o", color="b", label="Entropy")
-
-# Set axis labels and title
-plt.xlabel("Step (integer)")
-plt.ylabel("Entropy (double)")
-plt.title("Entropy Over Steps")
-
-# Add a legend
-plt.legend()
-
-# Display the plot
-plt.grid(True)  # Optional: add grid lines for better visualization
-plt.show()
+plot_metrics(entropies, mse)
