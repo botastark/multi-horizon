@@ -198,6 +198,14 @@ class uav_position:
         self.position = input[0]
         self.altitude = input[1]
 
+    def __eq__(self, other):
+        if isinstance(other, uav_position):
+            return self.position == other.position and self.altitude == other.altitude
+        return False
+
+    def __hash__(self):
+        return hash((self.position, self.altitude))
+
 
 class point:
     def __init__(self, x=None, y=None, z=None, p=None) -> None:
@@ -258,5 +266,6 @@ def plot_metrics(entropy_list, mse_list, coverage_list):
 
     # Show the plot
     plt.savefig("/home/bota/Desktop/final.png")
+    plt.close(fig)
 
     # plt.show()

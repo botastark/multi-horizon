@@ -151,8 +151,8 @@ class terrain:
         cbar2 = fig.colorbar(contour, ax=ax2, label="Elevation")
         plt.tight_layout()
         # Show the plots
-        # plt.show(block=False)
         plt.savefig(filename)
+        plt.close(fig)
 
     def plot_terrain(self, filename, uav_pos, gt, obs_z):
 
@@ -241,6 +241,7 @@ class terrain:
 
         # Show the plots
         plt.savefig(filename)
+        plt.close(fig)
 
     def plot_prob(self, filename):
 
@@ -266,6 +267,7 @@ class terrain:
 
         # # Save the figure to a file
         plt.savefig(filename)
+        plt.close(fig)
 
 
 def generate_n_peaks(n_peaks, map):

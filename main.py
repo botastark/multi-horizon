@@ -13,7 +13,7 @@ from uav_camera import camera
 from planner import planning
 
 desktop = "/home/bota/Desktop/step_"
-action_select_strategy = "random"  # "ig", "sweep"
+action_select_strategy = "sweep"  # "ig", "random"
 
 
 class grid_info:
@@ -43,11 +43,10 @@ mse = []
 coverage = []
 
 x = uav_position(((0, 0), 5.4))
-
-for step in range(16):
+obs_ms = set()
+for step in range(301):
     print("step ", step)
     # Observe
-
     uav_positions.append(x)
     camera.set_altitude(x.altitude)
     camera.set_position(x.position)
@@ -58,7 +57,8 @@ for step in range(16):
     entropies.append(plan1.get_entropy())
     current_state = plan1.get_current_state()
     mse.append(compute_mse(true_map.map, current_state.map))
-    coverage.append(compute_coverage(observed_m_ids(camera, x), grid_info))
+    obs_ms.update(observed_m_ids(camera, x))
+    coverage.append(compute_coverage(list(obs_ms), grid_info))
 
     # Plan
     next_action = plan1.select_action(strategy=action_select_strategy)
@@ -71,9 +71,9 @@ for step in range(16):
     # Check plots
     if step % 5 == 0:
         current_x, current_z = plan1.get_last_observation()
-        current_z.plot_prob(desktop + str(step) + "_prob_z.png")
+        # current_z.plot_prob(desktop + str(step) + "_prob_z.png")
         filename = desktop + str(step) + ".png"
-        current_state.plot_prob(desktop + str(step) + "_prob.png")
+        # current_state.plot_prob(desktop + str(step) + "_prob.png")
         current_state.plot_terrain(filename, uav_positions, true_map, current_z)
 
 
