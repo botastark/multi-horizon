@@ -14,7 +14,7 @@ from uav_camera import camera
 from planner import planning
 
 desktop = "/home/bota/Desktop/step_"
-action_select_strategy = "ig"  # "ig", "random" "sweep"
+action_select_strategy = "sweep"  # "ig", "random" "sweep"
 
 
 class grid_info:
@@ -45,7 +45,7 @@ coverage = []
 
 x = uav_position(((0, 0), 5.4))
 obs_ms = set()
-for step in range(25):
+for step in range(300):
     print("step ", step)
     # Observe
     uav_positions.append(x)
@@ -71,11 +71,12 @@ for step in range(25):
     actions.append(next_action)
 
     # Check plots
-    if step % 1 == 0:
+    if step % 25 == 0:
         current_x, current_z = plan1.get_last_observation()
-        # current_z.plot_prob(desktop + str(step) + "_prob_z.png")
+
+        current_z.plot_prob(desktop + str(step) + "_prob_z.png")
         filename = desktop + str(step) + ".png"
-        # current_state.plot_prob(desktop + str(step) + "_prob.png")
+        current_state.plot_prob(desktop + str(step) + "_prob.png")
         current_state.plot_terrain(filename, uav_positions, true_map, current_z)
 
 

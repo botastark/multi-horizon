@@ -35,14 +35,19 @@ class planning:
         return ig
 
     def _entropy_mi(self, m_i_id):
+        eps = 1e-10
         prior_m_i_0 = self.M.probability[0, m_i_id[0], m_i_id[1]]  # prob- of m_i = 0
         prior_m_i_1 = self.M.probability[1, m_i_id[0], m_i_id[1]]  # prob- of m_i = 1
         sum_ = prior_m_i_0 + prior_m_i_1
         prior_m_i_0 = prior_m_i_0 / sum_
         prior_m_i_1 = prior_m_i_1 / sum_
-        return -prior_m_i_0 * math.log2(prior_m_i_0) - (1 - prior_m_i_1) * math.log2(
-            1 - prior_m_i_1
-        )
+
+        prior_m_i_0 = np.clip(prior_m_i_0, eps, 1.0)
+        prior_m_i_1 = np.clip(prior_m_i_1, eps, 1.0)
+        entropy0 = -prior_m_i_0 * math.log2(prior_m_i_0) if prior_m_i_0 > 0 else 0
+        entropy1 = -prior_m_i_1 * math.log2(prior_m_i_1) if prior_m_i_1 > 0 else 0
+
+        return entropy0 + entropy1
 
     def _entropy(self):
         total_entropy = 0
