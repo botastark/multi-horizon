@@ -26,6 +26,7 @@ class planning:
         self.uav = uav_camera
         self.z = true_map.copy()  # last measurement at x
         self.last_observation = ([], [])
+        self.last_action = ""
 
     def info_gain(self, m_i_id, x_future):
         # print("IG check: H- ", self._entropy_mi(m_i_id))
@@ -122,8 +123,20 @@ class planning:
             if not permitted_actions:
                 raise ValueError("The permitted_actions list is empty.")
             return random.choice(permitted_actions)
-        # if strategy == "sweep":
-        #     continue
+        if strategy == "sweep":
+            optimal_altitude = 21.6
+            if (
+                self.uav.get_x().altitude < optimal_altitude
+                and "up" in permitted_actions
+            ):
+                return "up"
+
+            visited_x = [s_[0] for s_ in self.s]
+            for action in permitted_actions:
+                x_future = uav_position(self.uav.x_future(action))
+                if x_future not in visited_x and action != "up" and action != "down":
+                    return action
+            return random.choice(permitted_actions)
 
         for action in permitted_actions:
             # UAV position after taking action a
