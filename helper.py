@@ -1,4 +1,5 @@
 # pairwise_factor_weights: equal, biased, adaptive
+from matplotlib import pyplot as plt
 import numpy as np
 
 
@@ -214,18 +215,22 @@ def compute_mse(ground_truth_map, estimated_map):
     return mse
 
 
-def plot_metrics(entropy_list, mse_list):
+def compute_coverage(ms_set, grid):
+    # ms = observed_m_ids(uav, pos)
+    cell_area = grid.length * grid.length
+    observed_area = len(ms_set) * cell_area
+    total_area = grid.x * grid.y
+    return observed_area / total_area
 
-    # Ensure the lists have the same length
-    assert len(entropy_list) == len(
-        mse_list
-    ), "Entropy and MSE lists must have the same length."
 
-    # Number of steps
+def plot_metrics(entropy_list, mse_list, coverage_list):
+
+    assert len(entropy_list) == len(mse_list)
+    assert len(coverage_list) == len(mse_list)
+
     steps = range(len(entropy_list))
 
-    # Create figure and subplots
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 8))  # 2 rows, 1 column
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(8, 8))  # 3 rows, 1 column
 
     # Plot entropy in the first subplot
     ax1.plot(steps, entropy_list, "bo-", label="Entropy", markersize=5)
@@ -241,8 +246,17 @@ def plot_metrics(entropy_list, mse_list):
     ax2.set_title("MSE over Steps")
     ax2.grid(True)
 
+    # Plot covberage in the second subplot
+    ax3.plot(steps, coverage_list, "g*-", label="Coverage", markersize=5)
+    ax3.set_xlabel("Number of steps")
+    ax3.set_ylabel("Coverage")
+    ax3.set_title("Coverage over Steps")
+    ax3.grid(True)
+
     # Adjust layout to avoid overlap
     plt.tight_layout()
 
     # Show the plot
-    plt.show()
+    plt.savefig("/home/bota/Desktop/final.png")
+
+    # plt.show()

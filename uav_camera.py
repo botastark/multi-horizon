@@ -12,7 +12,7 @@ class camera:
         camera_pos=(0.0, 0.0),
         x_range=(0, 50),
         y_range=(0, 50),
-        xy_step = 2.94,
+        xy_step=3,
         h_range=(5.4, 32.4),
         h_step=5.4,
     ):
