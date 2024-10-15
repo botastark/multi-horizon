@@ -210,7 +210,7 @@ class terrain:
         ax2.set_ylim([0, self.y_range[1]])
 
         cmap = colors.ListedColormap(["green", "yellow"])
-        bounds = [0, 0.5, 1]
+        bounds = [-0.5, 0.5, 1.5]
         norm = colors.BoundaryNorm(bounds, cmap.N)
 
         im1 = ax2.imshow(
@@ -245,18 +245,36 @@ class terrain:
 
     def plot_prob(self, filename):
 
-        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(100, 100))
+        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(50, 50))
 
         # # Example 2D grid of probabilities (replace with your actual probability values)
         probability_map_0 = self.probability[0, :, :]  # First probability map
+        # print(self.probability[0].shape)
         # probability_map_1 = self.probability[1, :, :]  # Second probability map
 
         # # Plot the first probability map in ax[0]
-        cax0 = ax.imshow(probability_map_0, cmap="Blues", interpolation="nearest")
+        cax0 = ax.imshow(
+            probability_map_0.T,
+            cmap="Blues",
+            interpolation="nearest",
+            origin="lower",
+            vmin=0,
+            vmax=1,
+            extent=[self.x.min(), self.x.max(), self.y.min(), self.y.max()],
+        )
 
         # # Add text annotations for the first probability map
-        for (i, j), prob in np.ndenumerate(probability_map_0):
-            ax.text(j, i, f"{prob:.2f}", ha="center", va="center", color="black")
+        # for (i, j), prob in np.ndenumerate(probability_map_0):
+        #     ax.text(
+        #         j,
+        #         i,
+        #         f"{prob:.2f}",
+        #         ha="center",
+        #         va="center",
+        #         color="black",
+        #         fontsize=15,
+
+        #     )
 
         ax.set_title("Probability Map 0")
         ax.set_xlabel("X-axis")
