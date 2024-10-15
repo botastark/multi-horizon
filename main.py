@@ -13,6 +13,7 @@ from uav_camera import camera
 from planner import planning
 
 desktop = "/home/bota/Desktop/step_"
+action_select_strategy = "random"  # "ig", "sweep"
 
 
 class grid_info:
@@ -51,7 +52,6 @@ for step in range(16):
     camera.set_altitude(x.altitude)
     camera.set_position(x.position)
     z = camera.sample_observation(true_map, x)
-    print("Observed")
 
     # Map
     plan1.mapping(x, z)
@@ -59,16 +59,14 @@ for step in range(16):
     current_state = plan1.get_current_state()
     mse.append(compute_mse(true_map.map, current_state.map))
     coverage.append(compute_coverage(observed_m_ids(camera, x), grid_info))
-    print("Mapped")
 
     # Plan
-    next_action = plan1.select_action()
+    next_action = plan1.select_action(strategy=action_select_strategy)
 
     # Act
     # x_{t+1} UAV position after taking action a
     x = uav_position(camera.x_future(next_action))
     actions.append(next_action)
-    print("act")
 
     # Check plots
     if step % 5 == 0:
