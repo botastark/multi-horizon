@@ -1,3 +1,4 @@
+import numpy as np
 from helper import (
     compute_coverage,
     observed_m_ids,
@@ -13,13 +14,13 @@ from uav_camera import camera
 from planner import planning
 
 desktop = "/home/bota/Desktop/step_"
-action_select_strategy = "sweep"  # "ig", "random"
+action_select_strategy = "ig"  # "ig", "random" "sweep"
 
 
 class grid_info:
     x = 50
     y = 50
-    length = 0.75
+    length = 0.5
     shape = (int(x / length), int(y / length))
 
 
@@ -44,13 +45,14 @@ coverage = []
 
 x = uav_position(((0, 0), 5.4))
 obs_ms = set()
-for step in range(301):
+for step in range(25):
     print("step ", step)
     # Observe
     uav_positions.append(x)
     camera.set_altitude(x.altitude)
     camera.set_position(x.position)
     z = camera.sample_observation(true_map, x)
+    # print(np.max(z.x))
 
     # Map
     plan1.mapping(x, z)
@@ -69,7 +71,7 @@ for step in range(301):
     actions.append(next_action)
 
     # Check plots
-    if step % 5 == 0:
+    if step % 1 == 0:
         current_x, current_z = plan1.get_last_observation()
         # current_z.plot_prob(desktop + str(step) + "_prob_z.png")
         filename = desktop + str(step) + ".png"
