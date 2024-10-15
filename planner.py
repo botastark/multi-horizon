@@ -1,5 +1,6 @@
 import numpy as np
 import math
+import random
 from helper import (
     argmax_event_matrix,
     pairwise_factor_,
@@ -113,10 +114,16 @@ class planning:
             )
         return expected_entropy
 
-    def select_action(self):
+    def select_action(self, strategy="ig"):
 
         info_gain_action = {}
         permitted_actions = self.uav.permitted_actions(self.uav)  # at UAV position x
+        if strategy == "random":
+            if not permitted_actions:
+                raise ValueError("The permitted_actions list is empty.")
+            return random.choice(permitted_actions)
+        # if strategy == "sweep":
+        #     continue
 
         for action in permitted_actions:
             # UAV position after taking action a
@@ -127,7 +134,7 @@ class planning:
             for m_i_id in m_s:  # observed m cells
                 info_gain_action_a += self.info_gain(m_i_id, x_future)
             info_gain_action[action] = info_gain_action_a
-        # print(info_gain_action)
+        print(info_gain_action)
         next_action = max(info_gain_action, key=info_gain_action.get)
         print(next_action)
         return next_action

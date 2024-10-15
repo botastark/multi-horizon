@@ -356,11 +356,9 @@ def generate_correlated_gaussian_field(map, r, scale=20.0):
 
 
 import numpy as np
-from scipy.spatial.distance import pdist, squareform
-from scipy.stats import multivariate_normal
 
 import numpy as np
-from scipy.fftpack import fft2, ifft2, fftshift
+from scipy.fftpack import fft2, ifft2
 import matplotlib.pyplot as plt
 
 
