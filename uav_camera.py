@@ -49,9 +49,10 @@ class camera:
         y_angle = self.fov / 2  # degree
         x_dist = altitude * math.tan(x_angle / 180 * 3.14)
         y_dist = altitude * math.tan(y_angle / 180 * 3.14)
+
         # adjust func: for smaller square ->int() and for larger-> round()
-        x_dist = int(x_dist / self.grid.length) * self.grid.length
-        y_dist = int(y_dist / self.grid.length) * self.grid.length
+        x_dist = round(x_dist / self.grid.length) * self.grid.length
+        y_dist = round(y_dist / self.grid.length) * self.grid.length
         # Trim if out of scope (out of the map)
         x_min = max(position[0] - x_dist, 0.0)
         x_max = min(position[0] + x_dist, self.grid.x)
@@ -59,9 +60,13 @@ class camera:
         y_min = max(position[1] - y_dist, 0.0)
         y_max = min(position[1] + y_dist, self.grid.y)
         if index_form:  # return as indix range
-            x_min_id, y_min_id = self.pos2grid((x_min, y_min))
-            x_max_id, y_max_id = self.pos2grid((x_max, y_max))
-            return [[x_min_id, x_max_id], [y_min_id, y_max_id]]
+            return [
+                [round(x_min / self.grid.length), round(x_max / self.grid.length)],
+                [round(y_min / self.grid.length), round(y_max / self.grid.length)],
+            ]
+            # x_min_id, y_min_id = self.pos2grid((x_min, y_min))
+            # x_max_id, y_max_id = self.pos2grid((x_max, y_max))
+            # return [[x_min_id, x_max_id], [y_min_id, y_max_id]]
 
         return [[x_min, x_max], [y_min, y_max]]
 
@@ -72,13 +77,20 @@ class camera:
         [[x_min_id, x_max_id], [y_min_id, y_max_id]] = self.get_range(
             position=position, altitude=altitude, index_form=True
         )
-        submap = map[x_min_id : x_max_id + 1, y_min_id : y_max_id + 1]
+        # print(self.get_range(position=position, altitude=altitude))
+        # print(self.get_range(position=position, altitude=altitude, index_form=True))
+        # print(map.shape)
+        submap = map[x_min_id:x_max_id, y_min_id:y_max_id]
+        # print(submap.shape)
+        x_min_, x_max_ = self.grid2pos((x_min_id, x_max_id))
+        y_min_, y_max_ = self.grid2pos((y_min_id, y_max_id))
+        # print("z x {}-{} y {}-{}".format(x_min_, x_max_, y_min_, y_max_))
 
-        x_min_, x_max_ = self.grid2pos((x_min_id, x_max_id + 1))
-        y_min_, y_max_ = self.grid2pos((y_min_id, y_max_id + 1))
         x = np.arange(x_min_, x_max_, self.grid.length)
         y = np.arange(y_min_, y_max_, self.grid.length)
-
+        # print("x shape ", x.shape)
+        # print("y shape ", y.shape)
+        # print("sample obs x max {}".format(np.max(x)))
         x, y = np.meshgrid(x, y, indexing="ij")
         return submap, x, y
 
@@ -105,6 +117,7 @@ class camera:
         z_, z_x, z_y = self.get_observation(
             sampled_M.map, position=x.position, altitude=x.altitude
         )
+
         z.set_map(z_, x=z_x, y=z_y)
         for z_i_id in z:
             m_i_id = id_converter(z, z_i_id, sampled_M)
@@ -112,15 +125,15 @@ class camera:
             z_prob_0 = self.sensor_model(m_i, 0, x)
             z.probability[:, z_i_id[0], z_i_id[1]] = [z_prob_0, 1 - z_prob_0]
 
-        z.map = argmax_event_matrix(z.probability)
-        # z.map = sample_event_matrix(z.probability)
+        # z.map = argmax_event_matrix(z.probability)
+        z.map = sample_event_matrix(z.probability)
         return z
 
     def pos2grid(self, pos):
         # from position in meters into grid coordinates
-        return min(max(int(pos[0] / self.grid.length), 0), self.grid.shape[0] - 1), min(
-            max(int(pos[1] / self.grid.length), 0), self.grid.shape[1] - 1
-        )
+        return min(
+            max(round(pos[0] / self.grid.length), 0), self.grid.shape[0] - 1
+        ), min(max(round(pos[1] / self.grid.length), 0), self.grid.shape[1] - 1)
 
     def grid2pos(self, coords):
         return coords[0] * self.grid.length, coords[1] * self.grid.length

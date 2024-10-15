@@ -86,7 +86,11 @@ class planning:
                     type="equal",
                 )
             posterior_mi_given_s.append(pairwise_product * evidence_factors)
-        return np.array(posterior_mi_given_s)
+        posterior_mi_given_s = np.array(posterior_mi_given_s)
+        posterior_mi_given_s *= self.M.probability[:, m_i_pos[0], m_i_pos[1]]
+        total = posterior_mi_given_s[0] + posterior_mi_given_s[1]
+        posterior_mi_given_s = posterior_mi_given_s / total
+        return posterior_mi_given_s
 
     def _expected_entropy(self, m_i_id, x_future):
         expected_entropy = 0
