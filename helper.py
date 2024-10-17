@@ -231,6 +231,10 @@ def compute_coverage(ms_set, grid):
     return observed_area / total_area
 
 
+def sig(x):
+    return 1 / (1 + np.exp(-x))
+
+
 def plot_metrics(entropy_list, mse_list, coverage_list):
 
     assert len(entropy_list) == len(mse_list)
@@ -269,3 +273,69 @@ def plot_metrics(entropy_list, mse_list, coverage_list):
     plt.close(fig)
 
     # plt.show()
+
+
+class FastLogger:
+    HEADER = "step\tentropy\tmse\theight\tcoverage\n"
+
+    def __init__(
+        self, dir, strategy="ig", pairwise="equal", n_agent=1, grid=None, init_x=None
+    ):
+
+        self.strategy = strategy
+        self.pairwise = pairwise
+        self.n = n_agent
+        self.grid = grid
+        self.init_x = init_x
+        self.step = 0
+        self.filename = (
+            dir + "/" + self.strategy + "_" + self.pairwise + "_" + str(self.n) + ".txt"
+        )
+
+        with open(self.filename, "w") as f:
+            f.write(f"Strategy: {self.strategy}\n")
+            f.write(f"Pairwise: {self.pairwise}\n")
+            f.write(f"N agents: {self.n}\n")
+            f.write(
+                f"Grid info: range: 0-{self.grid.x}-{self.grid.y}, cell_size:{self.grid.length}, map shape: {self.grid.shape} \n"
+            )
+            f.write(
+                f"init UAV position: {self.init_x.position} - {self.init_x.altitude} \n"
+            )
+            f.write(self.HEADER)
+
+    def log_data(self, entropy, mse, height, coverage):
+        self.step += 1
+        with open(self.filename, "a") as f:
+            f.write(f"{self.step}\t{entropy}\t{mse}\t{height}\t{coverage}\n")
+            f.flush()
+
+    def log(self, text):
+        with open(self.filename, "a") as f:
+            f.write(text + "\n")
+            f.flush()
+
+    def collect_data(self, filename=None):
+        filename = filename or self.filename
+        info = {"strategy": None, "pairwise": None, "agents": None}
+        entropy, mse, height, coverage = [], [], [], []
+
+        try:
+            with open(filename, "r") as f:
+                lines = f.readlines()
+
+            info["strategy"] = lines[0].strip()
+            info["pairwise"] = lines[1].strip()
+            info["agents"] = lines[2].strip()
+
+            for line in lines[3:]:
+                raw = line.split("\t")
+                entropy.append(float(raw[1]))
+                mse.append(float(raw[2]))
+                height.append(float(raw[3]))
+                coverage.append(float(raw[4]))
+
+        except (IOError, IndexError, ValueError) as e:
+            print(f"Error reading or parsing data: {e}")
+
+        return info, (entropy, mse, height, coverage)
