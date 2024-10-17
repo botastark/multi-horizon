@@ -16,3 +16,7 @@ actions: ['up', 'up', 'front', 'right']
 actions: ['up', 'up', 'front', 'right', 'front']
 6	9584.215479679533	0.4343	16.200000000000003	0.0775
 actions: ['up', 'up', 'front', 'right', 'front', 'right']
+7	9463.184552953415	0.4252	16.200000000000003	0.0961
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front']
+8	9336.019537065233	0.4197	16.200000000000003	0.1147
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right']
