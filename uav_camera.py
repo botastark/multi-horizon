@@ -154,14 +154,14 @@ class camera:
             count += 1
         return count
 
-    def _prob_candidate_x(self):
-        """
-        P(x_{t+1}) = P(x_{t+1} | x_{t}) * P(x_{t})
-        P(x_{t+1} | x_{t}) over all possible future positions from the current position
-        P(x_{t}) = 1
-        """
-        prob_candidate_given_current = 1 / self._count_possible_states()
-        return prob_candidate_given_current  # * self.prob_uav_position()
+    # def _prob_candidate_x(self):
+    #     """
+    #     P(x_{t+1}) = P(x_{t+1} | x_{t}) * P(x_{t})
+    #     P(x_{t+1} | x_{t}) over all possible future positions from the current position
+    #     P(x_{t}) = 1
+    #     """
+    #     prob_candidate_given_current = 1 / self._count_possible_states()
+    #     return prob_candidate_given_current  # * self.prob_uav_position()
 
     def prob_future_observation(self, x_future, z_future):
         # if z_future is observable from x_future
@@ -174,7 +174,7 @@ class camera:
         y_min_, y_max_ = self.grid2pos((y_min_id, y_max_id + 1))
         if x_min_ <= z_future.x <= x_max_:
             if y_min_ <= z_future.y <= y_max_:
-                return self._prob_candidate_x() * z_future.probability
+                return z_future.probability
             else:
                 raise TypeError("check prob_future_observation y out of range")
         else:

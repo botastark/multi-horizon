@@ -51,8 +51,6 @@ class planning:
 
     def _entropy(self):
         total_entropy = 0
-        # print("entropy test")
-        # print(self.M.probability[0, :, :])
         for i, j in np.ndindex(self.M.map.shape):
             m_i_id = (i, j)
             prior_m_i_0 = self.M.probability[
@@ -64,8 +62,6 @@ class planning:
             sum_ = prior_m_i_0 + prior_m_i_1
             prior_m_i_0 = prior_m_i_0 / sum_
             prior_m_i_1 = prior_m_i_1 / sum_
-            # if prior_m_i_1 != 0.5 and prior_m_i_0 != 0.5:
-            #     print("m:{} 0: {}, 1:{}".format(m_i_id, prior_m_i_0, prior_m_i_1))
 
             total_entropy += self._entropy_mi(m_i_id)
 
