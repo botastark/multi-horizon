@@ -15,6 +15,7 @@ parts/
 bin/
 var/
 sdist/
+papers/
 *.manifest
 *.spec
 
