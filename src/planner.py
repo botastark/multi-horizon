@@ -53,23 +53,7 @@ class planning:
         total_entropy = 0
         for i, j in np.ndindex(self.M.map.shape):
             m_i_id = (i, j)
-            prior_m_i_0 = self.M.probability[
-                0, m_i_id[0], m_i_id[1]
-            ]  # prob- of m_i = 0
-            prior_m_i_1 = self.M.probability[
-                1, m_i_id[0], m_i_id[1]
-            ]  # prob- of m_i = 1
-            sum_ = prior_m_i_0 + prior_m_i_1
-            prior_m_i_0 = prior_m_i_0 / sum_
-            prior_m_i_1 = prior_m_i_1 / sum_
-
             total_entropy += self._entropy_mi(m_i_id)
-
-            # print(
-            #     "m:{} entropy: {}, total:{}".format(
-            #         m_i_id, self._entropy_mi(m_i_id), total_entropy
-            #     )
-            # )
         return total_entropy
 
     def _CRF_elementwise(self, z_future, x_future, m_i_pos, Z):
@@ -142,7 +126,7 @@ class planning:
                 if x_future not in visited_x and action != "up" and action != "down":
                     return action
             return random.choice(permitted_actions)
-
+        # IG based IPP strategy
         for action in permitted_actions:
             # UAV position after taking action a
             x_future = uav_position(self.uav.x_future(action))
@@ -152,8 +136,26 @@ class planning:
             for m_i_id in m_s:  # observed m cells
                 info_gain_action_a += self.info_gain(m_i_id, x_future)
             info_gain_action[action] = info_gain_action_a
+
+        # Find the maximum information gain
+        max_gain = max(info_gain_action.values())
+
+        # Collect actions with the maximum info gain
+        max_gain_actions = [
+            action for action, gain in info_gain_action.items() if gain == max_gain
+        ]
+
+        # Prefer previous action if it's among the max-gain actions, otherwise choose randomly
+        if self.last_action in max_gain_actions:
+            next_action = self.last_action
+        else:
+            next_action = random.choice(max_gain_actions)
+
+        # Update previous action for the next step
+        self.last_action = next_action
+
         print(info_gain_action)
-        next_action = max(info_gain_action, key=info_gain_action.get)
+        # next_action = max(info_gain_action, key=info_gain_action.get)
         print(next_action)
         return next_action
 
@@ -161,7 +163,7 @@ class planning:
         self.uav.set_position(x.position)
         self.uav.set_altitude(x.altitude)
 
-        # collect z_{t+1} observation @TODO add sensor model
+        # collect z_{t+1} observation from camera (done in main)
         self.z = z
 
         # CRF to update belief probabilities

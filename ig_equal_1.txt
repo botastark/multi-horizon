@@ -3,20 +3,7 @@ Pairwise: equal
 N agents: 1
 Grid info: range: 0-50-50, cell_size:0.5, map shape: (100, 100) 
 init UAV position: (0, 0) - 5.4 
-step	entropy	mse	height	coverage
-1	9978.198472668	0.4549	5.4	0.0036
+Step   Entropy    MSE      Height   Coverage  
+------------------------------------------------
+0      9978.2     0.4899   5.4      0.0036    
 actions: ['up']
-2	9933.694090083261	0.4521	10.8	0.0144
-actions: ['up', 'up']
-3	9861.834911064998	0.4454	16.200000000000003	0.0361
-actions: ['up', 'up', 'front']
-4	9783.296278405725	0.4445	16.200000000000003	0.0475
-actions: ['up', 'up', 'front', 'right']
-5	9686.615580091908	0.4385	16.200000000000003	0.0625
-actions: ['up', 'up', 'front', 'right', 'front']
-6	9584.215479679533	0.4343	16.200000000000003	0.0775
-actions: ['up', 'up', 'front', 'right', 'front', 'right']
-7	9463.184552953415	0.4252	16.200000000000003	0.0961
-actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front']
-8	9336.019537065233	0.4197	16.200000000000003	0.1147
-actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right']

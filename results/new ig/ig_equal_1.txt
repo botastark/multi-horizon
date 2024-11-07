@@ -1,0 +1,109 @@
+Strategy: ig
+Pairwise: equal
+N agents: 1
+Grid info: range: 0-50-50, cell_size:0.5, map shape: (100, 100) 
+init UAV position: (0, 0) - 5.4 
+Step   Entropy    MSE      Height   Coverage  
+------------------------------------------------
+0      9978.2     0.5483   5.4      0.0036    
+actions: ['up']
+1      9931.3     0.544    10.8     0.0144    
+actions: ['up', 'up']
+2      9859.68    0.5384   16.2     0.0361    
+actions: ['up', 'up', 'front']
+3      9787.65    0.5378   16.2     0.0475    
+actions: ['up', 'up', 'front', 'right']
+4      9692.22    0.5292   16.2     0.0625    
+actions: ['up', 'up', 'front', 'right', 'front']
+5      9596.38    0.524    16.2     0.0775    
+actions: ['up', 'up', 'front', 'right', 'front', 'right']
+6      9472.13    0.5138   16.2     0.0961    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front']
+7      9328.88    0.5057   16.2     0.1147    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right']
+8      9165.77    0.495    16.2     0.1369    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right']
+9      9003.06    0.4866   16.2     0.1591    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right']
+10     8843.44    0.4706   16.2     0.1813    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right']
+11     8677.29    0.4659   16.2     0.2035    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right']
+12     8503.09    0.453    16.2     0.2257    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right']
+13     8312.06    0.4459   16.2     0.2479    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right']
+14     8143.83    0.4392   16.2     0.2701    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right']
+15     7969.72    0.4276   16.2     0.2923    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right']
+16     7791.66    0.4162   16.2     0.3145    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right']
+17     7614.54    0.4001   16.2     0.3367    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right']
+18     7431.99    0.3952   16.2     0.3589    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front']
+19     7255.76    0.3824   16.2     0.3817    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'front']
+20     7110.27    0.3717   16.2     0.4045    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'front', 'front']
+21     6947.44    0.3608   16.2     0.4273    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'front', 'front', 'front']
+22     6779.92    0.3511   16.2     0.4501    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'front', 'front', 'front', 'front']
+23     6595.52    0.3388   16.2     0.4729    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'front', 'front', 'front', 'front', 'front']
+24     6421.28    0.3288   16.2     0.4957    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'front', 'front', 'front', 'front', 'front', 'front']
+25     6240.58    0.3171   16.2     0.5185    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front']
+26     6062.4     0.3089   16.2     0.5413    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front']
+27     5881.27    0.292    16.2     0.5641    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front']
+28     5698.83    0.2824   16.2     0.5869    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'left']
+29     5539.41    0.2729   16.2     0.6097    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'left', 'left']
+30     5385.06    0.2632   16.2     0.6325    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'left', 'left', 'left']
+31     5225.16    0.2561   16.2     0.6553    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'left', 'left', 'left', 'left']
+32     5056.21    0.2452   16.2     0.6781    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'left', 'left', 'left', 'left', 'left']
+33     4872.4     0.23     16.2     0.7009    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'left', 'left', 'left', 'left', 'left', 'left']
+34     4688.43    0.219    16.2     0.7237    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'left', 'left', 'left', 'left', 'left', 'left', 'left']
+35     4505.82    0.205    16.2     0.7465    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left']
+36     4326.57    0.1961   16.2     0.7693    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left']
+37     4149.75    0.1867   16.2     0.7921    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left']
+38     3989.28    0.1785   16.2     0.8111    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'back']
+39     3823.88    0.1636   16.2     0.8333    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'back', 'back']
+40     3665.6     0.1534   16.2     0.8555    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'back', 'back', 'back']
+41     3507.44    0.1407   16.2     0.8777    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'back', 'back', 'back', 'back']
+42     3347.95    0.1338   16.2     0.8925    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'back', 'back', 'back', 'back', 'right']
+43     3239.17    0.1265   16.2     0.9057    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'back', 'back', 'back', 'back', 'right', 'right']
+44     3111.01    0.1219   16.2     0.9189    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'back', 'back', 'back', 'back', 'right', 'right', 'right']
+45     2995.06    0.1136   16.2     0.9321    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'back', 'back', 'back', 'back', 'right', 'right', 'right', 'right']
+46     2886.24    0.1082   16.2     0.9409    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'back', 'back', 'back', 'back', 'right', 'right', 'right', 'right', 'back']
+47     2803.58    0.1058   16.2     0.9409    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'back', 'back', 'back', 'back', 'right', 'right', 'right', 'right', 'back', 'back']
+48     2733.43    0.1038   16.2     0.9409    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'back', 'back', 'back', 'back', 'right', 'right', 'right', 'right', 'back', 'back', 'back']
+49     2664.41    0.1015   16.2     0.9409    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'back', 'back', 'back', 'back', 'right', 'right', 'right', 'right', 'back', 'back', 'back', 'up']
+50     2618.81    0.099    21.6     0.9409    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'left', 'back', 'back', 'back', 'back', 'right', 'right', 'right', 'right', 'back', 'back', 'back', 'up', 'left']

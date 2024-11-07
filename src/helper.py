@@ -302,13 +302,22 @@ class FastLogger:
             f.write(
                 f"init UAV position: {self.init_x.position} - {self.init_x.altitude} \n"
             )
-            f.write(self.HEADER)
+            # Print table header with aligned columns
+            f.write(
+                f"{'Step':<6} {'Entropy':<10} {'MSE':<8} {'Height':<8} {'Coverage':<10}\n"
+            )
+            f.write("-" * 48)  # Divider line
+            f.write("\n")
 
     def log_data(self, entropy, mse, height, coverage):
-        self.step += 1
+
         with open(self.filename, "a") as f:
-            f.write(f"{self.step}\t{entropy}\t{mse}\t{height}\t{coverage}\n")
+            f.write(
+                f"{self.step:<6} {round(entropy, 2):<10} {round(mse, 4):<8} {round(height, 1):<8} {round(coverage, 4):<10}\n"
+            )
+
             f.flush()
+        self.step += 1
 
     def log(self, text):
         with open(self.filename, "a") as f:
