@@ -1,6 +1,6 @@
 import math
 import numpy as np
-from helper import argmax_event_matrix, id_converter, sample_event_matrix, uav_position
+from helper import id_converter, sample_event_matrix, uav_position
 
 
 class camera:
@@ -64,9 +64,6 @@ class camera:
                 [round(x_min / self.grid.length), round(x_max / self.grid.length)],
                 [round(y_min / self.grid.length), round(y_max / self.grid.length)],
             ]
-            # x_min_id, y_min_id = self.pos2grid((x_min, y_min))
-            # x_max_id, y_max_id = self.pos2grid((x_max, y_max))
-            # return [[x_min_id, x_max_id], [y_min_id, y_max_id]]
 
         return [[x_min, x_max], [y_min, y_max]]
 
@@ -77,20 +74,14 @@ class camera:
         [[x_min_id, x_max_id], [y_min_id, y_max_id]] = self.get_range(
             position=position, altitude=altitude, index_form=True
         )
-        # print(self.get_range(position=position, altitude=altitude))
-        # print(self.get_range(position=position, altitude=altitude, index_form=True))
-        # print(map.shape)
+
         submap = map[x_min_id:x_max_id, y_min_id:y_max_id]
-        # print(submap.shape)
         x_min_, x_max_ = self.grid2pos((x_min_id, x_max_id))
         y_min_, y_max_ = self.grid2pos((y_min_id, y_max_id))
-        # print("z x {}-{} y {}-{}".format(x_min_, x_max_, y_min_, y_max_))
 
         x = np.arange(x_min_, x_max_, self.grid.length)
         y = np.arange(y_min_, y_max_, self.grid.length)
-        # print("x shape ", x.shape)
-        # print("y shape ", y.shape)
-        # print("sample obs x max {}".format(np.max(x)))
+
         x, y = np.meshgrid(x, y, indexing="ij")
         return submap, x, y
 
@@ -129,6 +120,20 @@ class camera:
         z.map = sample_event_matrix(z.probability)
         return z
 
+    def mex_gen_observation(self, belief_map):
+        b_prob = belief_map.probability.copy()
+        sampled_belief_map_ = belief_map.copy()
+        sampled_observations = []
+        M = 5
+        for i in range(M):
+            sampled_belief_map_.map = sample_event_matrix(b_prob)
+            # sampled_believes.append(sample_event_matrix(b_prob))
+            sampled_z = self.sample_observation(sampled_belief_map_, x=None)
+            sampled_observations.append(sampled_z.map)
+
+        mean_z = np.mean(np.stack(sampled_observations), axis=0)
+        return mean_z
+
     def pos2grid(self, pos):
         # from position in meters into grid coordinates
         return min(
@@ -153,15 +158,6 @@ class camera:
         if self.position[0] - self.xy_step <= self.x_range[0]:  # left (-x)
             count += 1
         return count
-
-    # def _prob_candidate_x(self):
-    #     """
-    #     P(x_{t+1}) = P(x_{t+1} | x_{t}) * P(x_{t})
-    #     P(x_{t+1} | x_{t}) over all possible future positions from the current position
-    #     P(x_{t}) = 1
-    #     """
-    #     prob_candidate_given_current = 1 / self._count_possible_states()
-    #     return prob_candidate_given_current  # * self.prob_uav_position()
 
     def prob_future_observation(self, x_future, z_future):
         # if z_future is observable from x_future

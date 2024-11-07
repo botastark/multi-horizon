@@ -173,8 +173,8 @@ class terrain:
 
         ax1 = fig.add_subplot(131, projection="3d")
 
-        ax1.set_xlim([0, self.x_range[1]])
-        ax1.set_ylim([0, self.y_range[1]])
+        ax1.set_xlim([self.x_range[0], self.x_range[1]])
+        ax1.set_ylim([self.y_range[0], self.y_range[1]])
         ax1.set_zlim([0, 35])
         ax1.set_xlabel("X (m)")
         ax1.set_ylabel("Y (m)")
@@ -375,11 +375,7 @@ def generate_correlated_gaussian_field(map, r, scale=20.0):
     return terrain
 
 
-import numpy as np
-
-import numpy as np
 from scipy.fftpack import fft2, ifft2
-import matplotlib.pyplot as plt
 
 
 def fft_gaussian_random_field(map, radius, seed=None):
