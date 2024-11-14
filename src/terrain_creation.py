@@ -3,9 +3,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import copy
 from mpl_toolkits.mplot3d import Axes3D  # Ensure this is imported
-from scipy.spatial.distance import cdist
-
-from scipy.linalg import cholesky
 
 
 class terrain:
@@ -288,136 +285,26 @@ class terrain:
         plt.close(fig)
 
 
-def generate_n_peaks(n_peaks, map):
-    x, y = map.get_grid()
-    x_range, y_range, z_range = map.get_ranges()
+import gstools as gs
 
-    z_combined = np.zeros_like(x)
 
-    # Loop through each peak and generate elevations
-    for _ in range(n_peaks):
-        x_center = np.random.uniform(x_range[0], x_range[1])
-        y_center = np.random.uniform(y_range[0], y_range[1])
+def gen_fast(map, radius):
+    xx, yy = map.get_grid()
+    x = xx[:, 0]
+    y = yy[0, :]
 
-        # Random amplitude (within the z range)
-        amplitude = np.random.uniform(z_range[0], z_range[1])
-
-        # Random spreads (standard deviations)
-        sigma_x = np.random.uniform(
-            3, 10
-        )  # Control the width of the Gaussian in x-direction
-        sigma_y = np.random.uniform(
-            3, 10
-        )  # Control the width of the Gaussian in y-direction
-
-        z_combined += amplitude * np.exp(
-            -(
-                ((x - x_center) ** 2) / (2 * sigma_x**2)
-                + ((y - y_center) ** 2) / (2 * sigma_y**2)
-            )
-        )
-    z_combined = (z_combined - np.min(z_combined)) / (
-        np.max(z_combined) - np.min(z_combined)
+    seed = 20170519
+    if radius == 0.0:
+        radius += 0.001
+    model = gs.Gaussian(
+        dim=2,
+        len_scale=radius,
     )
 
-    return z_combined
+    srf = gs.SRF(model, seed=seed)
 
+    srf.structured([x, y])
+    z = srf.transform("binary")
+    z = np.where(z == -1.0, 0.0, z)
 
-def generate_correlated_gaussian_field(map, r, scale=20.0):
-    """
-    Generate a correlated Gaussian random field terrain parametrized by a cluster radius r.
-
-    Parameters:
-    - grid_size: Tuple (m, n) defining the size of the grid.
-    - r: Correlation cluster radius that controls the strength of spatial correlation.
-    - scale: Scaling factor for the Gaussian field (default is 1.0).
-
-    Returns:
-    - terrain: A (m, n) matrix representing the correlated Gaussian random field.
-    """
-    # Create grid coordinates
-
-    xx, yy = map.get_grid()
-    m, n = xx.shape
-    # Flatten the grid points into pairs of (x, y) coordinates
-    xy_grid = np.stack([xx.flatten(), yy.flatten()], axis=1)
-    if r == 0:
-        # If r = 0, generate an independent random Gaussian field (no spatial correlation)
-        terrain = np.random.normal(0, 1, (m, n))
-    else:
-
-        # Compute the pairwise Euclidean distance matrix for all grid points
-        distance_matrix = cdist(xy_grid, xy_grid)
-
-        # Define the covariance matrix using an exponential decay function based on distance and radius r
-        # Covariance decreases exponentially with distance, with r controlling the decay rate
-        covariance_matrix = np.exp(-distance_matrix / r)
-
-        # Perform Cholesky decomposition for the covariance matrix (to ensure it is positive semi-definite)
-        L = cholesky(covariance_matrix, lower=True)
-
-        # Generate independent Gaussian random values
-        z = np.random.normal(0, 1, xy_grid.shape[0])
-
-        # Apply Cholesky factorization to introduce spatial correlation
-        correlated_field = L @ z
-
-        # Reshape the correlated field back into the original (m, n) grid shape
-        terrain = correlated_field.reshape(m, n)
-
-        # Scale the field by the provided scale factor
-        terrain = scale * terrain
-
-        # Normalize terrain values between 0 and 1
-        terrain = (terrain - np.min(terrain)) / (np.max(terrain) - np.min(terrain))
-    terrain = (terrain > 0.5).astype(int)
-
-    return terrain
-
-
-from scipy.fftpack import fft2, ifft2
-
-
-def fft_gaussian_random_field(map, radius, seed=None):
-    """
-    Generate a correlated Gaussian random field terrain using FFT for efficiency.
-
-    Parameters:
-        size (int): The size of the terrain (size x size grid).
-        radius (float): The correlation radius, ranging from 0 to 5.
-        seed (int): Random seed for reproducibility (default: None).
-
-    Returns:
-        np.ndarray: A size x size 2D array representing the terrain.
-    """
-    if seed is not None:
-        np.random.seed(seed)
-    xx, yy = map.get_grid()
-    m, n = xx.shape
-
-    # Generate uncorrelated Gaussian noise
-    noise = np.random.normal(size=(m, n))
-
-    # Create a distance matrix for a 2D grid
-    x = np.fft.fftfreq(m) * n
-    y = np.fft.fftfreq(m) * n
-    xv, yv = np.meshgrid(x, y, indexing="ij")
-    distances = np.sqrt(xv**2 + yv**2)
-
-    # Create the correlation filter in the frequency domain (Gaussian filter)
-    # Using exponential decay model: exp(-distance / radius)
-    correlation_filter = np.exp(-distances / radius)
-
-    # Apply the filter to the noise using FFT
-    noise_fft = fft2(noise)
-    filtered_noise_fft = noise_fft * correlation_filter
-    filtered_noise = np.real(ifft2(filtered_noise_fft))
-
-    # Normalize the output to have zero mean and unit variance
-    filtered_noise = (filtered_noise - np.mean(filtered_noise)) / np.std(filtered_noise)
-    filtered_noise = (filtered_noise - np.min(filtered_noise)) / (
-        np.max(filtered_noise) - np.min(filtered_noise)
-    )
-    filtered_noise = (filtered_noise > 0.5).astype(int)
-
-    return filtered_noise
+    return z

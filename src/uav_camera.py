@@ -1,6 +1,6 @@
 import math
 import numpy as np
-from helper import id_converter, sample_event_matrix, uav_position
+from helper import argmax_event_matrix, id_converter, sample_event_matrix, uav_position
 
 
 class camera:
@@ -94,12 +94,7 @@ class camera:
         else:
             return sigma
 
-    def sample_observation(
-        self,
-        sampled_M,
-        x=None,
-        noise=False,
-    ):
+    def sample_observation_old(self, sampled_M, x=None):
         if x == None:
             x = uav_position((self.position, self.altitude))
 
@@ -117,22 +112,68 @@ class camera:
             z.probability[:, z_i_id[0], z_i_id[1]] = [z_prob_0, 1 - z_prob_0]
 
         # z.map = argmax_event_matrix(z.probability)
+        # z.map = sample_event_matrix(z.probability)
+        return z
+
+    def sample_observation(self, sampled_M, x=None):
+        if x == None:
+            x = uav_position((self.position, self.altitude))
+
+        # creating z as a terrain object, disregard z_ as we use it just to create a map
+        z = sampled_M.copy()
+        z_, z_x, z_y = self.get_observation(
+            sampled_M.map, position=x.position, altitude=x.altitude
+        )
+
+        z.set_map(z_, x=z_x, y=z_y)
+        z.probability = np.zeros((z.probability.shape))
+        for z_i_id in z:
+            m_i_id = id_converter(z, z_i_id, sampled_M)
+            for z_i in [0, 1]:
+                for m_i in [0, 1]:
+                    z.probability[z_i, z_i_id[0], z_i_id[1]] += (
+                        self.sensor_model(m_i, z_i, x)
+                        * sampled_M.probability[m_i, m_i_id[0], m_i_id[1]]
+                    )
+
+        # z.map = argmax_event_matrix(z.probability)
         z.map = sample_event_matrix(z.probability)
         return z
 
-    def mex_gen_observation(self, belief_map):
+    def sample_observation_genmex(self, sampled_M, x=None):
+        if x == None:
+            x = uav_position((self.position, self.altitude))
+
+        # creating z as a terrain object, disregard z_
+        z = sampled_M.copy()
+        z_, z_x, z_y = self.get_observation(
+            sampled_M.map, position=x.position, altitude=x.altitude
+        )
+
+        z.set_map(z_, x=z_x, y=z_y)
+
+        return z
+
+    def mex_gen_observation(
+        self,
+        belief_map,
+        x=None,
+    ):
         b_prob = belief_map.probability.copy()
         sampled_belief_map_ = belief_map.copy()
+
         sampled_observations = []
         M = 5
         for i in range(M):
             sampled_belief_map_.map = sample_event_matrix(b_prob)
-            # sampled_believes.append(sample_event_matrix(b_prob))
-            sampled_z = self.sample_observation(sampled_belief_map_, x=None)
+            sampled_z = self.sample_observation_genmex(sampled_belief_map_, x=x)
+
             sampled_observations.append(sampled_z.map)
 
         mean_z = np.mean(np.stack(sampled_observations), axis=0)
-        return mean_z
+        sampled_z.map = mean_z
+
+        return sampled_z
 
     def pos2grid(self, pos):
         # from position in meters into grid coordinates
