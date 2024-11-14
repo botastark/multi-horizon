@@ -7,16 +7,17 @@ from helper import (
     compute_mse,
 )
 from terrain_creation import (
-    fft_gaussian_random_field,
+    gen_fast,
     terrain,
 )
 from uav_camera import camera
 from planner import planning
 
 desktop = "/home/bota/Desktop/"
-action_select_strategy = "ig"  # "ig", "random" "sweep"
-pairwise = "equal"
-n_step = 51
+action_select_strategy = "ig"  # "ig", "random" "sweep" ig_with_mexgen
+
+pairwise = "equal"  # "biased", "equal" "adaptive"
+n_step = 100
 
 
 class grid_info:
@@ -35,8 +36,9 @@ camera = camera(grid_info, camera_params.fov_angle)
 
 # Ground truth map with n gaussian peaks
 true_map = terrain(grid_info)
-true_map.set_map(fft_gaussian_random_field(true_map, 20))
-x = uav_position(((0, 0), 5.4))
+true_map.set_map(gen_fast(true_map, 5))
+
+x = uav_position(((40, 40), 5.4))
 
 logger = FastLogger(
     "/home/bota/Desktop/active_sensing",
@@ -55,7 +57,7 @@ obs_ms = set()
 
 
 true_map.plot_map(desktop + "gt.png", fit=False)
-for step in range(n_step):
+for step in range(n_step + 1):
     print("step ", step)
     # Observe
     uav_positions.append(x)
@@ -77,6 +79,8 @@ for step in range(n_step):
     height.append(alt)
 
     # Plan
+    if step == n_step:
+        break
     next_action = plan1.select_action(strategy=action_select_strategy)
 
     # Act

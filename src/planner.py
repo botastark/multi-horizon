@@ -27,11 +27,14 @@ class planning:
         self.z = true_map.copy()  # last measurement at x
         self.last_observation = ([], [])
         self.last_action = ""
+        self.pairwise_factor_type = "equal"
 
-    def info_gain(self, m_i_id, x_future):
+    def info_gain(self, m_i_id, x_future, mexgen=False):
         # print("IG check: H- ", self._entropy_mi(m_i_id))
         # print("IG check: H+ ", self._expected_entropy(m_i_id, x_future, z_future))
-        ig = self._entropy_mi(m_i_id) - self._expected_entropy(m_i_id, x_future)
+        ig = self._entropy_mi(m_i_id) - self._expected_entropy(
+            m_i_id, x_future, mexgen=mexgen
+        )
         return ig
 
     def _entropy_mi(self, m_i_id):
@@ -68,7 +71,7 @@ class planning:
                     m_i,
                     self.M.map[m_j_pos],
                     obs_map=Z,
-                    type="equal",
+                    type=self.pairwise_factor_type,
                 )
             posterior_mi_given_s.append(pairwise_product * evidence_factors)
         posterior_mi_given_s = np.array(posterior_mi_given_s)
@@ -77,9 +80,13 @@ class planning:
         posterior_mi_given_s = posterior_mi_given_s / total
         return posterior_mi_given_s
 
-    def _expected_entropy(self, m_i_id, x_future):
+    def _expected_entropy(self, m_i_id, x_future, mexgen=False):
         expected_entropy = 0
-        sampled_Z = self.uav.sample_observation(self.M, x=x_future, noise=True)
+        if mexgen:
+            # sampled_Z = self.uav.mex_gen_observation(self.M, x=x_future)
+            sampled_Z = self.uav.mex_gen_observation(self.M, x=x_future)
+        else:
+            sampled_Z = self.uav.sample_observation(self.M, x=x_future)
         z_i_id = id_converter(self.M, m_i_id, sampled_Z)
 
         for z_i in range(2):
@@ -99,7 +106,10 @@ class planning:
             ) - posterior_mi[1] * math.log2(posterior_mi[1])
 
             expected_entropy += (
-                self.uav.prob_future_observation(x_future, z_future)
+                self.uav.prob_future_observation(
+                    x_future,
+                    z_future,
+                )
                 * entropy_posterior_mi
             )
         return expected_entropy
@@ -127,6 +137,10 @@ class planning:
                     return action
             return random.choice(permitted_actions)
         # IG based IPP strategy
+        if strategy == "ig_with_mexgen":
+            mexgen = True
+        else:
+            mexgen = False
         for action in permitted_actions:
             # UAV position after taking action a
             x_future = uav_position(self.uav.x_future(action))
@@ -134,7 +148,7 @@ class planning:
             info_gain_action_a = 0
             m_s = observed_m_ids(uav=self.uav, uav_pos=x_future)
             for m_i_id in m_s:  # observed m cells
-                info_gain_action_a += self.info_gain(m_i_id, x_future)
+                info_gain_action_a += self.info_gain(m_i_id, x_future, mexgen=mexgen)
             info_gain_action[action] = info_gain_action_a
 
         # Find the maximum information gain
@@ -175,7 +189,8 @@ class planning:
                 z=self.z.map[z_i_id],
                 x=self.z.x[z_i_id],
                 y=self.z.y[z_i_id],
-                p=self.z.probability[self.z.map[z_i_id], z_i_id[0], z_i_id[1]],
+                # p=self.z.probability[self.z.map[z_i_id], z_i_id[0], z_i_id[1]],
+                p=0,  # we do not care
             )
             posterior_mi = self._CRF_elementwise(z_future, x, m_i_id, Z=self.z)
             self.M.probability[:, m_i_id[0], m_i_id[1]] = posterior_mi
