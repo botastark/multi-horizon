@@ -83,10 +83,11 @@ class planning:
     def _expected_entropy(self, m_i_id, x_future, mexgen=False):
         expected_entropy = 0
         if mexgen:
-            # sampled_Z = self.uav.mex_gen_observation(self.M, x=x_future)
             sampled_Z = self.uav.mex_gen_observation(self.M, x=x_future)
         else:
-            sampled_Z = self.uav.sample_observation(self.M, x=x_future)
+            # sampled_Z = self.uav.sample_observation(self.M, x=x_future)
+            sampled_Z = self.uav.sample_observation_future(self.M, x=x_future)
+
         z_i_id = id_converter(self.M, m_i_id, sampled_Z)
 
         for z_i in range(2):
@@ -189,8 +190,8 @@ class planning:
                 z=self.z.map[z_i_id],
                 x=self.z.x[z_i_id],
                 y=self.z.y[z_i_id],
-                # p=self.z.probability[self.z.map[z_i_id], z_i_id[0], z_i_id[1]],
-                p=0,  # we do not care
+                p=self.z.probability[self.z.map[z_i_id], z_i_id[0], z_i_id[1]],
+                # p=0,  # we do not care
             )
             posterior_mi = self._CRF_elementwise(z_future, x, m_i_id, Z=self.z)
             self.M.probability[:, m_i_id[0], m_i_id[1]] = posterior_mi
@@ -202,6 +203,7 @@ class planning:
         # update belief matrix M
         self.curr_entropy = self._entropy()
         # self.M.map = sample_event_matrix(self.M.probability)
+
         self.M.map = argmax_event_matrix(self.M.probability)
 
     def get_current_state(self):

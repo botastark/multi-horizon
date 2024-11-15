@@ -1,6 +1,14 @@
 import math
 import numpy as np
 from helper import argmax_event_matrix, id_converter, sample_event_matrix, uav_position
+from terrain_creation import terrain
+
+
+class grid_info:
+    x = 10
+    y = 10
+    length = 1
+    shape = (int(x / length), int(y / length))
 
 
 class camera:
@@ -28,6 +36,7 @@ class camera:
         self.a = 1
         self.b = 0.015
         self.actions = {"up", "down", "front", "back", "left", "right", "hover"}
+        self.z = terrain(self.grid)
 
     def set_position(self, pos):
         self.position = pos
@@ -94,12 +103,14 @@ class camera:
         else:
             return sigma
 
-    def sample_observation_old(self, sampled_M, x=None):
+    def sample_observation(self, sampled_M, x=None):
         if x == None:
             x = uav_position((self.position, self.altitude))
 
         # creating z as a terrain object, disregard z_
-        z = sampled_M.copy()
+        # z = sampled_M.copy()
+        z = self.z
+
         z_, z_x, z_y = self.get_observation(
             sampled_M.map, position=x.position, altitude=x.altitude
         )
@@ -112,32 +123,43 @@ class camera:
             z.probability[:, z_i_id[0], z_i_id[1]] = [z_prob_0, 1 - z_prob_0]
 
         # z.map = argmax_event_matrix(z.probability)
-        # z.map = sample_event_matrix(z.probability)
+        z.map = sample_event_matrix(z.probability)
         return z
 
-    def sample_observation(self, sampled_M, x=None):
+    def sample_observation_future(self, sampled_M, x=None):
         if x == None:
             x = uav_position((self.position, self.altitude))
 
         # creating z as a terrain object, disregard z_ as we use it just to create a map
         z = sampled_M.copy()
         z_, z_x, z_y = self.get_observation(
-            sampled_M.map, position=x.position, altitude=x.altitude
+            z.map, position=x.position, altitude=x.altitude
         )
 
         z.set_map(z_, x=z_x, y=z_y)
         z.probability = np.zeros((z.probability.shape))
         for z_i_id in z:
             m_i_id = id_converter(z, z_i_id, sampled_M)
+            expected_z = 0
+
             for z_i in [0, 1]:
+                P_obs_z_i = 0
                 for m_i in [0, 1]:
-                    z.probability[z_i, z_i_id[0], z_i_id[1]] += (
+                    P_obs_z_i += (
                         self.sensor_model(m_i, z_i, x)
                         * sampled_M.probability[m_i, m_i_id[0], m_i_id[1]]
                     )
+                expected_z += z_i * P_obs_z_i
+                z.probability[z_i, z_i_id[0], z_i_id[1]] = P_obs_z_i
+            z.map[z_i_id] = expected_z
+
+            # z.probability[z_i, z_i_id[0], z_i_id[1]] += (
+            #     self.sensor_model(m_i, z_i, x)
+            #     * sampled_M.probability[m_i, m_i_id[0], m_i_id[1]]
+            # )
 
         # z.map = argmax_event_matrix(z.probability)
-        z.map = sample_event_matrix(z.probability)
+        # z.map = sample_event_matrix(z.probability)
         return z
 
     def sample_observation_genmex(self, sampled_M, x=None):
