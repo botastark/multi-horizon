@@ -223,8 +223,8 @@ class terrain:
         ax3.set_xlabel("X Axis")
         ax3.set_ylabel("Y Axis")
         ax3.set_title("Belief sampled map M")
-        ax3.set_xlim([0, self.x_range[1]])
-        ax3.set_ylim([0, self.y_range[1]])
+        # ax3.set_xlim([0, self.x_range[1]])
+        # ax3.set_ylim([0, self.y_range[1]])
 
         im2 = ax3.imshow(
             self.map.T,
@@ -261,17 +261,16 @@ class terrain:
         )
 
         # # Add text annotations for the first probability map
-        # for (i, j), prob in np.ndenumerate(probability_map_0):
-        #     ax.text(
-        #         j,
-        #         i,
-        #         f"{prob:.2f}",
-        #         ha="center",
-        #         va="center",
-        #         color="black",
-        #         fontsize=15,
-
-        #     )
+        for (i, j), prob in np.ndenumerate(probability_map_0.T):
+            ax.text(
+                j,
+                i,
+                f"{prob:.2f}",
+                ha="left",
+                va="bottom",
+                color="black",
+                fontsize=15,
+            )
 
         ax.set_title("Probability Map 0")
         ax.set_xlabel("X-axis")

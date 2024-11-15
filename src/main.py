@@ -17,13 +17,13 @@ desktop = "/home/bota/Desktop/"
 action_select_strategy = "ig"  # "ig", "random" "sweep" ig_with_mexgen
 
 pairwise = "equal"  # "biased", "equal" "adaptive"
-n_step = 100
+n_step = 50
 
 
 class grid_info:
-    x = 50
-    y = 50
-    length = 0.5
+    x = 20
+    y = 20
+    length = 0.25
     shape = (int(x / length), int(y / length))
 
 
@@ -38,7 +38,7 @@ camera = camera(grid_info, camera_params.fov_angle)
 true_map = terrain(grid_info)
 true_map.set_map(gen_fast(true_map, 5))
 
-x = uav_position(((40, 40), 5.4))
+x = uav_position(((0, 0), 5.4))
 
 logger = FastLogger(
     "/home/bota/Desktop/active_sensing",
@@ -56,7 +56,7 @@ entropies, mse, height, coverage = [], [], [], []
 obs_ms = set()
 
 
-true_map.plot_map(desktop + "gt.png", fit=False)
+# true_map.plot_map(desktop + "gt.png", fit=False)
 for step in range(n_step + 1):
     print("step ", step)
     # Observe
@@ -97,6 +97,7 @@ for step in range(n_step + 1):
         # current_z.plot_prob(desktop + str(step) + "_prob_z.png")
         filename = desktop + "step_" + str(step) + ".png"
         current_state.plot_prob(desktop + "_prob_step" + str(step) + ".png")
+        print(current_state.map)
         current_state.plot_terrain(filename, uav_positions, true_map, current_z)
 
 
