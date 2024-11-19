@@ -14,6 +14,7 @@ eggs/
 parts/
 bin/
 var/
+
 sdist/
 *.manifest
 *.spec
@@ -82,3 +83,6 @@ Desktop.ini
 
 # Debugger specific files
 debug.log
+
+# results folder
+results
