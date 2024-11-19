@@ -289,7 +289,14 @@ class FastLogger:
         self.init_x = init_x
         self.step = 0
         self.filename = (
-            dir + "/" + self.strategy + "_" + self.pairwise + "_" + str(self.n) + ".txt"
+            dir
+            + "/results/"
+            + self.strategy
+            + "_"
+            + self.pairwise
+            + "_"
+            + str(self.n)
+            + ".txt"
         )
 
         with open(self.filename, "w") as f:
