@@ -86,3 +86,4 @@ debug.log
 
 # results folder
 results
+*.txt
