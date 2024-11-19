@@ -84,35 +84,24 @@ class planning:
         expected_entropy = 0
         if mexgen:
             sampled_Z = self.uav.mex_gen_observation(self.M, x=x_future)
-        else:
-            # sampled_Z = self.uav.sample_observation(self.M, x=x_future)
-            sampled_Z = self.uav.sample_observation_future(self.M, x=x_future)
-
-        z_i_id = id_converter(self.M, m_i_id, sampled_Z)
-
+        P_z = self.observation_prob(m_i_id, x_future)
         for z_i in range(2):
-            z_future = point(
-                z=z_i,
-                x=sampled_Z.x[z_i_id],
-                y=sampled_Z.y[z_i_id],
-                p=sampled_Z.probability[z_i, z_i_id[0], z_i_id[1]],
+            # posterior distribution probabilities
+            # p(m = M|z = Z) = (p(z = Z|m = M)p(m = M))/p(z = Z)
+            p_0z = (
+                self.uav.sensor_model(z_i, 0, x_future)
+                * self.M.probability[0, m_i_id[0], m_i_id[1]]
+                / P_z[z_i]
+            )
+            p_1z = (
+                self.uav.sensor_model(z_i, 1, x_future)
+                * self.M.probability[1, m_i_id[0], m_i_id[1]]
+                / P_z[z_i]
             )
 
-            posterior_mi = self._CRF_elementwise(
-                z_future, x_future, m_i_id, Z=sampled_Z
-            )
+            entropy_posterior_mi = -p_0z * math.log2(p_0z) - p_1z * math.log2(p_1z)
 
-            entropy_posterior_mi = -posterior_mi[0] * math.log2(
-                posterior_mi[0]
-            ) - posterior_mi[1] * math.log2(posterior_mi[1])
-
-            expected_entropy += (
-                self.uav.prob_future_observation(
-                    x_future,
-                    z_future,
-                )
-                * entropy_posterior_mi
-            )
+            expected_entropy += P_z[z_i] * entropy_posterior_mi
         return expected_entropy
 
     def select_action(self, strategy="ig"):
@@ -223,3 +212,17 @@ class planning:
 
     def get_last_observation(self):
         return self.last_observation
+
+    def observation_prob(self, m_i_id, x_future):
+        P_z_zero = 0
+        # p(z = 0) = p(z = 0|m = 0)p(m = 0) + p(z = 0|m = 1)p(m = 1)
+
+        P_z_zero = (
+            self.uav.sensor_model(0, 0, x_future)
+            * self.M.probability[0, m_i_id[0], m_i_id[1]]
+            + self.uav.sensor_model(1, 0, x_future)
+            * self.M.probability[1, m_i_id[0], m_i_id[1]]
+        )
+        # p(z = 1) = 1 - p(z = 0)
+        P_z = [P_z_zero, 1 - P_z_zero]
+        return P_z

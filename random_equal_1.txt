@@ -1,0 +1,33 @@
+Strategy: random
+Pairwise: equal
+N agents: 1
+Grid info: range: 0-20-20, cell_size:0.25, map shape: (80, 80) 
+init UAV position: (0, 0) - 5.4 
+Step   Entropy    MSE      Height   Coverage  
+------------------------------------------------
+0      6312.79    0.4705   5.4      0.0225    
+actions: ['hover']
+1      6283.52    0.4697   5.4      0.0225    
+actions: ['hover', 'up']
+2      6086.16    0.4648   10.8     0.0977    
+actions: ['hover', 'up', 'up']
+3      5824.58    0.3841   16.2     0.2139    
+actions: ['hover', 'up', 'up', 'up']
+4      5543.13    0.3008   21.6     0.3906    
+actions: ['hover', 'up', 'up', 'up', 'front']
+5      5243.3     0.3003   21.6     0.4844    
+actions: ['hover', 'up', 'up', 'up', 'front', 'up']
+6      4970.87    0.313    27.0     0.7169    
+actions: ['hover', 'up', 'up', 'up', 'front', 'up', 'back']
+7      4800.38    0.2927   27.0     0.7169    
+actions: ['hover', 'up', 'up', 'up', 'front', 'up', 'back', 'right']
+8      4560.17    0.2802   27.0     0.8331    
+actions: ['hover', 'up', 'up', 'up', 'front', 'up', 'back', 'right', 'up']
+9      4398.29    0.2583   32.4     0.9375    
+actions: ['hover', 'up', 'up', 'up', 'front', 'up', 'back', 'right', 'up', 'front']
+10     4237.08    0.228    32.4     1.0       
+actions: ['hover', 'up', 'up', 'up', 'front', 'up', 'back', 'right', 'up', 'front', 'left']
+11     4096.56    0.2211   32.4     1.0       
+actions: ['hover', 'up', 'up', 'up', 'front', 'up', 'back', 'right', 'up', 'front', 'left', 'hover']
+12     3963.1     0.2064   32.4     1.0       
+actions: ['hover', 'up', 'up', 'up', 'front', 'up', 'back', 'right', 'up', 'front', 'left', 'hover', 'down']
