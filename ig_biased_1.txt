@@ -1,0 +1,23 @@
+Strategy: ig
+Pairwise: biased
+N agents: 1
+Grid info: range: 0-50-50, cell_size:0.5, map shape: (100, 100) 
+init UAV position: (0, 0) - 5.4 
+Step   Entropy    MSE      Height   Coverage  
+------------------------------------------------
+0      9978.2     0.6214   5.4      0.0036    
+actions: ['up']
+1      9943.28    0.619    10.8     0.0144    
+actions: ['up', 'up']
+2      9892.56    0.6152   16.2     0.0361    
+actions: ['up', 'up', 'front']
+3      9844.51    0.6146   16.2     0.0475    
+actions: ['up', 'up', 'front', 'right']
+4      9781.0     0.6125   16.2     0.0625    
+actions: ['up', 'up', 'front', 'right', 'front']
+5      9696.98    0.6125   16.2     0.0775    
+actions: ['up', 'up', 'front', 'right', 'front', 'right']
+6      9618.78    0.6111   16.2     0.0961    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'right']
+7      9527.08    0.6094   16.2     0.1147    
+actions: ['up', 'up', 'front', 'right', 'front', 'right', 'right', 'front']

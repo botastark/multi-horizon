@@ -126,42 +126,6 @@ class camera:
         z.map = sample_event_matrix(z.probability)
         return z
 
-    def sample_observation_future(self, sampled_M, x=None):
-        if x == None:
-            x = uav_position((self.position, self.altitude))
-
-        # creating z as a terrain object, disregard z_ as we use it just to create a map
-        z = sampled_M.copy()
-        z_, z_x, z_y = self.get_observation(
-            z.map, position=x.position, altitude=x.altitude
-        )
-
-        z.set_map(z_, x=z_x, y=z_y)
-        z.probability = np.zeros((z.probability.shape))
-        for z_i_id in z:
-            m_i_id = id_converter(z, z_i_id, sampled_M)
-            expected_z = 0
-
-            for z_i in [0, 1]:
-                P_obs_z_i = 0
-                for m_i in [0, 1]:
-                    P_obs_z_i += (
-                        self.sensor_model(m_i, z_i, x)
-                        * sampled_M.probability[m_i, m_i_id[0], m_i_id[1]]
-                    )
-                expected_z += z_i * P_obs_z_i
-                z.probability[z_i, z_i_id[0], z_i_id[1]] = P_obs_z_i
-            z.map[z_i_id] = expected_z
-
-            # z.probability[z_i, z_i_id[0], z_i_id[1]] += (
-            #     self.sensor_model(m_i, z_i, x)
-            #     * sampled_M.probability[m_i, m_i_id[0], m_i_id[1]]
-            # )
-
-        # z.map = argmax_event_matrix(z.probability)
-        # z.map = sample_event_matrix(z.probability)
-        return z
-
     def sample_observation_genmex(self, sampled_M, x=None):
         if x == None:
             x = uav_position((self.position, self.altitude))
@@ -205,40 +169,6 @@ class camera:
 
     def grid2pos(self, coords):
         return coords[0] * self.grid.length, coords[1] * self.grid.length
-
-    def _count_possible_states(self):
-        count = 1  # hover
-        if self.altitude + self.h_step <= self.h_range[1]:  # up
-            count += 1
-        if self.altitude - self.h_step >= self.h_range[0]:  # down
-            count += 1
-        if self.position[1] + self.xy_step <= self.y_range[1]:  # front (+y)
-            count += 1
-        if self.position[1] - self.xy_step <= self.y_range[0]:  # back (-y)
-            count += 1
-        if self.position[0] + self.xy_step <= self.x_range[1]:  # right (+x)
-            count += 1
-        if self.position[0] - self.xy_step <= self.x_range[0]:  # left (-x)
-            count += 1
-        return count
-
-    def prob_future_observation(self, x_future, z_future):
-        # if z_future is observable from x_future
-        # get x, y bbox of terrain cell visibale from x_future
-        # if z_future(i.e m_i coordinates are within that range, P(z_{t+1}|x_{t+1}) = 1, and otherwise, 0)
-        [[x_min_id, x_max_id], [y_min_id, y_max_id]] = self.get_range(
-            position=x_future.position, altitude=x_future.altitude, index_form=True
-        )
-        x_min_, x_max_ = self.grid2pos((x_min_id, x_max_id + 1))
-        y_min_, y_max_ = self.grid2pos((y_min_id, y_max_id + 1))
-        if x_min_ <= z_future.x <= x_max_:
-            if y_min_ <= z_future.y <= y_max_:
-                return z_future.probability
-            else:
-                raise TypeError("check prob_future_observation y out of range")
-        else:
-            raise TypeError("check prob_future_observation: x out of range")
-        return 0
 
     def x_future(self, action):
         # possible_actions = {"up", "down", "front", "back", "left", "right", "hover"}

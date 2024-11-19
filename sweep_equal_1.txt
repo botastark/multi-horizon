@@ -1,0 +1,59 @@
+Strategy: sweep
+Pairwise: equal
+N agents: 1
+Grid info: range: 0-50-50, cell_size:1, map shape: (50, 50) 
+init UAV position: (0, 0) - 5.4 
+Step   Entropy    MSE      Height   Coverage  
+------------------------------------------------
+0      2494.55    0.5116   5.4      0.0036    
+actions: ['up']
+1      2482.23    0.512    10.8     0.0144    
+actions: ['up', 'up']
+2      2468.4     0.5016   16.2     0.0324    
+actions: ['up', 'up', 'up']
+3      2452.69    0.4868   21.6     0.0576    
+actions: ['up', 'up', 'up', 'right']
+4      2431.52    0.4876   21.6     0.072     
+actions: ['up', 'up', 'up', 'right', 'right']
+5      2410.1     0.482    21.6     0.0864    
+actions: ['up', 'up', 'up', 'right', 'right', 'right']
+6      2387.34    0.484    21.6     0.1008    
+actions: ['up', 'up', 'up', 'right', 'right', 'right', 'right']
+7      2359.46    0.4804   21.6     0.1152    
+actions: ['up', 'up', 'up', 'right', 'right', 'right', 'right', 'right']
+8      2331.15    0.4784   21.6     0.1296    
+actions: ['up', 'up', 'up', 'right', 'right', 'right', 'right', 'right', 'right']
+9      2309.66    0.4792   21.6     0.144     
+actions: ['up', 'up', 'up', 'right', 'right', 'right', 'right', 'right', 'right', 'right']
+10     2282.82    0.4736   21.6     0.1584    
+actions: ['up', 'up', 'up', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right']
+11     2258.28    0.47     21.6     0.1728    
+actions: ['up', 'up', 'up', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right']
+12     2235.66    0.466    21.6     0.1872    
+actions: ['up', 'up', 'up', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right']
+13     2210.84    0.4656   21.6     0.2016    
+actions: ['up', 'up', 'up', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right']
+14     2182.34    0.4616   21.6     0.216     
+actions: ['up', 'up', 'up', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right']
+15     2155.42    0.458    21.6     0.2304    
+actions: ['up', 'up', 'up', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right']
+16     2126.5     0.4548   21.6     0.24      
+actions: ['up', 'up', 'up', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right']
+17     2110.68    0.4516   21.6     0.24      
+actions: ['up', 'up', 'up', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right']
+18     2099.98    0.4528   21.6     0.24      
+actions: ['up', 'up', 'up', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right']
+19     2087.08    0.4512   21.6     0.24      
+actions: ['up', 'up', 'up', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front']
+20     2073.26    0.4376   21.6     0.2568    
+actions: ['up', 'up', 'up', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'left']
+21     2057.68    0.4392   21.6     0.2604    
+actions: ['up', 'up', 'up', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'left', 'left']
+22     2043.47    0.4336   21.6     0.264     
+actions: ['up', 'up', 'up', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'left', 'left', 'left']
+23     2029.29    0.4344   21.6     0.2676    
+actions: ['up', 'up', 'up', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'left', 'left', 'left', 'left']
+24     2014.67    0.4336   21.6     0.2712    
+actions: ['up', 'up', 'up', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'left', 'left', 'left', 'left', 'left']
+25     2004.0     0.43     21.6     0.2748    
+actions: ['up', 'up', 'up', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'left', 'left', 'left', 'left', 'left', 'left']

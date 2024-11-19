@@ -263,13 +263,13 @@ class terrain:
         # # Add text annotations for the first probability map
         for (i, j), prob in np.ndenumerate(probability_map_0.T):
             ax.text(
-                j,
-                i,
+                self.y[i, j] + self.grid.length / 4,
+                self.x[i, j] + self.grid.length / 4,
                 f"{prob:.2f}",
-                ha="left",
-                va="bottom",
+                ha="center",
+                va="center",
                 color="black",
-                fontsize=15,
+                fontsize=10,
             )
 
         ax.set_title("Probability Map 0")
