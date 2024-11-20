@@ -1,12 +1,15 @@
 import numpy as np
 import math
+from helper import adaptive_weights_matrix
+
 
 class OccupancyMap:
     def __init__(self, n_cells):
         self.N = n_cells  # Grid size (100x100)
         self.states = [0, 1]  # Possible states
-         # Initialize local evidence (uniform belief)
+        # Initialize local evidence (uniform belief)
         self.phi = np.full((self.N, self.N, 2), 0.5)  # 2 states: [0, 1]
+        self.last_observations = np.array([])
         # Initialize messages (for each edge, uniform message)
         self.messages = {}
         for i in range(self.N):
@@ -27,6 +30,7 @@ class OccupancyMap:
             )  # Get the probability of observing the true state value at this altitude
         else:
             return sigma
+
     def local_evidence(self, z, x):
         """
         Compute local evidence phi(X_i) for a given cell based on observation z and error sigma.
@@ -39,14 +43,20 @@ class OccupancyMap:
             A list [P(free), P(occupied)] representing the local evidence for the cell.
         """
         if z == 0:
-            return [self.sensor_model(0, 0, x), self.sensor_model(0, 1, x)]  # [P(z=0|m=0), P(z=0|m=1)]
+            return [
+                self.sensor_model(0, 0, x),
+                self.sensor_model(0, 1, x),
+            ]  # [P(z=0|m=0), P(z=0|m=1)]
         elif z == 1:
-            return [self.sensor_model(1, 0, x), self.sensor_model(1, 1, x)]   # [P(z=1|m=0), P(z=1|m=1)]
+            return [
+                self.sensor_model(1, 0, x),
+                self.sensor_model(1, 1, x),
+            ]  # [P(z=1|m=0), P(z=1|m=1)]
         else:
             return [0.5, 0.5]  # Default uniform prior if no observation
 
     # Pairwise potential function
-    def pairwise_potential(self, i, j, ni, nj, correlation=None):
+    def pairwise_potential(self, correlation_type=None):
         """
         Compute pairwise potential psi(X_i, X_j) for neighboring cells.
         Options:
@@ -54,22 +64,15 @@ class OccupancyMap:
             - Biased: Fixed (0.7, 0.3).
             - Adaptive: Based on a metric like Pearson correlation.
         """
-        if correlation == "equal":
+        if correlation_type == "equal":
             # Default: Uniform potential
             return np.array([[0.5, 0.5], [0.5, 0.5]])
-        elif correlation == "biased":
+        elif correlation_type == "biased":
             # Fixed bias
             return np.array([[0.7, 0.3], [0.3, 0.7]])
         else:
-            # Adaptive: Example with Pearson correlation coefficient
-            # Normalize correlation to [0.3, 0.7] range
-            adaptive_value = 0.5 + 0.2 * correlation
-            return np.array(
-                [
-                    [adaptive_value, 1 - adaptive_value],
-                    [1 - adaptive_value, adaptive_value],
-                ]
-            )
+            # Adaptive: Pearson correlation coefficient
+            return np.array(adaptive_weights_matrix(self.last_observations))
 
     # Update observations
     def update_observations(self, observations, uav_pos, marginals):
@@ -77,43 +80,38 @@ class OccupancyMap:
         Update local evidence phi based on observations.
         observations: List of tuples (i, j, {'free': p_free, 'occupied': p_occupied}).
         """
+        self.last_observations = observations
         for i, j, obs in observations:
             # self.phi[i, j] = self.local_evidence(obs, uav_pos)
-            # for i, j, z in observations:
 
             # # Get local evidence for this observation
             local_evidence = self.local_evidence(obs, uav_pos)  # [P(free), P(occupied)]
-            
+
             # # Fuse with prior belief
             # prior_belief = self.phi[i, j]
-            # fused_belief = prior_belief * local_evidence  # Element-wise multiplication
-            
-            # # Normalize to ensure it's a valid probability distribution
-            # fused_belief /= np.sum(fused_belief)
-            
-            # # Update phi with the fused belief
-            # self.phi[i, j] = fused_belief
-                # Use current marginals as the prior
+
+            # Use current marginals as the prior
             prior_belief = marginals[i, j]
-            
+
             # Fuse the prior belief with the new local evidence
             fused_belief = prior_belief * local_evidence  # Element-wise multiplication
-            
+
             # Normalize to ensure it's a valid probability distribution
             fused_belief /= np.sum(fused_belief)
-            
+
             # Update phi with the fused belief
             self.phi[i, j] = fused_belief
 
-        
+    def set_last_observations(self, submap):
+        self.last_observations = np.array(submap)
 
-    def propagate_messages(self, max_iterations=5, correlation=None):
+    def propagate_messages(self, max_iterations=5, correlation_type=None):
         """
         Perform loopy belief propagation to update messages.
 
         Parameters:
             max_iterations: Number of iterations to perform.
-            correlation: Optional metric for adaptive pairwise potentials.
+            correlation_type:  for pairwise potentials.
 
         Returns:
             Updated messages.
@@ -133,8 +131,8 @@ class OccupancyMap:
                 prod_incoming = np.prod(incoming_messages, axis=0)
 
                 # Pairwise potential
-                psi = self.pairwise_potential(i, j, ni, nj, correlation)
-
+                psi = self.pairwise_potential(correlation_type)
+                # print(psi)
                 # Compute new message
                 new_message = np.dot(self.phi[i, j] * prod_incoming, psi)
                 new_message /= np.sum(new_message)  # Normalize
@@ -144,10 +142,8 @@ class OccupancyMap:
     def marginalize(self):
         """
         Compute marginals for each cell.
-
         Returns:
             Marginals array of shape (N, N, 2).
-
         """
         marginals = np.zeros((self.N, self.N, 2))
         for i in range(self.N):
@@ -161,6 +157,8 @@ class OccupancyMap:
                 marginals[i, j] = self.phi[i, j] * prod_incoming
                 marginals[i, j] /= np.sum(marginals[i, j])  # Normalize
         return marginals
+
+
 def get_range(uav_pos, grid, index_form=False):
     """
     calculates indices of camera footprints (part of terrain (therefore terrain indices) seen by camera at a given UAV pos and alt)
@@ -192,7 +190,9 @@ def get_range(uav_pos, grid, index_form=False):
 
 
 def get_observations(grid_info, ground_truth_map, uav_pos):
-    [[x_min_id, x_max_id], [y_min_id, y_max_id]] = get_range(uav_pos, grid_info, index_form=True)
+    [[x_min_id, x_max_id], [y_min_id, y_max_id]] = get_range(
+        uav_pos, grid_info, index_form=True
+    )
     submap = ground_truth_map[x_min_id:x_max_id, y_min_id:y_max_id]
     # print(submap)
     # print(f"[ {x_min_id}, {x_max_id}], [{y_min_id}, {y_max_id}] ")
@@ -202,4 +202,4 @@ def get_observations(grid_info, ground_truth_map, uav_pos):
         for i in range(submap.shape[0])
         for j in range(submap.shape[1])
     ]
-    return observations
+    return submap, observations
