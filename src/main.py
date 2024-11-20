@@ -7,7 +7,8 @@ from helper import (
     compute_mse,
 )
 from terrain_creation import (
-    gen_fast,
+    # gen_fast,
+    gaussian_random_field,
     terrain,
 )
 from uav_camera import camera
@@ -36,7 +37,8 @@ camera = camera(grid_info, camera_params.fov_angle)
 
 # Ground truth map with n gaussian peaks
 true_map = terrain(grid_info)
-true_map.set_map(gen_fast(true_map, 5))
+# true_map.set_map(gen_fast(true_map, 5))
+true_map.set_map(gaussian_random_field(5, grid_info.shape[0]))
 
 x = uav_position(((0, 0), 5.4))
 
