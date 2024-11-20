@@ -66,6 +66,19 @@ def adaptive_weights(m_i, m_j, obs_map):
         return exp / (1 + exp)
 
 
+def adaptive_weights_matrix(obs_map):
+    d_sampled = collect_sample_set(obs_map)
+    p = pearson_correlation_coeff(d_sampled)
+    exp = np.exp(-p)
+    psi = np.array(
+        [
+            [1 / (1 + exp), exp / (1 + exp)],  # For (m_i=0, m_j=0) and (m_i=0, m_j=1)
+            [exp / (1 + exp), 1 / (1 + exp)],  # For (m_i=1, m_j=0) and (m_i=1, m_j=1)
+        ]
+    )
+    return psi
+
+
 def pairwise_factor_(m_i, m_j, obs_map=[], type="equal"):
     if type == "equal":
         return 0.5
