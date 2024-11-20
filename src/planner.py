@@ -63,7 +63,7 @@ class planning:
         posterior_mi_given_s = []
         for m_i in range(self.M.probability.shape[0]):  # m_i=0 and m_i=1
             pairwise_product = 1
-            evidence_factors = self.uav.sensor_model(m_i, z_future.z, x_future)
+            evidence_factors = self.uav.sensor_model( z_future.z, m_i,  x_future)
             edges = get_neighbors(self.M.map, m_i_pos)
 
             for m_j_pos in edges:

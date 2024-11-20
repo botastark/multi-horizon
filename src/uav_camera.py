@@ -94,7 +94,7 @@ class camera:
         x, y = np.meshgrid(x, y, indexing="ij")
         return submap, x, y
 
-    def sensor_model(self, m_i, z_i, x):
+    def sensor_model(self, z_i, m_i, x):
         sigma = self.a * (1 - np.exp(-self.b * x.altitude))
         if z_i == m_i:
             return (
