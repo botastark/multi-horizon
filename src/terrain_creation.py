@@ -1,3 +1,4 @@
+from typing import List
 from matplotlib import colors
 import matplotlib.pyplot as plt
 import numpy as np
@@ -284,26 +285,70 @@ class terrain:
         plt.close(fig)
 
 
-import gstools as gs
+# import gstools as gs
 
 
-def gen_fast(map, radius):
-    xx, yy = map.get_grid()
-    x = xx[:, 0]
-    y = yy[0, :]
+# def gen_fast(map, radius):
+#     xx, yy = map.get_grid()
+#     x = xx[:, 0]
+#     y = yy[0, :]
 
-    seed = 20170519
-    if radius == 0.0:
-        radius += 0.001
-    model = gs.Gaussian(
-        dim=2,
-        len_scale=radius,
+#     seed = 20170519
+#     if radius == 0.0:
+#         radius += 0.001
+#     model = gs.Gaussian(
+#         dim=2,
+#         len_scale=radius,
+#     )
+
+#     srf = gs.SRF(model, seed=seed)
+
+#     srf.structured([x, y])
+#     z = srf.transform("binary")
+#     z = np.where(z == -1.0, 0.0, z)
+
+#     return z
+def gaussian_random_field(cluster_radius, n_cell):
+
+    """Generate 2D gaussian random field:
+    https://andrewwalker.github.io/statefultransitions/post/gaussian-fields/"""
+
+    def _fft_indices(n) -> List:
+        a = list(range(0, int(np.floor(n / 2)) + 1))
+        b = reversed(range(1, int(np.floor(n / 2))))
+        b = [-i for i in b]
+        return a + b
+
+    def _pk2(kx, ky):
+        if kx == 0 and ky == 0:
+            return 0.0
+        val = np.sqrt(np.sqrt(kx ** 2 + ky ** 2) ** (-cluster_radius))
+        return val
+
+    # memoization of amplitude (amplitude depends on n_cell, fft_indices, cluster_radius)
+    # there is a one-to-one mapping between cluster_radius and amplitude
+    # for each cluster_radius, what makes the maps different is just the noise
+    # if cluster_radius not in self.cluster_radius_to_amplitude:
+    cluster_radius_to_amplitude = {}
+    map_rng = np.random.default_rng(123)
+    amplitude = np.zeros((n_cell, n_cell))
+    fft_indices = _fft_indices(n_cell)
+
+    for i, kx in enumerate(fft_indices):
+        for j, ky in enumerate(fft_indices):
+            amplitude[i, j] = _pk2(kx, ky)
+
+
+        cluster_radius_to_amplitude[cluster_radius] = np.copy(amplitude)
+
+    noise = np.fft.fft2(map_rng.normal(size=(n_cell, n_cell)))
+    random_field = np.fft.ifft2(noise * cluster_radius_to_amplitude[cluster_radius]).real
+    normalized_random_field = (random_field - np.min(random_field)) / (
+            np.max(random_field) - np.min(random_field)
     )
 
-    srf = gs.SRF(model, seed=seed)
+    # Make field binary
+    normalized_random_field[normalized_random_field >= 0.5] = 1
+    normalized_random_field[normalized_random_field < 0.5] = 0
 
-    srf.structured([x, y])
-    z = srf.transform("binary")
-    z = np.where(z == -1.0, 0.0, z)
-
-    return z
+    return normalized_random_field.astype(np.uint8)

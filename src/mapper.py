@@ -1,11 +1,11 @@
-from typing import List
 import numpy as np
 from helper import uav_position
-import math 
+import math
+
+from terrain_creation import gaussian_random_field 
 
 class OccupancyMap:
     def __init__(self, n_cells):
-        # Grid dimensions
         self.N = n_cells  # Grid size (100x100)
         self.states = [0, 1]  # Possible states
          # Initialize local evidence (uniform belief)
@@ -167,53 +167,6 @@ def get_range(uav_pos, grid, index_form=False):
     return [[x_min, x_max], [y_min, y_max]]
 
 
-
-def gaussian_random_field(cluster_radius, n_cell):
-
-    """Generate 2D gaussian random field:
-    https://andrewwalker.github.io/statefultransitions/post/gaussian-fields/"""
-
-    def _fft_indices(n) -> List:
-        a = list(range(0, int(np.floor(n / 2)) + 1))
-        b = reversed(range(1, int(np.floor(n / 2))))
-        b = [-i for i in b]
-        return a + b
-
-    def _pk2(kx, ky):
-        if kx == 0 and ky == 0:
-            return 0.0
-        val = np.sqrt(np.sqrt(kx ** 2 + ky ** 2) ** (-cluster_radius))
-        return val
-
-    # memoization of amplitude (amplitude depends on n_cell, fft_indices, cluster_radius)
-    # there is a one-to-one mapping between cluster_radius and amplitude
-    # for each cluster_radius, what makes the maps different is just the noise
-    # if cluster_radius not in self.cluster_radius_to_amplitude:
-    cluster_radius_to_amplitude = {}
-    map_rng = np.random.default_rng(123)
-    amplitude = np.zeros((n_cell, n_cell))
-    fft_indices = _fft_indices(n_cell)
-
-    for i, kx in enumerate(fft_indices):
-        for j, ky in enumerate(fft_indices):
-            amplitude[i, j] = _pk2(kx, ky)
-
-
-        cluster_radius_to_amplitude[cluster_radius] = np.copy(amplitude)
-
-    noise = np.fft.fft2(map_rng.normal(size=(n_cell, n_cell)))
-    random_field = np.fft.ifft2(noise * cluster_radius_to_amplitude[cluster_radius]).real
-    normalized_random_field = (random_field - np.min(random_field)) / (
-            np.max(random_field) - np.min(random_field)
-    )
-
-    # Make field binary
-    normalized_random_field[normalized_random_field >= 0.5] = 1
-    normalized_random_field[normalized_random_field < 0.5] = 0
-
-    return normalized_random_field.astype(np.uint8)
-
-
 class grid_info:
     x = 21
     y = 21
@@ -221,7 +174,7 @@ class grid_info:
     shape = (int(x / length), int(y / length))
 
 ground_truth_map = gaussian_random_field(4, grid_info.shape[0])
-belief_map = OccupancyMap(grid_info.shape[0])
+mapper = OccupancyMap(grid_info.shape[0])
 
 # class camera_params:
 #     fov_angle = 60
@@ -229,34 +182,20 @@ x = uav_position(((5, 5), 10.2))
 
 [[x_min_id, x_max_id], [y_min_id, y_max_id]] = get_range(x, grid_info, index_form=True)
 submap = ground_truth_map[x_min_id:x_max_id, y_min_id:y_max_id]
-print(submap)
-print(f"[ {x_min_id}, {x_max_id}], [{y_min_id}, {y_max_id}] ")
+# print(submap)
+# print(f"[ {x_min_id}, {x_max_id}], [{y_min_id}, {y_max_id}] ")
 
 observations = [
     (x_min_id + i, y_min_id + j, submap[i, j])  # Global indices with binary state
     for i in range(submap.shape[0])
     for j in range(submap.shape[1])
 ]
-belief_map.update_observations(observations, x)
-belief_map.propagate_messages(max_iterations=5, correlation="equal")
-marginals = belief_map.marginalize()
+mapper.update_observations(observations, x)
+mapper.propagate_messages(max_iterations=5, correlation="equal")
+marginals = mapper.marginalize()
+print(marginals.shape)
+
 print("Marginal at (0, 3):", marginals[0, 2])
 
 print("Probability of occupied at (10, 10):", marginals[10, 10, 1])
 print("Probability of occupied at (10, 20):", marginals[10, 20, 1])
-
-# observations = [
-#     (10, 10, 0),
-#     # (20, 20, 0),
-# ]
-
-# 
-
-# print("after change ")
-# map1.update_observations(observations, x)
-# map1.propagate_messages(max_iterations=5, correlation="equal")
-# marginals = map1.marginalize()
-# print("Marginal at (10, 10):", marginals[10, 10])
-
-# print("Probability of occupied at (10, 10):", marginals[10, 10, 1])
-# print("Probability of occupied at (10, 20):", marginals[10, 20, 1])
