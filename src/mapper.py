@@ -1,10 +1,12 @@
+from typing import List
 import numpy as np
 from helper import uav_position
+import math 
 
 class OccupancyMap:
-    def __init__(self):
+    def __init__(self, n_cells):
         # Grid dimensions
-        self.N = 100  # Grid size (100x100)
+        self.N = n_cells  # Grid size (100x100)
         self.states = [0, 1]  # Possible states
          # Initialize local evidence (uniform belief)
         self.phi = np.full((self.N, self.N, 2), 0.5)  # 2 states: [0, 1]
@@ -121,6 +123,7 @@ class OccupancyMap:
 
         Returns:
             Marginals array of shape (N, N, 2).
+
         """
         marginals = np.zeros((self.N, self.N, 2))
         for i in range(self.N):
@@ -134,46 +137,126 @@ class OccupancyMap:
                 marginals[i, j] = self.phi[i, j] * prod_incoming
                 marginals[i, j] /= np.sum(marginals[i, j])  # Normalize
         return marginals
+def get_range(uav_pos, grid, index_form=False):
+    """
+    calculates indices of camera footprints (part of terrain (therefore terrain indices) seen by camera at a given UAV pos and alt)
+    """
+    # position = position if position is not None else self.position
+    # altitude = altitude if altitude is not None else self.altitude
+    fov = 60
+    x_angle = fov / 2  # degree
+    y_angle = fov / 2  # degree
+    x_dist = uav_pos.altitude * math.tan(x_angle / 180 * 3.14)
+    y_dist = uav_pos.altitude * math.tan(y_angle / 180 * 3.14)
+
+    # adjust func: for smaller square ->int() and for larger-> round()
+    x_dist = round(x_dist / grid.length) * grid.length
+    y_dist = round(y_dist / grid.length) * grid.length
+    # Trim if out of scope (out of the map)
+    x_min = max(uav_pos.position[0] - x_dist, 0.0)
+    x_max = min(uav_pos.position[0] + x_dist, grid.x)
+
+    y_min = max(uav_pos.position[1] - y_dist, 0.0)
+    y_max = min(uav_pos.position[1] + y_dist, grid.y)
+    if index_form:  # return as indix range
+        return [
+            [round(x_min / grid.length), round(x_max / grid.length)],
+            [round(y_min / grid.length), round(y_max / grid.length)],
+        ]
+
+    return [[x_min, x_max], [y_min, y_max]]
 
 
-grid = OccupancyMap()
+
+def gaussian_random_field(cluster_radius, n_cell):
+
+    """Generate 2D gaussian random field:
+    https://andrewwalker.github.io/statefultransitions/post/gaussian-fields/"""
+
+    def _fft_indices(n) -> List:
+        a = list(range(0, int(np.floor(n / 2)) + 1))
+        b = reversed(range(1, int(np.floor(n / 2))))
+        b = [-i for i in b]
+        return a + b
+
+    def _pk2(kx, ky):
+        if kx == 0 and ky == 0:
+            return 0.0
+        val = np.sqrt(np.sqrt(kx ** 2 + ky ** 2) ** (-cluster_radius))
+        return val
+
+    # memoization of amplitude (amplitude depends on n_cell, fft_indices, cluster_radius)
+    # there is a one-to-one mapping between cluster_radius and amplitude
+    # for each cluster_radius, what makes the maps different is just the noise
+    # if cluster_radius not in self.cluster_radius_to_amplitude:
+    cluster_radius_to_amplitude = {}
+    map_rng = np.random.default_rng(123)
+    amplitude = np.zeros((n_cell, n_cell))
+    fft_indices = _fft_indices(n_cell)
+
+    for i, kx in enumerate(fft_indices):
+        for j, ky in enumerate(fft_indices):
+            amplitude[i, j] = _pk2(kx, ky)
+
+
+        cluster_radius_to_amplitude[cluster_radius] = np.copy(amplitude)
+
+    noise = np.fft.fft2(map_rng.normal(size=(n_cell, n_cell)))
+    random_field = np.fft.ifft2(noise * cluster_radius_to_amplitude[cluster_radius]).real
+    normalized_random_field = (random_field - np.min(random_field)) / (
+            np.max(random_field) - np.min(random_field)
+    )
+
+    # Make field binary
+    normalized_random_field[normalized_random_field >= 0.5] = 1
+    normalized_random_field[normalized_random_field < 0.5] = 0
+
+    return normalized_random_field.astype(np.uint8)
 
 
 class grid_info:
-    x = 20
-    y = 20
-    length = 0.25
+    x = 21
+    y = 21
+    length = 1
     shape = (int(x / length), int(y / length))
 
+ground_truth_map = gaussian_random_field(4, grid_info.shape[0])
+belief_map = OccupancyMap(grid_info.shape[0])
 
-class camera_params:
-    fov_angle = 60
+# class camera_params:
+#     fov_angle = 60
+x = uav_position(((5, 5), 10.2))
 
-
-x = uav_position(((0, 0), 5.2))
-
+[[x_min_id, x_max_id], [y_min_id, y_max_id]] = get_range(x, grid_info, index_form=True)
+submap = ground_truth_map[x_min_id:x_max_id, y_min_id:y_max_id]
+print(submap)
+print(f"[ {x_min_id}, {x_max_id}], [{y_min_id}, {y_max_id}] ")
 
 observations = [
-    (10, 10, 1),
-    (20, 20, 0),
+    (x_min_id + i, y_min_id + j, submap[i, j])  # Global indices with binary state
+    for i in range(submap.shape[0])
+    for j in range(submap.shape[1])
 ]
-grid.update_observations(observations, x)
-grid.propagate_messages(max_iterations=5, correlation="equal")
-marginals = grid.marginalize()
-print("Marginal at (10, 10):", marginals[10, 10])
+belief_map.update_observations(observations, x)
+belief_map.propagate_messages(max_iterations=5, correlation="equal")
+marginals = belief_map.marginalize()
+print("Marginal at (0, 3):", marginals[0, 2])
 
 print("Probability of occupied at (10, 10):", marginals[10, 10, 1])
 print("Probability of occupied at (10, 20):", marginals[10, 20, 1])
 
-observations = [
-    (10, 10, 0),
-    # (20, 20, 0),
-]
-print("after shange ")
-grid.update_observations(observations, x)
-grid.propagate_messages(max_iterations=5, correlation="equal")
-marginals = grid.marginalize()
-print("Marginal at (10, 10):", marginals[10, 10])
+# observations = [
+#     (10, 10, 0),
+#     # (20, 20, 0),
+# ]
 
-print("Probability of occupied at (10, 10):", marginals[10, 10, 1])
-print("Probability of occupied at (10, 20):", marginals[10, 20, 1])
+# 
+
+# print("after change ")
+# map1.update_observations(observations, x)
+# map1.propagate_messages(max_iterations=5, correlation="equal")
+# marginals = map1.marginalize()
+# print("Marginal at (10, 10):", marginals[10, 10])
+
+# print("Probability of occupied at (10, 10):", marginals[10, 10, 1])
+# print("Probability of occupied at (10, 20):", marginals[10, 20, 1])
