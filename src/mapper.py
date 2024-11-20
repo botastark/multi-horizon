@@ -1,8 +1,5 @@
 import numpy as np
-from helper import uav_position
 import math
-
-from terrain_creation import gaussian_random_field 
 
 class OccupancyMap:
     def __init__(self, n_cells):
@@ -75,13 +72,40 @@ class OccupancyMap:
             )
 
     # Update observations
-    def update_observations(self, observations, uav_pos):
+    def update_observations(self, observations, uav_pos, marginals):
         """
         Update local evidence phi based on observations.
         observations: List of tuples (i, j, {'free': p_free, 'occupied': p_occupied}).
         """
         for i, j, obs in observations:
-            self.phi[i, j] = self.local_evidence(obs, uav_pos)
+            # self.phi[i, j] = self.local_evidence(obs, uav_pos)
+            # for i, j, z in observations:
+
+            # # Get local evidence for this observation
+            local_evidence = self.local_evidence(obs, uav_pos)  # [P(free), P(occupied)]
+            
+            # # Fuse with prior belief
+            # prior_belief = self.phi[i, j]
+            # fused_belief = prior_belief * local_evidence  # Element-wise multiplication
+            
+            # # Normalize to ensure it's a valid probability distribution
+            # fused_belief /= np.sum(fused_belief)
+            
+            # # Update phi with the fused belief
+            # self.phi[i, j] = fused_belief
+                # Use current marginals as the prior
+            prior_belief = marginals[i, j]
+            
+            # Fuse the prior belief with the new local evidence
+            fused_belief = prior_belief * local_evidence  # Element-wise multiplication
+            
+            # Normalize to ensure it's a valid probability distribution
+            fused_belief /= np.sum(fused_belief)
+            
+            # Update phi with the fused belief
+            self.phi[i, j] = fused_belief
+
+        
 
     def propagate_messages(self, max_iterations=5, correlation=None):
         """
@@ -167,35 +191,15 @@ def get_range(uav_pos, grid, index_form=False):
     return [[x_min, x_max], [y_min, y_max]]
 
 
-class grid_info:
-    x = 21
-    y = 21
-    length = 1
-    shape = (int(x / length), int(y / length))
+def get_observations(grid_info, ground_truth_map, uav_pos):
+    [[x_min_id, x_max_id], [y_min_id, y_max_id]] = get_range(uav_pos, grid_info, index_form=True)
+    submap = ground_truth_map[x_min_id:x_max_id, y_min_id:y_max_id]
+    # print(submap)
+    # print(f"[ {x_min_id}, {x_max_id}], [{y_min_id}, {y_max_id}] ")
 
-ground_truth_map = gaussian_random_field(4, grid_info.shape[0])
-mapper = OccupancyMap(grid_info.shape[0])
-
-# class camera_params:
-#     fov_angle = 60
-x = uav_position(((5, 5), 10.2))
-
-[[x_min_id, x_max_id], [y_min_id, y_max_id]] = get_range(x, grid_info, index_form=True)
-submap = ground_truth_map[x_min_id:x_max_id, y_min_id:y_max_id]
-# print(submap)
-# print(f"[ {x_min_id}, {x_max_id}], [{y_min_id}, {y_max_id}] ")
-
-observations = [
-    (x_min_id + i, y_min_id + j, submap[i, j])  # Global indices with binary state
-    for i in range(submap.shape[0])
-    for j in range(submap.shape[1])
-]
-mapper.update_observations(observations, x)
-mapper.propagate_messages(max_iterations=5, correlation="equal")
-marginals = mapper.marginalize()
-print(marginals.shape)
-
-print("Marginal at (0, 3):", marginals[0, 2])
-
-print("Probability of occupied at (10, 10):", marginals[10, 10, 1])
-print("Probability of occupied at (10, 20):", marginals[10, 20, 1])
+    observations = [
+        (x_min_id + i, y_min_id + j, submap[i, j])  # Global indices with binary state
+        for i in range(submap.shape[0])
+        for j in range(submap.shape[1])
+    ]
+    return observations
