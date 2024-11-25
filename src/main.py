@@ -99,7 +99,7 @@ for step in range(n_step + 1):
         # current_z.plot_prob(desktop + str(step) + "_prob_z.png")
         filename = desktop + "step_" + str(step) + ".png"
         current_state.plot_prob(desktop + "_prob_step" + str(step) + ".png")
-        print(current_state.map)
+        # print(current_state.map)
         current_state.plot_terrain(filename, uav_positions, true_map, current_z)
 
 

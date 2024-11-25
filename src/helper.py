@@ -129,7 +129,7 @@ def get_neighbors(map, pos):
     return neighbors
 
 
-def observed_m_ids(uav=None, uav_pos=None, new_z=None, m_terrain=None):
+def observed_m_ids(uav=None, uav_pos=None, new_z=None, m_terrain=None, aslist=True):
 
     if new_z != None and m_terrain != None:
         [obsd_m_i_min, obsd_m_j_min] = id_converter(new_z, [0, 0], m_terrain)
@@ -144,12 +144,15 @@ def observed_m_ids(uav=None, uav_pos=None, new_z=None, m_terrain=None):
         )
     else:
         raise TypeError("Pass either z or uav_position")
+    if aslist:
 
-    observed_m = []
-    for i_b in range(obsd_m_i_min, obsd_m_i_max):
-        for j_b in range(obsd_m_j_min, obsd_m_j_max):
-            observed_m.append((i_b, j_b))
-    return observed_m
+        observed_m = []
+        for i_b in range(obsd_m_i_min, obsd_m_i_max):
+            for j_b in range(obsd_m_j_min, obsd_m_j_max):
+                observed_m.append((i_b, j_b))
+        return observed_m
+    else:
+        return [[obsd_m_i_min, obsd_m_i_max], [obsd_m_j_min, obsd_m_j_max]]
 
 
 def normalize_probabilities(current_probs):
