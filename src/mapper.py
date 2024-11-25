@@ -189,17 +189,65 @@ def get_range(uav_pos, grid, index_form=False):
     return [[x_min, x_max], [y_min, y_max]]
 
 
+# def get_observations(grid_info, ground_truth_map, uav_pos):
+#     [[x_min_id, x_max_id], [y_min_id, y_max_id]] = get_range(
+#         uav_pos, grid_info, index_form=True
+#     )
+#     submap = ground_truth_map[x_min_id:x_max_id, y_min_id:y_max_id]
+
+#     x = np.arange(
+#         x_min_id * grid_info.length, x_max_id * grid_info.length, grid_info.length
+#     )
+#     y = np.arange(
+#         y_min_id * grid_info.length, y_max_id * grid_info.length, grid_info.length
+#     )
+
+#     x, y = np.meshgrid(x, y, indexing="ij")
+
+#     observations = [
+#         (x_min_id + i, y_min_id + j, submap[i, j])  # Global indices with binary state
+#         for i in range(submap.shape[0])
+#         for j in range(submap.shape[1])
+#     ]
+
+#     return submap, observations
+
+
 def get_observations(grid_info, ground_truth_map, uav_pos):
     [[x_min_id, x_max_id], [y_min_id, y_max_id]] = get_range(
         uav_pos, grid_info, index_form=True
     )
     submap = ground_truth_map[x_min_id:x_max_id, y_min_id:y_max_id]
-    # print(submap)
-    # print(f"[ {x_min_id}, {x_max_id}], [{y_min_id}, {y_max_id}] ")
+
+    x = np.arange(
+        x_min_id * grid_info.length, x_max_id * grid_info.length, grid_info.length
+    )
+    y = np.arange(
+        y_min_id * grid_info.length, y_max_id * grid_info.length, grid_info.length
+    )
+
+    x, y = np.meshgrid(x, y, indexing="ij")
+
+    return x, y, submap
+
+
+def adapt_observations(x, y, submap, grid_info):
+    x_min_id = int(x[0, 0] / grid_info.length)
+    y_min_id = int(y[0, 0] / grid_info.length)
 
     observations = [
         (x_min_id + i, y_min_id + j, submap[i, j])  # Global indices with binary state
         for i in range(submap.shape[0])
         for j in range(submap.shape[1])
     ]
-    return submap, observations
+    return observations
+
+
+def adapt_observation(submap, x, y, grid_length):
+    x_min_id = x[0][0] / grid_length
+    y_min_id = y[0][0] / grid_length
+    observations = [
+        (x_min_id + i, y_min_id + j, submap[i, j])  # Global indices with binary state
+        for i in range(submap.shape[0])
+        for j in range(submap.shape[1])
+    ]

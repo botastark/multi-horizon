@@ -82,7 +82,11 @@ class terrain:
                     [0.5 * np.ones_like(self.map), 0.5 * np.ones_like(self.map)]
                 )
             else:
-                raise TypeError("Grid and Map sizes don't match and no grid is passed")
+                x = np.arange(0, z.shape[0], 1)
+                y = np.arange(0, z.shape[0], 1)
+                self.x, self.y = np.meshgrid(x, y, indexing="ij")
+                self.map = z
+                # raise TypeError("Grid and Map sizes don't match and no grid is passed")
 
     def __iter__(self):
         self._current = 0
@@ -306,14 +310,42 @@ class terrain:
 #     srf.structured([x, y])
 #     z = srf.transform("binary")
 #     z = np.where(z == -1.0, 0.0, z)
-
 #     return z
-def gaussian_random_field(cluster_radius, n_cell):
 
-    """Generate 2D gaussian random field:
-    https://andrewwalker.github.io/statefultransitions/post/gaussian-fields/"""
 
-    def _fft_indices(n) -> List:
+import os
+import pickle
+
+
+def gaussian_random_field(cluster_radius, n_cell, cache_dir="cache"):
+    """
+    Generate a 2D Gaussian random field and cache the results for reuse.
+     https://andrewwalker.github.io/statefultransitions/post/gaussian-fields/
+    Parameters:
+    - cluster_radius: Correlation radius for the Gaussian field.
+    - n_cell: Size of the field (n_cell x n_cell).
+    - cache_dir: Directory to store cached fields (default: "cache").
+
+    Returns:
+    - 2D binary random field as a numpy array.
+    """
+
+    # Ensure cache directory exists
+    os.makedirs(cache_dir, exist_ok=True)
+
+    # Generate cache filename
+    cache_file = os.path.join(
+        cache_dir, f"field_radius_{cluster_radius}_size_{n_cell}.pkl"
+    )
+
+    # Try loading from cache
+    if os.path.exists(cache_file):
+        with open(cache_file, "rb") as f:
+            print(f"Loading cached field from {cache_file}")
+            return pickle.load(f)
+
+    # Helper functions
+    def _fft_indices(n):
         a = list(range(0, int(np.floor(n / 2)) + 1))
         b = reversed(range(1, int(np.floor(n / 2))))
         b = [-i for i in b]
@@ -322,14 +354,10 @@ def gaussian_random_field(cluster_radius, n_cell):
     def _pk2(kx, ky):
         if kx == 0 and ky == 0:
             return 0.0
-        val = np.sqrt(np.sqrt(kx ** 2 + ky ** 2) ** (-cluster_radius))
+        val = np.sqrt(np.sqrt(kx**2 + ky**2) ** (-cluster_radius))
         return val
 
-    # memoization of amplitude (amplitude depends on n_cell, fft_indices, cluster_radius)
-    # there is a one-to-one mapping between cluster_radius and amplitude
-    # for each cluster_radius, what makes the maps different is just the noise
-    # if cluster_radius not in self.cluster_radius_to_amplitude:
-    cluster_radius_to_amplitude = {}
+    # Generate amplitude for the given cluster_radius
     map_rng = np.random.default_rng(123)
     amplitude = np.zeros((n_cell, n_cell))
     fft_indices = _fft_indices(n_cell)
@@ -338,17 +366,22 @@ def gaussian_random_field(cluster_radius, n_cell):
         for j, ky in enumerate(fft_indices):
             amplitude[i, j] = _pk2(kx, ky)
 
-
-        cluster_radius_to_amplitude[cluster_radius] = np.copy(amplitude)
-
+    # Generate Gaussian random field
     noise = np.fft.fft2(map_rng.normal(size=(n_cell, n_cell)))
-    random_field = np.fft.ifft2(noise * cluster_radius_to_amplitude[cluster_radius]).real
+    random_field = np.fft.ifft2(noise * amplitude).real
     normalized_random_field = (random_field - np.min(random_field)) / (
-            np.max(random_field) - np.min(random_field)
+        np.max(random_field) - np.min(random_field)
     )
 
     # Make field binary
     normalized_random_field[normalized_random_field >= 0.5] = 1
     normalized_random_field[normalized_random_field < 0.5] = 0
 
-    return normalized_random_field.astype(np.uint8)
+    binary_field = normalized_random_field.astype(np.uint8)
+
+    # Save to cache
+    with open(cache_file, "wb") as f:
+        pickle.dump(binary_field, f)
+    print(f"Field generated and saved to {cache_file}")
+
+    return binary_field
