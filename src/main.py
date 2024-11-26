@@ -7,7 +7,6 @@ from helper import (
     compute_mse,
 )
 from terrain_creation import (
-    # gen_fast,
     gaussian_random_field,
     terrain,
 )
@@ -22,9 +21,9 @@ n_step = 50
 
 
 class grid_info:
-    x = 20
-    y = 20
-    length = 0.25
+    x = 50
+    y = 50
+    length = 0.125
     shape = (int(x / length), int(y / length))
 
 

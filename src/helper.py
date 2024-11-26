@@ -233,8 +233,7 @@ class point:
 
 def compute_mse(ground_truth_map, estimated_map):
     if ground_truth_map.shape != estimated_map.shape:
-        raise ValueError("Input maps must have the same dimensions")
-
+        raise ValueError("Input maps must have the same dimensions for MSE")
     mse = np.mean((ground_truth_map - estimated_map) ** 2)
     return mse
 
@@ -251,14 +250,38 @@ def sig(x):
     return 1 / (1 + np.exp(-x))
 
 
-def plot_metrics(entropy_list, mse_list, coverage_list):
+def compute_entropy(belief):
+    v1 = belief[:, :, 0]
+    v2 = belief[:, :, 1]
+    l1 = np.log2(v1)
+    l2 = np.log2(v2)
+    assert np.all(np.less_equal(l1, 0.0))
+    assert np.all(np.less_equal(l2, 0.0))
+
+    return np.sum(-(v1 * l1 + v2 * l2))
+
+
+def compute_metrics(ground_truth_map, belief, ms_set, grid):
+    estimated_map = (belief[..., 1] >= 0.5).astype(np.uint8)
+    mse = compute_mse(ground_truth_map, estimated_map)
+    entropy = compute_entropy(belief)
+    coverage = compute_coverage(ms_set, grid)
+
+    return (entropy, mse, coverage)
+
+
+def plot_metrics(entropy_list, mse_list, coverage_list, height_list):
 
     assert len(entropy_list) == len(mse_list)
     assert len(coverage_list) == len(mse_list)
+    assert len(coverage_list) == len(height_list)
 
     steps = range(len(entropy_list))
 
-    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(8, 8))  # 3 rows, 1 column
+    # fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(8, 8))  # 3 rows, 1 column
+    # Create a 2x2 grid of subplots
+    fig, axes = plt.subplots(2, 2, figsize=(10, 8))  # 2 rows, 2 columns
+    (ax1, ax2), (ax3, ax4) = axes
 
     # Plot entropy in the first subplot
     ax1.plot(steps, entropy_list, "bo-", label="Entropy", markersize=5)
@@ -281,6 +304,13 @@ def plot_metrics(entropy_list, mse_list, coverage_list):
     ax3.set_title("Coverage over Steps")
     ax3.grid(True)
 
+    # Plot height in the fourth subplot
+    ax4.plot(steps, height_list, "m^-", label="Height", markersize=5)
+    ax4.set_xlabel("Steps")
+    ax4.set_ylabel("Height")
+    ax4.set_title("Height over Steps")
+    ax4.grid(True)
+
     # Adjust layout to avoid overlap
     plt.tight_layout()
 
@@ -295,7 +325,14 @@ class FastLogger:
     HEADER = "step\tentropy\tmse\theight\tcoverage\n"
 
     def __init__(
-        self, dir, strategy="ig", pairwise="equal", n_agent=1, grid=None, init_x=None
+        self,
+        dir,
+        strategy="ig",
+        pairwise="equal",
+        n_agent=1,
+        grid=None,
+        r=None,
+        init_x=None,
     ):
 
         self.strategy = strategy
@@ -304,6 +341,7 @@ class FastLogger:
         self.grid = grid
         self.init_x = init_x
         self.step = 0
+        self.r = r
         self.filename = (
             dir
             + "/results/"
