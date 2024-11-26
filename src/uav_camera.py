@@ -1,14 +1,7 @@
 import math
 import numpy as np
-from helper import argmax_event_matrix, id_converter, sample_event_matrix, uav_position
+from helper import id_converter, sample_event_matrix, uav_position
 from terrain_creation import terrain
-
-
-class grid_info:
-    x = 10
-    y = 10
-    length = 1
-    shape = (int(x / length), int(y / length))
 
 
 class camera:
@@ -20,19 +13,19 @@ class camera:
         camera_pos=(0.0, 0.0),
         x_range=(0, 50),
         y_range=(0, 50),
-        xy_step=3,
-        h_range=(5.4, 32.4),
-        h_step=5.4,
     ):
+
         self.grid = grid
         self.altitude = camera_altitude
         self.position = camera_pos
         self.fov = fov_angle
         self.x_range = x_range
         self.y_range = y_range
-        self.xy_step = xy_step
-        self.h_range = h_range
-        self.h_step = h_step
+
+        # Dynamic xy_step and h_step calculation if not explicitly provided
+        self.xy_step = (self.x_range[1] - self.x_range[0]) / 2 / 8
+        self.h_step = self.xy_step / np.tan(self.fov / 180 * 3.14 * 0.5)
+        self.h_range = (self.h_step, 6 * self.h_step)
         self.a = 1
         self.b = 0.015
         self.actions = {"up", "down", "front", "back", "left", "right", "hover"}

@@ -6,17 +6,17 @@ import copy
 from mpl_toolkits.mplot3d import Axes3D  # Ensure this is imported
 
 
-def plot_terrain(filename, belief, grid, uav_pos, gt, obs_z):
+def plot_terrain(filename, belief, grid, uav_pos, gt, submap, zx, zy):
 
     # Plot both the 3D and 2D maps in subplots
     fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(15, 6))
     for ax in axes:
         ax.set_axis_off()
 
-    ox_min = np.min(obs_z.x)
-    ox_max = np.max(obs_z.x)
-    oy_min = np.min(obs_z.y)
-    oy_max = np.max(obs_z.y)
+    ox_min = np.min(zx)
+    ox_max = np.max(zx)
+    oy_min = np.min(zy)
+    oy_max = np.max(zy)
 
     o_x = [ox_min, ox_max, ox_max, ox_min, ox_min]
     o_y = [oy_min, oy_min, oy_max, oy_max, oy_min]
@@ -48,14 +48,14 @@ def plot_terrain(filename, belief, grid, uav_pos, gt, obs_z):
         x,
         y,
         np.zeros_like(x),
-        facecolors=np.where(gt.map == 0, "green", "yellow"),
+        facecolors=np.where(gt == 0, "green", "yellow"),
         alpha=0.6,
         edgecolor="none",
     )
     o_z = np.zeros_like(o_x) + 0.01  # Slightly above z=0
 
     # Plot the line in 3D
-    ax1.plot(o_x, o_y, o_z, color="red", lw=2)
+    ax1.plot(o_x, o_y, o_z, color="red", lw=1)
 
     # ---- Plot 2: 2D last observation z_t ----
     ax2 = fig.add_subplot(132)
@@ -71,10 +71,10 @@ def plot_terrain(filename, belief, grid, uav_pos, gt, obs_z):
     norm = colors.BoundaryNorm(bounds, cmap.N)
 
     im1 = ax2.imshow(
-        obs_z.map.T,
+        submap.T,
         cmap=cmap,
         norm=norm,
-        extent=[obs_z.x.min(), obs_z.x.max(), obs_z.y.min(), obs_z.y.max()],
+        extent=[ox_min, ox_max, oy_min, oy_max],
         origin="lower",
     )
 
@@ -91,7 +91,7 @@ def plot_terrain(filename, belief, grid, uav_pos, gt, obs_z):
         # norm=norm,
         extent=[x.min(), x.max(), y.min(), y.max()],
         origin="lower",
-        interpolation="nearest",
+        # interpolation="nearest",
         vmin=0,
         vmax=1,
     )

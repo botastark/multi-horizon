@@ -19,17 +19,17 @@ class OccupancyMap:
                     if 0 <= ni < self.N and 0 <= nj < self.N:  # Valid neighbor
                         self.messages[((i, j), (ni, nj))] = [0.5, 0.5]
 
-    # Local evidence function (sensor model)
-    def sensor_model(self, z_i, m_i, x):
-        a = 1
-        b = 0.015
-        sigma = a * (1 - np.exp(-b * x.altitude))
-        if z_i == m_i:
-            return (
-                1 - sigma
-            )  # Get the probability of observing the true state value at this altitude
-        else:
-            return sigma
+    # # Local evidence function (sensor model)
+    # def sensor_model(self, z_i, m_i, x):
+    #     a = 1
+    #     b = 0.015
+    #     sigma = a * (1 - np.exp(-b * x.altitude))
+    #     if z_i == m_i:
+    #         return (
+    #             1 - sigma
+    #         )  # Get the probability of observing the true state value at this altitude
+    #     else:
+    #         return sigma
 
     def local_evidence(self, z, x):
         """
@@ -42,18 +42,16 @@ class OccupancyMap:
         Returns:
             A list [P(free), P(occupied)] representing the local evidence for the cell.
         """
+        a = 1
+        b = 0.015
+        sigma = a * (1 - np.exp(-b * x.altitude))
+
         if z == 0:
-            return [
-                self.sensor_model(0, 0, x),
-                self.sensor_model(0, 1, x),
-            ]  # [P(z=0|m=0), P(z=0|m=1)]
+            return [1 - sigma, sigma]  # [P(z=0|m=0), P(z=0|m=1)]
         elif z == 1:
-            return [
-                self.sensor_model(1, 0, x),
-                self.sensor_model(1, 1, x),
-            ]  # [P(z=1|m=0), P(z=1|m=1)]
-        else:
-            return [0.5, 0.5]  # Default uniform prior if no observation
+            return [sigma, 1 - sigma]  # [P(z=1|m=0), P(z=1|m=1)]
+        # else:
+        #     return [0.5, 0.5]  # Default uniform prior if no observation
 
     # Pairwise potential function
     def pairwise_potential(self, correlation_type=None):
@@ -81,14 +79,12 @@ class OccupancyMap:
         observations: List of tuples (i, j, {'free': p_free, 'occupied': p_occupied}).
         """
         self.last_observations = observations
+
         for i, j, obs in observations:
             # self.phi[i, j] = self.local_evidence(obs, uav_pos)
 
             # # Get local evidence for this observation
             local_evidence = self.local_evidence(obs, uav_pos)  # [P(free), P(occupied)]
-
-            # # Fuse with prior belief
-            # prior_belief = self.phi[i, j]
 
             # Use current marginals as the prior
             prior_belief = marginals[i, j]
@@ -189,30 +185,6 @@ def get_range(uav_pos, grid, index_form=False):
     return [[x_min, x_max], [y_min, y_max]]
 
 
-# def get_observations(grid_info, ground_truth_map, uav_pos):
-#     [[x_min_id, x_max_id], [y_min_id, y_max_id]] = get_range(
-#         uav_pos, grid_info, index_form=True
-#     )
-#     submap = ground_truth_map[x_min_id:x_max_id, y_min_id:y_max_id]
-
-#     x = np.arange(
-#         x_min_id * grid_info.length, x_max_id * grid_info.length, grid_info.length
-#     )
-#     y = np.arange(
-#         y_min_id * grid_info.length, y_max_id * grid_info.length, grid_info.length
-#     )
-
-#     x, y = np.meshgrid(x, y, indexing="ij")
-
-#     observations = [
-#         (x_min_id + i, y_min_id + j, submap[i, j])  # Global indices with binary state
-#         for i in range(submap.shape[0])
-#         for j in range(submap.shape[1])
-#     ]
-
-#     return submap, observations
-
-
 def get_observations(grid_info, ground_truth_map, uav_pos):
     [[x_min_id, x_max_id], [y_min_id, y_max_id]] = get_range(
         uav_pos, grid_info, index_form=True
@@ -241,13 +213,3 @@ def adapt_observations(x, y, submap, grid_info):
         for j in range(submap.shape[1])
     ]
     return observations
-
-
-def adapt_observation(submap, x, y, grid_length):
-    x_min_id = x[0][0] / grid_length
-    y_min_id = y[0][0] / grid_length
-    observations = [
-        (x_min_id + i, y_min_id + j, submap[i, j])  # Global indices with binary state
-        for i in range(submap.shape[0])
-        for j in range(submap.shape[1])
-    ]
