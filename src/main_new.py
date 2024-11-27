@@ -11,7 +11,6 @@ from helper import (
 from terrain_creation import gaussian_random_field
 from planner_new import planning
 from uav_camera import camera
-import numpy as np
 
 from viewer import plot_terrain
 
