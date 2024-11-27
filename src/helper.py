@@ -128,56 +128,6 @@ def compute_metrics(ground_truth_map, belief, ms_set, grid):
     return (entropy, mse, coverage)
 
 
-def plot_metrics(dir, entropy_list, mse_list, coverage_list, height_list):
-
-    assert len(entropy_list) == len(mse_list)
-    assert len(coverage_list) == len(mse_list)
-    assert len(coverage_list) == len(height_list)
-
-    steps = range(len(entropy_list))
-
-    # fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(8, 8))  # 3 rows, 1 column
-    # Create a 2x2 grid of subplots
-    fig, axes = plt.subplots(2, 2, figsize=(10, 8))  # 2 rows, 2 columns
-    (ax1, ax2), (ax3, ax4) = axes
-
-    # Plot entropy in the first subplot
-    ax1.plot(steps, entropy_list, "bo-", label="Entropy", markersize=5)
-    ax1.set_xlabel("Number of steps")
-    ax1.set_ylabel("Entropy")
-    ax1.set_title("Entropy over Steps")
-    ax1.grid(True)
-
-    # Plot MSE in the second subplot
-    ax2.plot(steps, mse_list, "r*-", label="MSE", markersize=5)
-    ax2.set_xlabel("Number of steps")
-    ax2.set_ylabel("MSE")
-    ax2.set_title("MSE over Steps")
-    ax2.grid(True)
-
-    # Plot covberage in the second subplot
-    ax3.plot(steps, coverage_list, "g*-", label="Coverage", markersize=5)
-    ax3.set_xlabel("Number of steps")
-    ax3.set_ylabel("Coverage")
-    ax3.set_title("Coverage over Steps")
-    ax3.grid(True)
-
-    # Plot height in the fourth subplot
-    ax4.plot(steps, height_list, "m^-", label="Height", markersize=5)
-    ax4.set_xlabel("Steps")
-    ax4.set_ylabel("Height")
-    ax4.set_title("Height over Steps")
-    ax4.grid(True)
-
-    # Adjust layout to avoid overlap
-    plt.tight_layout()
-
-    # Show the plot
-    plt.savefig(dir+"/final.png")
-    plt.close(fig)
-
-    # plt.show()
-
 
 class FastLogger:
     HEADER = "step\tentropy\tmse\theight\tcoverage\n"
