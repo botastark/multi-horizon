@@ -1,6 +1,6 @@
 from mapper import OccupancyMap, get_observations
 import timeit
-import os 
+import os
 
 from helper import (
     FastLogger,
@@ -14,18 +14,17 @@ from uav_camera import camera
 
 from viewer import plot_terrain, plot_metrics
 
-# desktop = "/home/bota/Desktop/"
-desktop = "/Users/botaduisenbay/active_sensing"
+desktop = "/home/bota/Desktop/active_sensing"
+# desktop = "/Users/botaduisenbay/active_sensing"
 
 cache_dir = desktop + "/cache/"
-desktop+="/temp/"
+desktop += "/temp"
 correlation_type = "biased"  # "biased", "equal" "adaptive"
 action_select_strategy = "ig"  # "ig", "random" "sweep" ig_with_mexgen
 n_steps = 100
 grf_r = 5
 if not os.path.exists(desktop):
     os.makedirs(desktop)
-
 
 
 class grid_info:

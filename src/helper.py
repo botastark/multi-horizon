@@ -2,6 +2,7 @@
 from matplotlib import pyplot as plt
 import numpy as np
 
+
 def collect_sample_set(grid):
     # Create an array of central cells for each 3x3 block (using slices)
     rows, cols = grid.shape
@@ -26,6 +27,7 @@ def collect_sample_set(grid):
 
     return np.column_stack((central_cells.flatten(), neighbor_sums.flatten()))
 
+
 def pearson_correlation_coeff(d_sampled):
     c_values = d_sampled[:, 0]  # Central cell values
     n_values = d_sampled[:, 1]  # Neighbor sums
@@ -38,11 +40,11 @@ def pearson_correlation_coeff(d_sampled):
     n_diff = n_values - avg_n
 
     numerator = np.sum(c_diff * n_diff)
-    sum_sq_central_diff = np.sum(c_diff ** 2)
-    sum_sq_neighbors_diff = np.sum(n_diff ** 2)
+    sum_sq_central_diff = np.sum(c_diff**2)
+    sum_sq_neighbors_diff = np.sum(n_diff**2)
 
     denominator = np.sqrt(sum_sq_central_diff * sum_sq_neighbors_diff)
-    
+
     return numerator / denominator if denominator != 0 else 0
 
 
@@ -57,7 +59,6 @@ def adaptive_weights_matrix(obs_map):
         ]
     )
     return psi
-
 
 
 def observed_m_ids(uav=None, uav_pos=None, aslist=True):
@@ -128,7 +129,6 @@ def compute_metrics(ground_truth_map, belief, ms_set, grid):
     return (entropy, mse, coverage)
 
 
-
 class FastLogger:
     HEADER = "step\tentropy\tmse\theight\tcoverage\n"
 
@@ -151,16 +151,9 @@ class FastLogger:
         self.step = 0
         self.r = r
         self.filename = (
-            dir
-            + "/results/"
-            + self.strategy
-            + "_"
-            + self.pairwise
-            + "_"
-            + str(self.n)
-            + ".txt"
+            dir + "/" + self.strategy + "_" + self.pairwise + "_" + str(self.n) + ".txt"
         )
-        
+
         with open(self.filename, "w") as f:
             f.write(f"Strategy: {self.strategy}\n")
             f.write(f"Pairwise: {self.pairwise}\n")
