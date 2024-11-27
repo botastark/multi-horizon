@@ -73,12 +73,62 @@ class OccupancyMap:
             return np.array(adaptive_weights_matrix(self.last_observations))
 
     # Update observations
-    def update_observations(self, observations, uav_pos, marginals):
+
+    def update_observations(self, x, y, submap, uav_pos, marginals):
         """
         Update local evidence phi based on observations.
-        observations: List of tuples (i, j, {'free': p_free, 'occupied': p_occupied}).
+        
+        Parameters:
+            x: Meshgrid of x-coordinates (1D array).
+            y: Meshgrid of y-coordinates (1D array).
+            submap: 2D array of observed states (0 or 1).
+            uav_pos: UAV position as a dictionary with altitude and other metadata.
+            marginals: 3D array of current marginals [P(free), P(occupied)].
         """
-        self.last_observations = observations
+        # Determine grid indices from x and y
+        grid_length = x[1, 0] - x[0, 0]  # First row, consecutive columns
+        # print(f"grid length {grid_length}")
+
+        i = (x / grid_length).astype(int)  # Convert x to grid indices
+        j = (y / grid_length).astype(int)  # Convert y to grid indices
+        
+
+        # Flatten submap and grid indices for vectorized processing
+        z = submap.flatten()
+        i_flat = i.flatten()
+        j_flat = j.flatten()
+        # print(f"i  {i_flat}")
+
+        # Compute local evidence for all observations
+        altitude = uav_pos.altitude
+        a, b = 1, 0.015
+        sigma = a * (1 - np.exp(-b * altitude))  # Error parameter based on altitude
+
+        # Vectorized local evidence computation
+        local_evidence = np.zeros((len(z), 2))  # [P(free), P(occupied)]
+        local_evidence[:, 0] = np.where(z == 0, 1 - sigma, sigma)  # P(free)
+        local_evidence[:, 1] = np.where(z == 0, sigma, 1 - sigma)  # P(occupied)
+
+        # Extract prior beliefs from marginals
+        prior_beliefs = marginals[i_flat, j_flat]  # Shape (len(z), 2)
+
+        # Fuse prior beliefs with local evidence
+        fused_beliefs = prior_beliefs * local_evidence  # Element-wise multiplication
+        fused_beliefs /= fused_beliefs.sum(axis=1, keepdims=True)  # Normalize
+
+        # Update phi for the observed grid cells
+        self.phi[i_flat, j_flat] = fused_beliefs
+        self.last_observations = np.array(submap)
+
+    
+
+    def original_update_observations(self, observations, uav_pos, marginals):
+        
+        # Update local evidence phi based on observations.
+        # observations: List of tuples (i, j, {'free': p_free, 'occupied': p_occupied}).
+        
+        
+        # self.last_observations = observations
 
         for i, j, obs in observations:
             # self.phi[i, j] = self.local_evidence(obs, uav_pos)
@@ -97,7 +147,7 @@ class OccupancyMap:
 
             # Update phi with the fused belief
             self.phi[i, j] = fused_belief
-
+    
     def set_last_observations(self, submap):
         self.last_observations = np.array(submap)
 
@@ -112,6 +162,8 @@ class OccupancyMap:
         Returns:
             Updated messages.
         """
+        # Pairwise potential
+        psi = self.pairwise_potential(correlation_type)
         for _ in range(max_iterations):
             new_messages = {}
             for ((i, j), (ni, nj)), message in self.messages.items():
@@ -126,9 +178,6 @@ class OccupancyMap:
                 # Product of incoming messages
                 prod_incoming = np.prod(incoming_messages, axis=0)
 
-                # Pairwise potential
-                psi = self.pairwise_potential(correlation_type)
-                # print(psi)
                 # Compute new message
                 new_message = np.dot(self.phi[i, j] * prod_incoming, psi)
                 new_message /= np.sum(new_message)  # Normalize
