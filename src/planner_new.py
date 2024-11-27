@@ -152,7 +152,7 @@ class planning:
                     index_form=True,
                 )
             )
-            obs_M = self.M[obsd_m_i_min:obsd_m_i_max, obsd_m_j_min:obsd_m_j_max, 0]
+            obs_M = self.M[obsd_m_i_min:obsd_m_i_max, obsd_m_j_min:obsd_m_j_max, 1]
             info_gain_action_a = np.sum(self.info_gain(obs_M, x_future))
             info_gain_action[action] = info_gain_action_a
 

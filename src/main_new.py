@@ -19,7 +19,7 @@ desktop = "/home/bota/Desktop/active_sensing"
 
 cache_dir = desktop + "/cache/"
 desktop += "/temp"
-correlation_type = "biased"  # "biased", "equal" "adaptive"
+correlation_type = "adaptive"  # "biased", "equal" "adaptive"
 action_select_strategy = "ig"  # "ig", "random" "sweep" ig_with_mexgen
 n_steps = 100
 grf_r = 5
@@ -63,6 +63,7 @@ entropy, mse, height, coverage = [], [], [], []
 
 for step in range(n_steps + 1):
     # collect observations
+    print(f"step {step}")
     zx, zy, submap = get_observations(grid_info, ground_truth_map, uav_pos)
     # mapping
     mapper.update_observations(zx, zy, submap, uav_pos, belief_map)
