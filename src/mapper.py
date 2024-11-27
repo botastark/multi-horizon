@@ -100,9 +100,9 @@ class OccupancyMap:
         # print(f"i  {i_flat}")
 
         # Compute local evidence for all observations
-        altitude = uav_pos.altitude
+        # altitude = uav_pos.altitude
         a, b = 1, 0.015
-        sigma = a * (1 - np.exp(-b * altitude))  # Error parameter based on altitude
+        sigma = a * (1 - np.exp(-b * uav_pos.altitude))  # Error parameter based on altitude
 
         # Vectorized local evidence computation
         local_evidence = np.zeros((len(z), 2))  # [P(free), P(occupied)]
@@ -126,7 +126,6 @@ class OccupancyMap:
         
         # Update local evidence phi based on observations.
         # observations: List of tuples (i, j, {'free': p_free, 'occupied': p_occupied}).
-        
         
         # self.last_observations = observations
 
