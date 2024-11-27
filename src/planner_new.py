@@ -6,10 +6,11 @@ from helper import uav_position
 
 
 class planning:
-    def __init__(self, belief, uav):
+    def __init__(self, belief, uav, strategy):
         self.M = belief
         self.uav = uav
         self.last_action = None
+        self.strategy = strategy
 
     def info_gain(self, var, x_future, mexgen=False):
         ig = self.H(var) - self._expected_entropy(var, x_future, mexgen=mexgen)
@@ -175,17 +176,17 @@ class planning:
         print(next_action)
         return next_action
 
-    def select_action(self, belief, visited_x, strategy="ig"):
+    def select_action(self, belief, visited_x):
         self.M = belief
 
         permitted_actions = self.uav.permitted_actions(self.uav)  # at UAV position x
-        if strategy == "random":
+        if self.strategy == "random":
             return self.random_action(permitted_actions)
-        if strategy == "sweep":
+        if self.strategy == "sweep":
             return self.sweep(permitted_actions, visited_x)
 
         # IG based IPP strategy
-        if strategy == "ig_with_mexgen":
+        if self.strategy == "ig_with_mexgen":
             mexgen = True
         else:
             mexgen = False

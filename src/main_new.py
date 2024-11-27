@@ -1,27 +1,31 @@
-from mapper import OccupancyMap, adapt_observations, get_observations
+from mapper import OccupancyMap, get_observations
 import timeit
+import os 
 
 from helper import (
     FastLogger,
     compute_metrics,
     observed_m_ids,
-    plot_metrics,
     uav_position,
 )
 from terrain_creation import gaussian_random_field
 from planner_new import planning
 from uav_camera import camera
 
-from viewer import plot_terrain
+from viewer import plot_terrain, plot_metrics
 
 # desktop = "/home/bota/Desktop/"
 desktop = "/Users/botaduisenbay/active_sensing"
 
 cache_dir = desktop + "/cache/"
-correlation_type = "equal"  # "biased", "equal" "adaptive"
+desktop+="/temp/"
+correlation_type = "biased"  # "biased", "equal" "adaptive"
 action_select_strategy = "ig"  # "ig", "random" "sweep" ig_with_mexgen
-n_steps = 300
+n_steps = 100
 grf_r = 5
+if not os.path.exists(desktop):
+    os.makedirs(desktop)
+
 
 
 class grid_info:
@@ -53,7 +57,7 @@ uav_positions, past_observations, actions = [uav_pos], [], []
 
 
 belief_map = mapper.marginalize()
-planner = planning(belief_map, camera)
+planner = planning(belief_map, camera, action_select_strategy)
 
 obs_ms = set()
 entropy, mse, height, coverage = [], [], [], []
@@ -61,7 +65,6 @@ entropy, mse, height, coverage = [], [], [], []
 for step in range(n_steps + 1):
     # collect observations
     zx, zy, submap = get_observations(grid_info, ground_truth_map, uav_pos)
-    # observations = adapt_observations(zx, zy, submap, grid_info)
     # mapping
     mapper.update_observations(zx, zy, submap, uav_pos, belief_map)
     mapper.propagate_messages(max_iterations=1, correlation_type=correlation_type)
@@ -96,6 +99,7 @@ for step in range(n_steps + 1):
 
     if step == n_steps:
         break
+
     # PLAN
     next_action = planner.select_action(belief_map, uav_positions)
 
