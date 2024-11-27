@@ -1,0 +1,7 @@
+{
+    "experiment_name": "experiment_1",
+    "output_path": "results/",
+    "field_size": 256,
+    "cluster_radius": 2.0,
+    "cache_dir": "cache/"
+}

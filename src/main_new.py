@@ -1,4 +1,6 @@
 from mapper import OccupancyMap, adapt_observations, get_observations
+import timeit
+
 from helper import (
     FastLogger,
     compute_metrics,
@@ -13,8 +15,10 @@ import numpy as np
 
 from viewer import plot_terrain
 
-desktop = "/home/bota/Desktop/"
-cache_dir = desktop + "active_sensing/cache/"
+# desktop = "/home/bota/Desktop/"
+desktop = "/Users/botaduisenbay/active_sensing"
+
+cache_dir = desktop + "/cache/"
 correlation_type = "equal"  # "biased", "equal" "adaptive"
 action_select_strategy = "ig"  # "ig", "random" "sweep" ig_with_mexgen
 n_steps = 300
@@ -31,7 +35,7 @@ class grid_info:
 uav_pos = uav_position(((0, 0), 5.4))
 
 logger = FastLogger(
-    "/home/bota/Desktop/active_sensing",
+    desktop,
     strategy=action_select_strategy,
     pairwise=correlation_type,
     grid=grid_info,
@@ -58,10 +62,9 @@ entropy, mse, height, coverage = [], [], [], []
 for step in range(n_steps + 1):
     # collect observations
     zx, zy, submap = get_observations(grid_info, ground_truth_map, uav_pos)
-    observations = adapt_observations(zx, zy, submap, grid_info)
+    # observations = adapt_observations(zx, zy, submap, grid_info)
     # mapping
-    mapper.update_observations(observations, uav_pos, belief_map)
-    mapper.set_last_observations(submap)
+    mapper.update_observations(zx, zy, submap, uav_pos, belief_map)
     mapper.propagate_messages(max_iterations=1, correlation_type=correlation_type)
     belief_map = mapper.marginalize()
 
@@ -79,10 +82,10 @@ for step in range(n_steps + 1):
     logger.log_data(entropy[-1], mse[-1], height[-1], coverage[-1])
     logger.log("actions: " + str(actions))
 
-    plot_metrics(entropy, mse, coverage, height)
+    plot_metrics(desktop, entropy, mse, coverage, height)
 
     plot_terrain(
-        f"{desktop}step_{step}.png",
+        f"{desktop}/step_{step}.png",
         belief_map,
         grid_info,
         uav_positions,

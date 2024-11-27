@@ -3,67 +3,105 @@ from matplotlib import pyplot as plt
 import numpy as np
 
 
+# def collect_sample_set(grid):
+#     rows, cols = grid.shape
+#     D = []
+
+#     # Calculate number of complete 3x3 grids
+#     num_blocks_row = rows // 3
+#     num_blocks_col = cols // 3
+
+#     # Iterate over the grid in steps of 3 to access central cells of each 3x3 block
+#     for block_i in range(num_blocks_row):
+#         for block_j in range(num_blocks_col):
+#             # Central cell in a 3x3 block
+#             central_i = block_i * 3 + 1
+#             central_j = block_j * 3 + 1
+#             c = grid[central_i, central_j]
+
+#             # Collect Von Neumann neighbors
+#             neighbors = [
+#                 grid[central_i - 1, central_j],  # North
+#                 grid[central_i + 1, central_j],  # South
+#                 grid[central_i, central_j - 1],  # West
+#                 grid[central_i, central_j + 1],  # East
+#             ]
+
+#             n = sum(neighbors)
+
+#             # Append the central cell value and the sum of neighbors
+#             D.append((c, n))
+#     return D
+
+
+import numpy as np
+
 def collect_sample_set(grid):
+    # Create an array of central cells for each 3x3 block (using slices)
     rows, cols = grid.shape
-    D = []
+    valid_rows = (rows // 3) * 3
+    valid_cols = (cols // 3) * 3
 
-    # Calculate number of complete 3x3 grids
-    num_blocks_row = rows // 3
-    num_blocks_col = cols // 3
+    # Truncate the grid to the largest valid sub-grid
+    truncated_grid = grid[:valid_rows, :valid_cols]
 
-    # Iterate over the grid in steps of 3 to access central cells of each 3x3 block
-    for block_i in range(num_blocks_row):
-        for block_j in range(num_blocks_col):
-            # Central cell in a 3x3 block
-            central_i = block_i * 3 + 1
-            central_j = block_j * 3 + 1
-            c = grid[central_i, central_j]
+    # Extract central cells
+    central_cells = truncated_grid[1::3, 1::3]
 
-            # Collect Von Neumann neighbors
-            neighbors = [
-                grid[central_i - 1, central_j],  # North
-                grid[central_i + 1, central_j],  # South
-                grid[central_i, central_j - 1],  # West
-                grid[central_i, central_j + 1],  # East
-            ]
+    # Create a matrix of neighbors for each central cell using slicing
+    north = truncated_grid[0::3, 1::3]  # One row above central cells
+    south = truncated_grid[2::3, 1::3]  # One row below central cells
+    west = truncated_grid[1::3, 0::3]  # One column to the left
+    east = truncated_grid[1::3, 2::3]  # One column to the right
 
-            n = sum(neighbors)
+    # Stack the neighbors (this automatically handles each block's neighbors)
+    neighbors = np.stack([north, south, west, east], axis=-1)
 
-            # Append the central cell value and the sum of neighbors
-            D.append((c, n))
-    return D
+    # Sum the neighbors for each block
+    neighbor_sums = np.sum(neighbors, axis=-1)
 
+    # Combine the central cells with the neighbor sums
+    return np.column_stack((central_cells.flatten(), neighbor_sums.flatten()))
 
 def pearson_correlation_coeff(d_sampled):
-    c_values = [c for c, n in d_sampled]
-    n_values = [n for c, n in d_sampled]
+    c_values = d_sampled[:, 0]  # Central cell values
+    n_values = d_sampled[:, 1]  # Neighbor sums
+
     avg_c = np.mean(c_values)
     avg_n = np.mean(n_values)
-    p = 0
-    numerator = 0
-    sum_sq_central_diff = 0
-    sum_sq_neighbors_diff = 0
-    for c, n in d_sampled:
-        c_diff = c - avg_c
-        n_diff = n - avg_n
-        numerator += n_diff * c_diff
-        sum_sq_central_diff += c_diff**2
-        sum_sq_neighbors_diff += n_diff**2
+
+    # Vectorized calculations for the Pearson correlation
+    c_diff = c_values - avg_c
+    n_diff = n_values - avg_n
+
+    numerator = np.sum(c_diff * n_diff)
+    sum_sq_central_diff = np.sum(c_diff ** 2)
+    sum_sq_neighbors_diff = np.sum(n_diff ** 2)
+
     denominator = np.sqrt(sum_sq_central_diff * sum_sq_neighbors_diff)
-    p = numerator / denominator if denominator != 0 else 0
-    return p
+    
+    return numerator / denominator if denominator != 0 else 0
+
+# def pearson_correlation_coeff(d_sampled):
+#     c_values = [c for c, n in d_sampled]
+#     n_values = [n for c, n in d_sampled]
+#     avg_c = np.mean(c_values)
+#     avg_n = np.mean(n_values)
+#     p = 0
+#     numerator = 0
+#     sum_sq_central_diff = 0
+#     sum_sq_neighbors_diff = 0
+#     for c, n in d_sampled:
+#         c_diff = c - avg_c
+#         n_diff = n - avg_n
+#         numerator += n_diff * c_diff
+#         sum_sq_central_diff += c_diff**2
+#         sum_sq_neighbors_diff += n_diff**2
+#     denominator = np.sqrt(sum_sq_central_diff * sum_sq_neighbors_diff)
+#     p = numerator / denominator if denominator != 0 else 0
+#     return p
 
 
-def adaptive_weights(m_i, m_j, obs_map):
-
-    d_sampled = collect_sample_set(obs_map)
-    p = pearson_correlation_coeff(d_sampled)
-    exp = np.exp(-p)
-
-    if m_i == m_j:
-        return 1 / (1 + exp)
-    else:
-        return exp / (1 + exp)
 
 
 def adaptive_weights_matrix(obs_map):
@@ -77,6 +115,17 @@ def adaptive_weights_matrix(obs_map):
         ]
     )
     return psi
+
+def adaptive_weights(m_i, m_j, obs_map):
+
+    d_sampled = collect_sample_set(obs_map)
+    p = pearson_correlation_coeff(d_sampled)
+    exp = np.exp(-p)
+
+    if m_i == m_j:
+        return 1 / (1 + exp)
+    else:
+        return exp / (1 + exp)
 
 
 def pairwise_factor_(m_i, m_j, obs_map=[], type="equal"):
@@ -270,7 +319,7 @@ def compute_metrics(ground_truth_map, belief, ms_set, grid):
     return (entropy, mse, coverage)
 
 
-def plot_metrics(entropy_list, mse_list, coverage_list, height_list):
+def plot_metrics(dir, entropy_list, mse_list, coverage_list, height_list):
 
     assert len(entropy_list) == len(mse_list)
     assert len(coverage_list) == len(mse_list)
@@ -315,7 +364,7 @@ def plot_metrics(entropy_list, mse_list, coverage_list, height_list):
     plt.tight_layout()
 
     # Show the plot
-    plt.savefig("/home/bota/Desktop/final.png")
+    plt.savefig(dir+"/final.png")
     plt.close(fig)
 
     # plt.show()
@@ -352,7 +401,7 @@ class FastLogger:
             + str(self.n)
             + ".txt"
         )
-
+        
         with open(self.filename, "w") as f:
             f.write(f"Strategy: {self.strategy}\n")
             f.write(f"Pairwise: {self.pairwise}\n")
