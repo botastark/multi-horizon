@@ -85,8 +85,14 @@ def plot_terrain(filename, belief, grid, uav_pos, gt, submap, zx, zy):
     ax3.set_title("Belief sampled map M")
     # ax3.set_xlim([0, self.x_range[1]])
     # ax3.set_ylim([0, self.y_range[1]])
+
+    if belief.ndim==3:
+        map = belief[:, :, 1].T
+    else:
+        map = belief.T
+
     im2 = ax3.imshow(
-        belief[:, :, 1].T,
+        map,
         cmap="Blues",
         extent=[x.min(), x.max(), y.min(), y.max()],
         origin="lower",

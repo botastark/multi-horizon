@@ -1,6 +1,9 @@
-from mapper import OccupancyMap, get_observations
+# from mapper import OccupancyMap, get_observations
+from mapper_LBP import OccupancyMap, get_observations
 import timeit
 import os
+import numpy as np
+
 
 from helper import (
     FastLogger,
@@ -17,12 +20,13 @@ from viewer import plot_terrain, plot_metrics
 desktop = "/home/bota/Desktop/active_sensing"
 # desktop = "/Users/botaduisenbay/active_sensing"
 
+
 cache_dir = desktop + "/cache/"
-desktop += "/temp"
-correlation_type = "adaptive"  # "biased", "equal" "adaptive"
+desktop += "/equal"
+correlation_type = "equal"  # "biased", "equal" "adaptive"
 action_select_strategy = "ig"  # "ig", "random" "sweep" ig_with_mexgen
 n_steps = 100
-grf_r = 5
+grf_r = 4
 if not os.path.exists(desktop):
     os.makedirs(desktop)
 
@@ -33,8 +37,8 @@ class grid_info:
     length = 0.125
     shape = (int(x / length), int(y / length))
 
-
-uav_pos = uav_position(((0, 0), 5.4))
+camera = camera(grid_info, 60)
+uav_pos = uav_position(((0, 0), camera.get_hstep()))
 
 logger = FastLogger(
     desktop,
@@ -47,7 +51,7 @@ logger = FastLogger(
 
 ground_truth_map = gaussian_random_field(grf_r, grid_info.shape[0])
 mapper = OccupancyMap(grid_info.shape[0])
-camera = camera(grid_info, 60)
+
 
 
 camera.set_altitude(uav_pos.altitude)
@@ -55,7 +59,7 @@ camera.set_position(uav_pos.position)
 uav_positions, past_observations, actions = [uav_pos], [], []
 
 
-belief_map = mapper.marginalize()
+belief_map = np.full((grid_info.shape[0], grid_info.shape[0], 2), 0.5)
 planner = planning(belief_map, camera, action_select_strategy)
 
 obs_ms = set()
@@ -64,11 +68,19 @@ entropy, mse, height, coverage = [], [], [], []
 for step in range(n_steps + 1):
     # collect observations
     print(f"step {step}")
-    zx, zy, submap = get_observations(grid_info, ground_truth_map, uav_pos)
+   
+    x_, y_, submap = get_observations(grid_info, ground_truth_map, uav_pos, seed = 0, mexgen=action_select_strategy)
     # mapping
-    mapper.update_observations(zx, zy, submap, uav_pos, belief_map)
-    mapper.propagate_messages(max_iterations=1, correlation_type=correlation_type)
-    belief_map = mapper.marginalize()
+    # mapper.update_observations(zx, zy, submap, uav_pos, belief_map)
+    # mapper.propagate_messages(max_iterations=1, correlation_type=correlation_type)
+    # belief_map = mapper.marginalize()
+
+    zx = x_*grid_info.length
+    zy = y_*grid_info.length
+    l_m_0 = mapper.update_belief_OG(x_.T, y_.T, submap, uav_pos, mexgen = action_select_strategy)
+    mapper.propagate_messages_( x_.T, y_.T, submap, uav_pos,  max_iterations=1, correlation_type=correlation_type)
+    belief_map[:,:, 1] = mapper.get_belief().copy()
+    belief_map[:,:, 0] = 1-belief_map[:,:, 1]
 
     # collect metrics, log and plot
     obs_ms.update(observed_m_ids(camera, uav_pos))

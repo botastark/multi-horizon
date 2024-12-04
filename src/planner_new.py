@@ -13,7 +13,18 @@ class planning:
         self.strategy = strategy
 
     def info_gain(self, var, x_future, mexgen=False):
-        ig = self.H(var) - self._expected_entropy(var, x_future, mexgen=mexgen)
+        if mexgen==False:
+            ig = self.H(var) - self._expected_entropy(var, x_future, mexgen=mexgen)
+        else:
+            # sampled_observation = self.sample_future_observation(5, var, x_future.altitude)
+            sampled_observation = self.sample_binary_observations(var,x_future.altitude)
+            # expected_entropy = self.calculate_entropy(var, mean_future_observation)
+            expected_entropy = self.compute_future_entropy(var, sampled_observation)
+            # print(f"{np.sum(self.H(var))} vs {expected_entropy}")
+
+            ig =np.sum( self.H(var))  - expected_entropy
+            # - self._expected_entropy(var, x_future, mexgen=True)
+
         return ig
 
     def get_entropy(self, belief):
@@ -153,7 +164,7 @@ class planning:
                 )
             )
             obs_M = self.M[obsd_m_i_min:obsd_m_i_max, obsd_m_j_min:obsd_m_j_max, 1]
-            info_gain_action_a = np.sum(self.info_gain(obs_M, x_future))
+            info_gain_action_a = np.sum(self.info_gain(obs_M, x_future,mexgen=mexgen))
             info_gain_action[action] = info_gain_action_a
 
         # Find the maximum information gain
@@ -175,6 +186,26 @@ class planning:
         # next_action = max(info_gain_action, key=info_gain_action.get)
         print(next_action)
         return next_action
+    def compute_future_entropy(self, prior: np.ndarray, sampled_observation: np.ndarray) -> float:
+        """
+        Compute expected future entropy given sampled observation
+        """
+        # Clip values for numerical stability
+        prior = np.clip(prior, 1e-10, 1 - 1e-10)
+        sampled_observation = np.clip(sampled_observation, 1e-10, 1 - 1e-10)
+        # print(sampled_observation)
+        # Estimate posterior using sampled observation
+        # P(m|z) ∝ P(z|m)P(m)
+        likelihood_ratio = sampled_observation 
+        # posterior = (likelihood_ratio * prior) / (likelihood_ratio * prior + (1-likelihood_ratio)*(1 - prior))
+        posterior = (likelihood_ratio * prior) / (likelihood_ratio * prior + (1-likelihood_ratio)*(1 - prior))
+
+        # Compute entropy of estimated posterior
+        # print(posterior)
+        # posterior = (likelihood_ratio * prior) / (likelihood_ratio * prior + (1 - prior))
+        # print(posterior)
+        entropy = self.H(posterior) 
+        return np.sum(entropy)
 
     def select_action(self, belief, visited_x):
         self.M = belief
@@ -191,3 +222,35 @@ class planning:
         else:
             mexgen = False
         return self.ig_based(permitted_actions, mexgen)
+    def sample_binary_observations(self, belief_map, altitude, num_samples=5):
+        """
+        Samples binary observations from a belief map with noise based on altitude.
+
+        Args:
+            belief_map (np.ndarray): Belief map of shape (m, n, 2), where belief_map[..., 1] is P(m=1).
+            altitude (float): UAV altitude affecting noise level.
+            num_samples (int): Number of samples for averaging.
+            noise_factor (float): Base noise factor scaled with altitude.
+
+        Returns:
+            np.ndarray: Averaged binary observation map of shape (m, n).
+        """
+        m, n = belief_map.shape
+        sampled_observations = np.zeros((m, n, num_samples))
+        a = 0.2
+        b = 0.05
+        var = a*(1-np.exp(-b*altitude))
+        noise_std = np.sqrt(var)
+        # noise_std = noise_factor * altitude  # Noise increases with altitude
+
+        for i in range(num_samples):
+            # Sample from the probability map with added Gaussian noise
+            noise = np.random.normal(loc=0.0, scale=noise_std, size=(m, n))
+            noisy_prob = belief_map + noise  # Add noise to P(m=1)
+            noisy_prob = np.clip(noisy_prob, 0, 1)  # Ensure probabilities are valid
+
+            # Sample binary observation
+            sampled_observations[..., i] = np.random.binomial(1, noisy_prob)
+
+        # Return the averaged observation map
+        return np.mean(sampled_observations, axis=-1)

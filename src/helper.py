@@ -110,18 +110,41 @@ def compute_coverage(ms_set, grid):
 
 
 def compute_entropy(belief):
-    v1 = belief[:, :, 0]
-    v2 = belief[:, :, 1]
+    assert np.all(np.greater_equal(belief, 0.0)), f"{belief[np.isnan(belief)]}"
+    assert np.all(np.less_equal(belief, 1.0)), f"{belief[np.isnan(belief)]}"
+
+    if belief.ndim==3:
+        v1 = belief[:, :, 0]
+        v2 = belief[:, :, 1]
+    else:
+        v1 = belief
+        v2 = 1.0 - belief
+    if isinstance(belief, np.ndarray):
+        v1 = np.where(v1 == 0.0, 1.0, v1)
+        v2 = np.where(v2 == 0.0, 1.0, v2)
+    else:
+        if v1 == 0.0:
+            v1 = 1.0
+        if v2 == 0.0:
+            v2 = 1.0
+
     l1 = np.log2(v1)
     l2 = np.log2(v2)
     assert np.all(np.less_equal(l1, 0.0))
     assert np.all(np.less_equal(l2, 0.0))
 
-    return np.sum(-(v1 * l1 + v2 * l2))
+    entropy = np.sum(-(v1 * l1 + v2 * l2))
+
+    assert np.all(np.greater_equal(entropy, 0.0))
+
+    return entropy.astype(float)
 
 
 def compute_metrics(ground_truth_map, belief, ms_set, grid):
-    estimated_map = (belief[..., 1] >= 0.5).astype(np.uint8)
+    if belief.ndim==3:
+        estimated_map = (belief[..., 1] >= 0.5).astype(np.uint8)
+    else:
+        estimated_map = (belief >= 0.5).astype(np.uint8)
     mse = compute_mse(ground_truth_map, estimated_map)
     entropy = compute_entropy(belief)
     coverage = compute_coverage(ms_set, grid)
@@ -172,7 +195,6 @@ class FastLogger:
             f.write("\n")
 
     def log_data(self, entropy, mse, height, coverage):
-
         with open(self.filename, "a") as f:
             f.write(
                 f"{self.step:<6} {round(entropy, 2):<10} {round(mse, 4):<8} {round(height, 1):<8} {round(coverage, 4):<10}\n"
