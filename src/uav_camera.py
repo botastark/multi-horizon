@@ -25,7 +25,7 @@ class camera:
 
         # Dynamic xy_step and h_step calculation if not explicitly provided
         self.xy_step = (self.x_range[1] - self.x_range[0]) / 2 / 8
-        self.h_step = self.xy_step / np.tan(self.fov / 180 * 3.14 * 0.5)
+        self.h_step = self.xy_step / np.tan(self.fov / 180 * np.pi * 0.5)
         self.h_range = (self.h_step, 6 * self.h_step)
         self.a = 1
         self.b = 0.015
@@ -34,7 +34,8 @@ class camera:
 
     def set_position(self, pos):
         self.position = pos
-
+    def get_hstep(self):
+        return self.h_step
     def set_altitude(self, alt):
         self.altitude = alt
 
@@ -50,8 +51,8 @@ class camera:
 
         x_angle = self.fov / 2  # degree
         y_angle = self.fov / 2  # degree
-        x_dist = altitude * math.tan(x_angle / 180 * 3.14)
-        y_dist = altitude * math.tan(y_angle / 180 * 3.14)
+        x_dist = altitude * math.tan(x_angle / 180 * np.pi)
+        y_dist = altitude * math.tan(y_angle / 180 * np.pi)
 
         # adjust func: for smaller square ->int() and for larger-> round()
         x_dist = round(x_dist / self.grid.length) * self.grid.length
