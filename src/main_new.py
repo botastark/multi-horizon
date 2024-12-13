@@ -1,10 +1,11 @@
-# from mapper import OccupancyMap, get_observations
-from mapper_LBP import OccupancyMap, get_observations
+from mapper import OccupancyMap, get_observations
+from mapper_LBP import OccupancyMap as OML
+from mapper_LBP import get_observations as get_observations_l
 import timeit
 import os
 import numpy as np
 
-
+version_to_use = "Luca"
 from helper import (
     FastLogger,
     compute_metrics,
@@ -50,8 +51,10 @@ logger = FastLogger(
 )
 
 ground_truth_map = gaussian_random_field(grf_r, grid_info.shape[0])
-mapper = OccupancyMap(grid_info.shape[0])
-
+if version_to_use=="Bota":
+    mapper = OccupancyMap(grid_info.shape[0])
+else:
+    mapper = OML(grid_info.shape[0])
 
 
 camera.set_altitude(uav_pos.altitude)
@@ -70,27 +73,21 @@ for step in range(n_steps + 1):
     print(f"step {step}")
     # collect observations
     x_, y_, submap = get_observations(grid_info, ground_truth_map, uav_pos, seed = 0, mexgen=action_select_strategy)
+    
     # mapping
+    if version_to_use=="Bota":
+        mapper.update_observations(zx, zy, submap, uav_pos, belief_map)
+        mapper.propagate_messages(max_iterations=1, correlation_type=correlation_type)
+        belief_map = mapper.marginalize()
+    else:
+        # mapper = OML(grid_info.shape[0])
+        zx = x_*grid_info.length
+        zy = y_*grid_info.length
+        l_m_0 = mapper.update_belief_OG(x_.T, y_.T, submap, uav_pos, mexgen = action_select_strategy)
+        mapper.propagate_messages_( x_.T, y_.T, submap, uav_pos,  max_iterations=1, correlation_type=correlation_type)
+        belief_map[:,:, 1] = mapper.get_belief().copy()
+        belief_map[:,:, 0] = 1-belief_map[:,:, 1]
 
-    """
-    Mapping Bota's version
-    # mapper.update_observations(zx, zy, submap, uav_pos, belief_map)
-    # mapper.propagate_messages(max_iterations=1, correlation_type=correlation_type)
-    # belief_map = mapper.marginalize()
-    """
-
-    """
-    Luca's version
-    """
-    zx = x_*grid_info.length
-    zy = y_*grid_info.length
-    l_m_0 = mapper.update_belief_OG(x_.T, y_.T, submap, uav_pos, mexgen = action_select_strategy)
-    mapper.propagate_messages_( x_.T, y_.T, submap, uav_pos,  max_iterations=1, correlation_type=correlation_type)
-    belief_map[:,:, 1] = mapper.get_belief().copy()
-    belief_map[:,:, 0] = 1-belief_map[:,:, 1]
-    """
-    end 
-    """
 
     # collect metrics, log and plot
     obs_ms.update(observed_m_ids(camera, uav_pos))

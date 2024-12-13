@@ -304,3 +304,119 @@ def gaussian_random_field(cluster_radius, n_cell, cache_dir="cache"):
     print(f"Field generated and saved to {cache_file}")
 
     return binary_field
+
+import math
+
+
+def get_range(uav_pos, grid, index_form=False):
+    """
+    calculates indices of camera footprints (part of terrain (therefore terrain indices) seen by camera at a given UAV pos and alt)
+    """
+    # position = position if position is not None else self.position
+    # altitude = altitude if altitude is not None else self.altitude
+    fov = np.pi / 3
+    x_angle = fov / 2  # rads
+    y_angle = fov / 2  # rads
+    x_dist = uav_pos.altitude * math.tan(x_angle )
+    y_dist = uav_pos.altitude * math.tan(y_angle )
+
+    # adjust func: for smaller square ->int() and for larger-> round()
+    x_dist = round(x_dist / grid.length) * grid.length
+    y_dist = round(y_dist / grid.length) * grid.length
+    # Trim if out of scope (out of the map)
+    x_min = max(uav_pos.position[0] - x_dist, 0.0)
+    x_max = min(uav_pos.position[0] + x_dist, grid.x)
+
+    y_min = max(uav_pos.position[1] - y_dist, 0.0)
+    y_max = min(uav_pos.position[1] + y_dist, grid.y)
+    if index_form:  # return as indix range
+        return [
+            [round(x_min / grid.length), round(x_max / grid.length)],
+            [round(y_min / grid.length), round(y_max / grid.length)],
+        ]
+
+    return [[x_min, x_max], [y_min, y_max]]
+
+# def get_observations(grid_info, ground_truth_map, uav_pos):
+#     [[x_min_id, x_max_id], [y_min_id, y_max_id]] = get_range(
+#         uav_pos, grid_info, index_form=True
+#     )
+#     submap = ground_truth_map[x_min_id:x_max_id, y_min_id:y_max_id]
+
+#     x = np.arange(
+#         x_min_id * grid_info.length, x_max_id * grid_info.length, grid_info.length
+#     )
+#     y = np.arange(
+#         y_min_id * grid_info.length, y_max_id * grid_info.length, grid_info.length
+#     )
+
+#     x, y = np.meshgrid(x, y, indexing="ij")
+
+#     return x, y, submap
+
+
+def get_observations(grid_info, ground_truth_map, uav_pos, seed = None, mexgen = None):
+    [[x_min_id, x_max_id], [y_min_id, y_max_id]] = get_range(
+        uav_pos, grid_info, index_form=True
+    )
+    m = ground_truth_map[x_min_id:x_max_id, y_min_id:y_max_id]
+    if mexgen!=None:
+        success1 = sample_binary_observations(m, uav_pos.altitude)
+        success0 = 1 - success1
+    else:  
+        if seed is None:
+            seed = np.identity
+        rng = np.random.default_rng(seed)
+        a = 1
+        b = 0.015
+        sigma = a * (1 - np.exp(-b * uav_pos.altitude))
+        random_values = rng.random(m.shape)
+        success0 = random_values <= 1.0 - sigma
+        success1 = random_values <= 1.0 - sigma
+    
+    z0 = np.where(np.logical_and(success0, m == 0), 0, 1)
+    z1 = np.where(np.logical_and(success1, m == 1), 1, 0)
+    z = np.where(m == 0, z0, z1)
+
+    x = np.arange(
+        x_min_id , x_max_id 
+    )
+    y = np.arange(
+        y_min_id , y_max_id
+    )
+
+    x, y = np.meshgrid(x, y, indexing="ij")
+
+    return x, y, z
+
+def sample_binary_observations(belief_map, altitude, num_samples=5):
+    """
+    Samples binary observations from a belief map with noise based on altitude.
+
+    Args:
+        belief_map (np.ndarray): Belief map of shape (m, n, 2), where belief_map[..., 1] is P(m=1).
+        altitude (float): UAV altitude affecting noise level.
+        num_samples (int): Number of samples for averaging.
+        noise_factor (float): Base noise factor scaled with altitude.
+
+    Returns:
+        np.ndarray: Averaged binary observation map of shape (m, n).
+    """
+    m, n = belief_map.shape
+    sampled_observations = np.zeros((m, n, num_samples))
+    a = 0.2
+    b = 0.05
+    var = a*(1-np.exp(-b*altitude))
+    noise_std = np.sqrt(var)
+
+    for i in range(num_samples):
+        # Sample from the probability map with added Gaussian noise
+        noise = np.random.normal(loc=0.0, scale=noise_std, size=(m, n))
+        noisy_prob = belief_map + noise  # Add noise to P(m=1)
+        noisy_prob = np.clip(noisy_prob, 0, 1)  # Ensure probabilities are valid
+
+        # Sample binary observation
+        sampled_observations[..., i] = np.random.binomial(1, noisy_prob)
+
+    # Return the averaged observation map
+    return np.mean(sampled_observations, axis=-1)
