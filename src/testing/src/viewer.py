@@ -1,6 +1,8 @@
+from typing import List
 from matplotlib import colors
 import matplotlib.pyplot as plt
 import numpy as np
+import copy
 from mpl_toolkits.mplot3d import Axes3D  # Ensure this is imported
 
 
@@ -83,14 +85,8 @@ def plot_terrain(filename, belief, grid, uav_pos, gt, submap, zx, zy):
     ax3.set_title("Belief sampled map M")
     # ax3.set_xlim([0, self.x_range[1]])
     # ax3.set_ylim([0, self.y_range[1]])
-
-    if belief.ndim==3:
-        map = belief[:, :, 1].T
-    else:
-        map = belief.T
-
     im2 = ax3.imshow(
-        map,
+        belief[:, :, 1].T,
         cmap="Blues",
         extent=[x.min(), x.max(), y.min(), y.max()],
         origin="lower",
@@ -105,6 +101,48 @@ def plot_terrain(filename, belief, grid, uav_pos, gt, submap, zx, zy):
     plt.savefig(filename)
     plt.close(fig)
 
+    # def plot_prob(self, filename):
+
+    #     fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(50, 50))
+
+    #     # # Example 2D grid of probabilities (replace with your actual probability values)
+    #     probability_map_0 = self.probability[0, :, :]  # First probability map
+    #     # print(self.probability[0].shape)
+    #     # probability_map_1 = self.probability[1, :, :]  # Second probability map
+
+    #     # # Plot the first probability map in ax[0]
+    #     cax0 = ax.imshow(
+    #         probability_map_0.T,
+    #         cmap="Blues",
+    #         interpolation="nearest",
+    #         origin="lower",
+    #         vmin=0,
+    #         vmax=1,
+    #         extent=[self.x.min(), self.x.max(), self.y.min(), self.y.max()],
+    #     )
+
+    #     # # Add text annotations for the first probability map
+    #     for (i, j), prob in np.ndenumerate(probability_map_0.T):
+    #         ax.text(
+    #             self.y[i, j] + self.grid.length / 4,
+    #             self.x[i, j] + self.grid.length / 4,
+    #             f"{prob:.2f}",
+    #             ha="center",
+    #             va="center",
+    #             color="black",
+    #             fontsize=10,
+    #         )
+
+    #     ax.set_title("Probability Map 0")
+    #     ax.set_xlabel("X-axis")
+    #     ax.set_ylabel("Y-axis")
+
+    #     # # Adjust the layout to make sure everything fits well
+    #     plt.tight_layout()
+
+    #     # # Save the figure to a file
+    #     plt.savefig(filename)
+    #     plt.close(fig)
 
 
 
