@@ -19,18 +19,6 @@ class OccupancyMap:
                     if 0 <= ni < self.N and 0 <= nj < self.N:  # Valid neighbor
                         self.messages[((i, j), (ni, nj))] = [0.5, 0.5]
 
-    # # Local evidence function (sensor model)
-    # def sensor_model(self, z_i, m_i, x):
-    #     a = 1
-    #     b = 0.015
-    #     sigma = a * (1 - np.exp(-b * x.altitude))
-    #     if z_i == m_i:
-    #         return (
-    #             1 - sigma
-    #         )  # Get the probability of observing the true state value at this altitude
-    #     else:
-    #         return sigma
-
     def local_evidence(self, z, x):
         """
         Compute local evidence phi(X_i) for a given cell based on observation z and error sigma.
@@ -50,8 +38,7 @@ class OccupancyMap:
             return [1 - sigma, sigma]  # [P(z=0|m=0), P(z=0|m=1)]
         elif z == 1:
             return [sigma, 1 - sigma]  # [P(z=1|m=0), P(z=1|m=1)]
-        # else:
-        #     return [0.5, 0.5]  # Default uniform prior if no observation
+
 
     # Pairwise potential function
     def pairwise_potential(self, correlation_type=None):
@@ -249,15 +236,3 @@ def get_observations(grid_info, ground_truth_map, uav_pos):
     x, y = np.meshgrid(x, y, indexing="ij")
 
     return x, y, submap
-
-
-def adapt_observations(x, y, submap, grid_info):
-    x_min_id = int(x[0, 0] / grid_info.length)
-    y_min_id = int(y[0, 0] / grid_info.length)
-
-    observations = [
-        (x_min_id + i, y_min_id + j, submap[i, j])  # Global indices with binary state
-        for i in range(submap.shape[0])
-        for j in range(submap.shape[1])
-    ]
-    return observations

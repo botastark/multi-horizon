@@ -50,7 +50,7 @@ def plot_entropy_mse_combined(entropy1, entropy2, mse1, mse2, first_plot = "MexG
     plt.show()
 
 
-file_path = "/home/bota/Desktop/active_sensing/mexgen_equal/ig_with_mexgen_equal_1.txt"
+file_path = "/home/bota/Desktop/active_sensing/equal_mexgen/ig_with_mexgen_equal_1.txt"
 entropy_mexgen, mse_mexgen = extract_values_from_file(file_path)
 file_path_ = "/home/bota/Desktop/active_sensing/equal/ig_equal_1.txt"
 entropy_, mse_ = extract_values_from_file(file_path_)

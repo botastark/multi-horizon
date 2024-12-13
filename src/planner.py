@@ -196,15 +196,29 @@ class planning:
         # print(sampled_observation)
         # Estimate posterior using sampled observation
         # P(m|z) ∝ P(z|m)P(m)
+        # P(z=1|m=1)
         likelihood_ratio = sampled_observation 
+        P_z1 =likelihood_ratio*prior + (1-likelihood_ratio)*(1-prior)
+
+        P_z0 = 1- P_z1
+        P_m1_given_z1 = likelihood_ratio*prior/P_z1
+        P_m1_given_z0 = (1-likelihood_ratio)*prior/P_z0
+        P_m1_given_z1 = np.clip(P_m1_given_z1, 1e-10, 1 - 1e-10)
+        P_m1_given_z0 = np.clip(P_m1_given_z0, 1e-10, 1 - 1e-10)
+
+        # Entropy for P(m|z=1)
+        H_m_given_z1 = self.H(P_m1_given_z1)
+        H_m_given_z0 = self.H(P_m1_given_z0)
+        entropy = P_z0*H_m_given_z0+ P_z1*H_m_given_z1
+
+
+        
         # posterior = (likelihood_ratio * prior) / (likelihood_ratio * prior + (1-likelihood_ratio)*(1 - prior))
-        posterior = (likelihood_ratio * prior) / (likelihood_ratio * prior + (1-likelihood_ratio)*(1 - prior))
 
         # Compute entropy of estimated posterior
         # print(posterior)
         # posterior = (likelihood_ratio * prior) / (likelihood_ratio * prior + (1 - prior))
-        # print(posterior)
-        entropy = self.H(posterior) 
+        # entropy = self.H(posterior) 
         return np.sum(entropy)
 
     def select_action(self, belief, visited_x):

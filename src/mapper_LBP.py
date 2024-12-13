@@ -144,7 +144,6 @@ class OccupancyMap:
             "ur": np.array([np.min(i), np.max(j)+1]),
             "br": np.array([np.max(i)+1, np.max(j)+1]),
         }
-
         return fp_vertices_ij
 
 
@@ -178,7 +177,6 @@ class OccupancyMap:
                 fp_vertices_ij["ul"][I] : fp_vertices_ij["bl"][I],
                 fp_vertices_ij["ul"][J] : fp_vertices_ij["ur"][J]
             ]
-        
 
         assert np.all(np.greater_equal(posterior_m_zero, 0.0))
         assert np.all(np.less_equal(posterior_m_zero, 1.0))
@@ -195,8 +193,6 @@ class OccupancyMap:
         # Recheck the normalization
         assert np.all(np.greater_equal(posterior_m_one_norm, 0.0))
         assert np.all(np.less_equal(posterior_m_one_norm, 1.0))
-
-
 
         self.map_beliefs[
             fp_vertices_ij["ul"][I] : fp_vertices_ij["bl"][I],
@@ -217,13 +213,13 @@ class OccupancyMap:
         self.msgs[4, :, :] = self.map_beliefs[:, :]  # set msgs last channel with current map belief
         for _ in range(max_iterations):
             for direction, data in self.direction_to_slicing_data.items():
-                print(direction)
+                # print(direction)
                 product_slice = data["product_slice"](fp_vertices_ij)
-                print(f"product slice {product_slice}")
+                # print(f"product slice {product_slice}")
                 read_slice = data["read_slice"](fp_vertices_ij)
-                print(f"read_slice {read_slice}")
+                # print(f"read_slice {read_slice}")
                 write_slice = data["write_slice"](fp_vertices_ij)
-                print(f"write_slice  {write_slice}")
+                # print(f"write_slice  {write_slice}")
 
                 # elementwise multiplication of msgs
                 mul_0 = np.prod(1 - self.msgs[product_slice], axis=0)
@@ -270,6 +266,7 @@ class OccupancyMap:
 
     def get_belief(self):
         return self.map_beliefs
+    
     def sample_binary_observations(self, belief_map, altitude, num_samples=5):
         """
         Samples binary observations from a belief map with noise based on altitude.
@@ -387,7 +384,6 @@ def sample_binary_observations(belief_map, altitude, num_samples=5):
     b = 0.05
     var = a*(1-np.exp(-b*altitude))
     noise_std = np.sqrt(var)
-    # noise_std = noise_factor * altitude  # Noise increases with altitude
 
     for i in range(num_samples):
         # Sample from the probability map with added Gaussian noise

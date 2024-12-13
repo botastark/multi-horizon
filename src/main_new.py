@@ -11,8 +11,8 @@ from helper import (
     observed_m_ids,
     uav_position,
 )
-from terrain_creation import gaussian_random_field
-from planner_new import planning
+from helper import gaussian_random_field
+from planner import planning
 from uav_camera import camera
 
 from viewer import plot_terrain, plot_metrics
@@ -22,9 +22,9 @@ desktop = "/home/bota/Desktop/active_sensing"
 
 
 cache_dir = desktop + "/cache/"
-desktop += "/equal"
+desktop += "/equal_mexgen"
 correlation_type = "equal"  # "biased", "equal" "adaptive"
-action_select_strategy = "ig"  # "ig", "random" "sweep" ig_with_mexgen
+action_select_strategy = "ig_with_mexgen"  # "ig", "random" "sweep" ig_with_mexgen
 n_steps = 100
 grf_r = 4
 if not os.path.exists(desktop):
@@ -66,21 +66,31 @@ obs_ms = set()
 entropy, mse, height, coverage = [], [], [], []
 
 for step in range(n_steps + 1):
-    # collect observations
+    
     print(f"step {step}")
-   
+    # collect observations
     x_, y_, submap = get_observations(grid_info, ground_truth_map, uav_pos, seed = 0, mexgen=action_select_strategy)
     # mapping
+
+    """
+    Mapping Bota's version
     # mapper.update_observations(zx, zy, submap, uav_pos, belief_map)
     # mapper.propagate_messages(max_iterations=1, correlation_type=correlation_type)
     # belief_map = mapper.marginalize()
+    """
 
+    """
+    Luca's version
+    """
     zx = x_*grid_info.length
     zy = y_*grid_info.length
     l_m_0 = mapper.update_belief_OG(x_.T, y_.T, submap, uav_pos, mexgen = action_select_strategy)
     mapper.propagate_messages_( x_.T, y_.T, submap, uav_pos,  max_iterations=1, correlation_type=correlation_type)
     belief_map[:,:, 1] = mapper.get_belief().copy()
     belief_map[:,:, 0] = 1-belief_map[:,:, 1]
+    """
+    end 
+    """
 
     # collect metrics, log and plot
     obs_ms.update(observed_m_ids(camera, uav_pos))
@@ -122,11 +132,3 @@ for step in range(n_steps + 1):
 
     camera.set_altitude(uav_pos.altitude)
     camera.set_position(uav_pos.position)
-
-"""
-checks
-print(marginals.shape)
-print("Marginal at (0, 3):", marginals[0, 2])
-print("Probability of occupied at (10, 10):", marginals[10, 10, 1])
-print("Probability of occupied at (10, 20):", marginals[10, 20, 1])
-"""
