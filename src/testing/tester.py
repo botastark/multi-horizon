@@ -1,5 +1,6 @@
 import numpy as np
 from src.helper import uav_position
+import matplotlib.pyplot as plt
 from src.mapper import OccupancyMap
 # from src.mapper_LBP import OccupancyMap
 from simulator import MappingEnv, Mapper, Agent, State, Camera, Proximity
@@ -72,6 +73,7 @@ for step in range(1, len(actions)):
     correlation_type = params["weights_type"]
     occupancy_map.update_observations(x_, y_, submap, uav_pos, occupancy_beliefs)
     occupancy_map.propagate_messages(fp_ij, max_iterations=1, correlation_type=correlation_type)
+    my_msgs = occupancy_map.msgs_change()
     # l_m_0 = occupancy_map.update_belief_OG(x_.T, y_.T, submap, uav_pos)
     # occupancy_map.propagate_messages_( x_.T, y_.T, submap, uav_pos,  max_iterations=1, correlation_type=correlation_type)
 
@@ -85,6 +87,8 @@ for step in range(1, len(actions)):
     sim_mapper.update_belief_OG( observations, sim_env.agents)
     sim_mapper.update_map_beliefs(sim_env.agents, observations)
     sim_mapper.update_news_and_fuse_map_beliefs(sim_env.agents, observations)
+    his_msgs = sim_mapper.get_msgs()
+    assert my_msgs.shape == his_msgs.shape
     # l_m_0_ = sim_mapper.get_map_beliefs()[:, :, 0]
     # diff = l_m_0 - l_m_0_
     # diff = np.array(diff).flatten()
@@ -92,7 +96,7 @@ for step in range(1, len(actions)):
     
 
     # Extract the beliefs
-    occupancy_beliefs = occupancy_map.marginalize()
+    occupancy_beliefs = occupancy_map.marginalize(fp_ij)
     # occupancy_beliefs = occupancy_map.get_belief()
     sim_beliefs = sim_mapper.get_map_beliefs()[:, :, 0].copy()
 
@@ -108,37 +112,66 @@ for step in range(1, len(actions)):
 
     sim_env.step([actions[step]])
     
-    import matplotlib.pyplot as plt
+
+
+
+
     # Optionally visualize the differences
-    try:
+    plt.figure(figsize=(12, 5))
+    plt.subplot(1, 4, 1)
+    plt.title("OccupancyMap Beliefs")
+    if occupancy_beliefs.ndim==3:
+        plt.imshow(occupancy_beliefs[:, :, 1], cmap="viridis")  # Probability of "occupied"
+    else:
+        plt.imshow(occupancy_beliefs[:, :], cmap="viridis")  # Probability of "occupied"
+    plt.colorbar()
 
-        plt.figure(figsize=(12, 5))
-        plt.subplot(1, 4, 1)
-        plt.title("OccupancyMap Beliefs")
-        if occupancy_beliefs.ndim==3:
-            plt.imshow(occupancy_beliefs[:, :, 1], cmap="viridis")  # Probability of "occupied"
-        else:
-            plt.imshow(occupancy_beliefs[:, :], cmap="viridis")  # Probability of "occupied"
-        plt.colorbar()
+    plt.subplot(1, 4, 2)
+    plt.title("Simulator Mapper Beliefs")
+    plt.imshow(sim_beliefs, cmap="viridis")  # Probability of "occupied"
+    plt.colorbar()
 
-        plt.subplot(1, 4, 2)
-        plt.title("Simulator Mapper Beliefs")
-        plt.imshow(sim_beliefs, cmap="viridis")  # Probability of "occupied"
-        plt.colorbar()
+    plt.subplot(1, 4, 3)
+    plt.title("Difference")
+    plt.imshow(belief_diff, cmap="inferno")
+    plt.colorbar()
 
-        plt.subplot(1, 4, 3)
-        plt.title("Difference")
-        plt.imshow(belief_diff, cmap="inferno")
-        plt.colorbar()
+    plt.subplot(1, 4, 4)
+    plt.title("ground truth")
+    plt.imshow(submap, cmap="viridis")  # Probability of "occupied"
+    plt.colorbar()
 
-        plt.subplot(1, 4, 4)
-        plt.title("ground truth")
-        plt.imshow(submap, cmap="viridis")  # Probability of "occupied"
-        plt.colorbar()
-
-        plt.tight_layout()
-        plt.show()
-    except ImportError:
-        print("Matplotlib not installed, skipping visualization.")
+    plt.tight_layout()
+    plt.show()
     # break
+
+
+
+    # msgs difference
+    diff = my_msgs-his_msgs
+    plt.figure(figsize=(12, 5))
+    plt.subplot(1, 4, 1)
+    plt.title("down")
+    plt.imshow(diff[0,:, :], cmap="viridis")  # Probability of "occupied"
+    plt.colorbar()
+
+    plt.subplot(1, 4, 2)
+    plt.title("up")
+    plt.imshow(diff[2,:, :], cmap="viridis")  # Probability of "occupied"
+    plt.colorbar()
+
+    plt.subplot(1, 4, 3)
+    plt.title("left")
+    plt.imshow(diff[1,:, :], cmap="viridis")
+    plt.colorbar()
+
+    plt.subplot(1, 4, 4)
+    plt.title("right")
+    plt.imshow(diff[3,:, :], cmap="viridis")  # Probability of "occupied"
+    plt.colorbar()
+
+    plt.tight_layout()
+    plt.show()
+    # break
+
 

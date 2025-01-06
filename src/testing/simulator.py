@@ -1603,6 +1603,7 @@ class Mapper:
                 # copy the first 4 channels only
                 # the 5th one is the map belief
                 self.msgs[:4, :, :] = self.msgs_buffer[:4, :, :]
+                # return self.msgs[:4,:,:]
 
             bel_0 = np.prod(
                 1 - self.msgs[:, product_slice[1], product_slice[2]], axis=0
@@ -1624,7 +1625,8 @@ class Mapper:
                 )
             )
 
-
+    def get_msgs(self):
+        return self.msgs[:4,:,:]
     def _update_news_belief_LBP_and_fuse_single(
         self, agents: List[Agent], observations: List[Dict]
     ):
