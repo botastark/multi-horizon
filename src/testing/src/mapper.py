@@ -11,6 +11,7 @@ class OccupancyMap:
         self.last_observations = {}
         self.local_evidence = None
         self.messages = {}
+        self.priors = np.full((self.N, self.N, 2),0.5)
 
         # for i in range(self.N):
         #     for j in range(self.N):
@@ -65,14 +66,14 @@ class OccupancyMap:
 
 
         # Extract prior beliefs from marginals
-        prior_beliefs = marginals[i_flat, j_flat]  # Shape (len(z), 2)
+        prior_beliefs = self.priors[i_flat, j_flat]  # Shape (len(z), 2)
 
         # Fuse prior beliefs with local evidence
         fused_beliefs = prior_beliefs * self.local_evidence  # Element-wise multiplication
         fused_beliefs /= fused_beliefs.sum(axis=1, keepdims=True)  # Normalize
 
         # Update phi for the observed grid cells
-        self.phi[i_flat, j_flat] = np.round(fused_beliefs, decimals=10)
+        self.priors[i_flat, j_flat] = np.round(fused_beliefs, decimals=10)
         self.last_observations = {"z": np.array(submap), "i":i_flat, "j":j_flat}
 
     def propagate_messages(self, fp_ij, max_iterations=5, correlation_type=None):
@@ -93,8 +94,10 @@ class OccupancyMap:
             new_messages = {}
             for ((i, j), (ni, nj)), message in self.messages.items():
                 if (
-                    i_min <= i <= i_max and j_min <= j <= j_max and
-                    i_min <= ni <= i_max and j_min <= nj <= j_max
+                    # i_min <= i <= i_max and j_min <= j <= j_max
+                    #   and
+                    # i_min <= ni <= i_max and j_min <= nj <= j_max
+                    True
                 ):
                     
                     # Nk (ni_, nj_) neighbors of C (i,j) except for Ni (ni, nj), messgae from Nk to C
@@ -108,45 +111,74 @@ class OccupancyMap:
                     prod_incoming = np.prod(incoming_msgs, axis=0)
 
                     # Retrieve local evidence for (i, j)
-                    indices = np.where((self.last_observations["i"] == i) & (self.last_observations["j"] == j))[0]
-                    local_evidence_c = self.local_evidence[indices[0]]
-                    local_evidence_c =self.phi[i,j]
-                    # local_evidence_c = np.array([1,1])
+                    # indices = np.where((self.last_observations["i"] == i) & (self.last_observations["j"] == j))[0]
+                    # local_evidence_c = self.local_evidence[indices[0]]
+                    local_evidence_c =self.priors[i,j]
                     # Compute outgoing message from c to Ni
                     # new_message = np.dot(psi, prod_incoming) 
                     # print(f"correct order: {new_message}")
                     m_j0=local_evidence_c[0]*psi[0,0]*prod_incoming[0]+local_evidence_c[1]*psi[1,0]*prod_incoming[1]
                     m_j1=local_evidence_c[0]*psi[0,1]*prod_incoming[0]+local_evidence_c[1]*psi[1,1]*prod_incoming[1]
-                    # print(f"m j {m_j0},{m_j1}")
                     new_message = [m_j0, m_j1]
                     # new_message =local_evidence_c * np.dot( prod_incoming, psi)
-                    # print(f"m prev {new_message}")
-                    # print(f'weird order {new_message}')
                     new_message /= np.sum(new_message)  # Normalize
                     new_messages[((i, j), (ni, nj))] = np.round(new_message, decimals=10)
 
             # Update message storage
             self.messages.update(new_messages)
-            
 
-    def marginalize(self):
+            
+    def msgs_change(self):
+        storage = np.full(shape=(4,self.N, self.N),fill_value=0.5)
+        for i in range(self.N):
+            for j in range(self.N):
+                # neighbors = [(i - 1, j), (i + 1, j), (i, j - 1), (i, j + 1)]
+                # neighbors = [(i+1, j), (i, j-1), (i - 1, j), (i, j +1)]
+                neighbors = [(i-1, j), (i, j+1), (i + 1, j), (i, j - 1)]
+                for dir, (ni, nj) in enumerate(neighbors):
+                    if 0 <= ni<= self.N-1 and 0 <= nj <= self.N-1:
+                        storage[dir, i,j] = self.messages[(ni, nj),(i,j) ][1]
+        return storage
+
+
+
+                
+
+    def marginalize(self, fp_ij):
         """
         Compute marginals for each cell.
         Returns:
             Marginals array of shape (N, N, 2).
         """
-        marginals = np.zeros((self.N, self.N, 2))
-        for i in range(self.N):
-            for j in range(self.N):
+        
+        j_min, j_max = fp_ij["ul"][1], fp_ij["ur"][1] 
+        i_min, i_max = fp_ij["ul"][0], fp_ij["bl"][0] 
+        # for i in range(self.N):
+        #     for j in range(self.N):
+        for i in range(i_min, i_max):
+            for j in range(j_min, j_max):    
                 incoming_messages = np.array([
                     self.messages[((ni, nj), (i, j))]
                     for ni, nj in [(i - 1, j), (i + 1, j), (i, j - 1), (i, j + 1)]
                     if 0 <= ni < self.N and 0 <= nj < self.N
                 ])
                 prod_incoming = np.prod(incoming_messages, axis=0)
-                marginals[i, j] = self.phi[i, j] * prod_incoming
-                marginals[i, j] /= np.sum(marginals[i, j])  # Normalize
-        return np.round(marginals, decimals=10)
+                self.priors[i, j] = self.priors[i, j] * prod_incoming
+                # marginals[i, j] = prod_incoming
+                self.priors[i, j] /= np.sum(self.priors[i, j])  # Normalize
+
+
+        
+            # bel_0 = np.prod(
+            #     1 - self.msgs[:, product_slice[1], product_slice[2]], axis=0
+            # )
+            # bel_1 = np.prod(self.msgs[:, product_slice[1], product_slice[2]], axis=0)
+
+            # # norm_bel_0 = bel_0 / (bel_0 + bel_1)
+            # map_beliefs[product_slice[1], product_slice[2], agent.id] = bel_1 / (
+            #     bel_0 + bel_1
+            # )
+        return np.round(self.priors, decimals=10)
 
 
 def get_range(uav_pos, grid, index_form=False):
