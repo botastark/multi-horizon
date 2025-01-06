@@ -164,11 +164,13 @@ class OccupancyMap:
                 # Product of incoming messages
                 prod_incoming = np.prod(incoming_messages, axis=0)
 
+
                 # Compute new message
                 new_message = np.dot(self.phi[i, j] * prod_incoming, psi)
                 new_message /= np.sum(new_message)  # Normalize
                 new_messages[((i, j), (ni, nj))] = new_message
             self.messages = new_messages
+
 
     def marginalize(self):
         """
@@ -186,6 +188,7 @@ class OccupancyMap:
                 ]
                 prod_incoming = np.prod(incoming_messages, axis=0)
                 marginals[i, j] = self.phi[i, j] * prod_incoming
+                # marginals[i, j] = prod_incoming
                 marginals[i, j] /= np.sum(marginals[i, j])  # Normalize
         return marginals
 
