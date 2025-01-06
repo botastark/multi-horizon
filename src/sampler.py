@@ -34,26 +34,27 @@ def sensor_model(true_matrix, altitude):
 def sampler(true_matrix, altitude, N):
     rows, cols = true_matrix.shape
     cumulative_observation = np.zeros((rows, cols))
+    avg_acc = 0
 
     for _ in range(N):
         observation_matrix = sensor_model(true_matrix, altitude)
         stat = calculate_statistics(true_matrix, observation_matrix)
-
-        print(stat)
-        # cumulative_observation += observation_matrix
-        
-
-
-    return cumulative_observation / N
+        avg_acc+=stat['true/all']
+        cumulative_observation += observation_matrix
+    return cumulative_observation / N, avg_acc/N
 
 # Calculate true positive, false negative, etc.
-def calculate_statistics(true_matrix, averaged_observation):
-    true_positive = np.sum((true_matrix == 1) & (averaged_observation >= 0.5))
-    false_negative = np.sum((true_matrix == 1) & (averaged_observation < 0.5))
-    false_positive = np.sum((true_matrix == 0) & (averaged_observation >= 0.5))
-    true_negative = np.sum((true_matrix == 0) & (averaged_observation < 0.5))
-    true = true_negative+true_positive
-    all = true+ false_negative+false_positive
+def calculate_statistics(true_matrix, averaged_observation, Pm=None):
+    diff = 0.5
+    if Pm is not None:
+        diff = Pm[0]
+
+    true_positive = np.sum((true_matrix == 1) & (averaged_observation >= diff))
+    false_negative = np.sum((true_matrix == 1) & (averaged_observation < diff))
+    false_positive = np.sum((true_matrix == 0) & (averaged_observation >=diff))
+    true_negative = np.sum((true_matrix == 0) & (averaged_observation < diff))
+    true = true_negative + true_positive
+    all = true + false_negative + false_positive
     return {
         'True Positive': true_positive,
         'False Negative': false_negative,
@@ -64,53 +65,47 @@ def calculate_statistics(true_matrix, averaged_observation):
     
 
 # Parameters
-rows, cols = 10, 10  # Size of the grid
+rows, cols = 1, 1  # Size of the grid
 P_m = [0.50, 0.50]  # P(m=0) = 0.45, P(m=1) = 0.55
+P_m_decide = [0.450, 0.550]  # P(m=0) = 0.45, P(m=1) = 0.55
 
 
 # Generate the true matrix
 true_matrix = generate_true_matrix(rows, cols, P_m)
 hs= [5, 10, 15, 20, 25, 30]
-N_values = list(range(1,100,10))
+N_values = list(range(1,200,1))
+# N_values = [1,10,25,50,100,150, 200]
 
 plt.figure(figsize=(8, 6))
 cmap = matplotlib.colormaps['viridis']
 colors = [cmap(i / len(hs)) for i in range(len(hs))]
 
 for i, altitude in enumerate(hs):
-    # statistics_list = []
     acc= []
+    acc_avg = []
+
     for N in N_values:
-        averaged_observation = sampler(true_matrix, altitude, N)
+        averaged_observation, avg_acc = sampler(true_matrix, altitude, N)
         stats = calculate_statistics(true_matrix, averaged_observation)
-        # statistics_list.append(stats)
-        acc.append(stats["true/all"])
+        # acc.append(stats["true/all"])
+        if true_matrix[0][0]==1:
+            acc_avg.append(averaged_observation[0])
+        else:
+            acc_avg.append(1-averaged_observation[0])
 
-    plt.plot(N_values, acc, label = f"h={altitude}", color= colors[i] )
+    # plt.plot(N_values, acc, label = f"h={altitude}", color= colors[i] )
+    plt.plot(N_values, acc_avg, label = f"h={altitude}", color= colors[i] )
     sig = sigma(altitude)
-    plt.plot(N_values, [1-sig]*len(N_values), label = f"1-sigma h={altitude}", color= colors[i],linestyle='--')
-
+    plt.plot(N_values, [1-sig]*len(N_values), label = f"h={altitude} 1-sigma={round(1-sig,2)}", color= colors[i],linestyle='--')
+    print(f"h={altitude}, avgobs = {averaged_observation[0]}, 1-sig={1-sig}")
 plt.legend(title="Lines", bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
 plt.title('acc of sensor model for limited budget')
 plt.xlabel('budget: N samples')
+# plt.xscale("log")
+
 plt.ylabel('accuracy: (TP+TN)/ALL')
 plt.tight_layout()
 plt.show()
-
-
-
-# # Plot the results
-# plt.figure(figsize=(8, 6))
-# for i, N in enumerate(N_values):
-#     averaged_observation = sampler(true_matrix, altitude, N)
-#     plt.subplot(2, 2, i + 1)
-#     plt.imshow(averaged_observation, cmap='viridis', interpolation='none')
-#     plt.colorbar(label='Averaged Observation')
-#     plt.title(f'N = {N}')
-#     plt.axis('off')
-
-# plt.tight_layout()
-# plt.show()
 
 # Print statistics for each N
 
@@ -119,4 +114,3 @@ plt.show()
     
 #     for key, value in statistics_list[i].items():
 #         print(f"  {key}: {value}")
-#     print()
