@@ -182,8 +182,12 @@ class FastLogger:
             f.write(f"Pairwise: {self.pairwise}\n")
             f.write(f"N agents: {self.n}\n")
             f.write(
-                f"Grid info: range: 0-{self.grid.x}-{self.grid.y}, cell_size:{self.grid.length}, map shape: {self.grid.shape} \n"
+                f"Grid info: range: 0-{self.grid.x}-{self.grid.y}, cell_size:{self.grid.length}, map shape: {self.grid.shape}"
             )
+            if isinstance(self.r,str):
+                f.write(f"using {self.r} \n")
+            else:
+                f.write(f"Gaussian radius {self.r} \n")
             f.write(
                 f"init UAV position: {self.init_x.position} - {self.init_x.altitude} \n"
             )
@@ -354,18 +358,20 @@ def get_range(uav_pos, grid, index_form=False):
 
 #     return x, y, submap
 
-
 def get_observations(grid_info, ground_truth_map, uav_pos, seed = None, mexgen = None):
     [[x_min_id, x_max_id], [y_min_id, y_max_id]] = get_range(
         uav_pos, grid_info, index_form=True
     )
     m = ground_truth_map[x_min_id:x_max_id, y_min_id:y_max_id]
-    if mexgen!=None:
+    # if tile_dict is not None:
+    #     m = observed_submap((x_min_id,x_max_id), (y_min_id,y_max_id), tile_dict)
+
+    if mexgen is not None:
         success1 = sample_binary_observations(m, uav_pos.altitude)
         success0 = 1 - success1
     else:  
         if seed is None:
-            seed = np.identity
+            seed = 1
         rng = np.random.default_rng(seed)
         a = 1
         b = 0.015
@@ -420,3 +426,36 @@ def sample_binary_observations(belief_map, altitude, num_samples=5):
 
     # Return the averaged observation map
     return np.mean(sampled_observations, axis=-1)
+
+
+from tiles import observed_submap
+def gt_tiles(grid_info, tile_dict, cache_dir="cache"):
+    """
+    predict(TBU soon) from tiles
+    Parameters:
+    - folder with tiles
+    Returns:
+    - 2D binary map as a numpy array.
+    """
+
+    # Ensure cache directory exists
+    os.makedirs(cache_dir, exist_ok=True)
+
+    # Generate cache filename
+    cache_file = os.path.join(
+        cache_dir, f"field_tiles_{grid_info.x}x{grid_info.y}.pkl"
+    )
+
+    # Try loading from cache
+    if os.path.exists(cache_file):
+        with open(cache_file, "rb") as f:
+            print(f"Loading cached field from {cache_file}")
+            return pickle.load(f)
+    ground_truth_map = observed_submap((0, grid_info.x), (0, grid_info.y), tile_dict)
+
+    # Save to cache
+    with open(cache_file, "wb") as f:
+        pickle.dump(ground_truth_map, f)
+    print(f"Field generated and saved to {cache_file}")
+    
+    return ground_truth_map

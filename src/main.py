@@ -1,6 +1,6 @@
 from mapper import OccupancyMap, get_observations
 from mapper_LBP import OccupancyMap as OML
-from mapper_LBP import get_observations as get_observations_l
+# from mapper_LBP import get_observations as get_observations_l
 import timeit
 import os
 import numpy as np
@@ -23,9 +23,11 @@ desktop = "/home/bota/Desktop/active_sensing"
 
 
 cache_dir = desktop + "/cache/"
-desktop += "/equal_mexgen"
 correlation_type = "equal"  # "biased", "equal" "adaptive"
 action_select_strategy = "ig_with_mexgen"  # "ig", "random" "sweep" ig_with_mexgen
+desktop += f"/{correlation_type}_{action_select_strategy}"
+
+
 n_steps = 100
 grf_r = 4
 if not os.path.exists(desktop):
@@ -72,8 +74,10 @@ for step in range(n_steps + 1):
     
     print(f"step {step}")
     # collect observations
-    x_, y_, submap = get_observations(grid_info, ground_truth_map, uav_pos, seed = 0, mexgen=action_select_strategy)
-    
+    # x_, y_, submap = get_observations(grid_info, ground_truth_map, uav_pos, seed = 0, mexgen=action_select_strategy)
+    x_, y_, submap = get_observations(grid_info, ground_truth_map, uav_pos)
+    zx = x_*grid_info.length
+    zy = y_*grid_info.length
     # mapping
     if version_to_use=="Bota":
         mapper.update_observations(zx, zy, submap, uav_pos, belief_map)
@@ -81,8 +85,7 @@ for step in range(n_steps + 1):
         belief_map = mapper.marginalize()
     else:
         # mapper = OML(grid_info.shape[0])
-        zx = x_*grid_info.length
-        zy = y_*grid_info.length
+
         l_m_0 = mapper.update_belief_OG(x_.T, y_.T, submap, uav_pos, mexgen = action_select_strategy)
         mapper.propagate_messages_( x_.T, y_.T, submap, uav_pos,  max_iterations=1, correlation_type=correlation_type)
         belief_map[:,:, 1] = mapper.get_belief().copy()
@@ -112,8 +115,8 @@ for step in range(n_steps + 1):
         uav_positions,
         ground_truth_map,
         submap,
-        zx,
-        zy,
+        x_,
+        y_,
     )
 
     if step == n_steps:
