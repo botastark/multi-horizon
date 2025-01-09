@@ -163,10 +163,14 @@ accuracy_data_obs = {}
 accuracy_data_sigma = {}
 convergence_N_values = {}
 for i, altitude in enumerate(hs):
-    rows, cols = true_map_size(altitude)
-
-    true_matrix = generate_true_matrix(rows, cols, P_m)
-    acc_avg_obs= []
+    # rows, cols = true_map_size(altitude)
+    if rows==1 and cols==1:
+        true_matrix = np.array([0,1])
+        true_matrix = np.expand_dims(true_matrix, axis=0)
+        N_values = N_values[0:len(N_values)]
+    else:
+        true_matrix = generate_true_matrix(rows, cols, P_m)
+    acc_avg_obs = []
     acc_avg_sigma= []
     running_averages = []
     for N in N_values:
