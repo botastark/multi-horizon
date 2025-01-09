@@ -4,19 +4,19 @@ from helper import adaptive_weights_matrix
 
 
 class OccupancyMap:
-    def __init__(self, n_cells):
-        self.N = n_cells  # Grid size (100x100)
+    def __init__(self, grid_shape ):
+        self.N = grid_shape  # Grid size (100x100)
         self.states = [0, 1]  # Possible states
         # Initialize local evidence (uniform belief)
-        self.phi = np.full((self.N, self.N, 2), 0.5)  # 2 states: [0, 1]
+        self.phi = np.full((self.N[0], self.N[1], 2), 0.5)  # 2 states: [0, 1]
         self.last_observations = np.array([])
         # Initialize messages (for each edge, uniform message)
         self.messages = {}
-        for i in range(self.N):
-            for j in range(self.N):
+        for i in range(self.N[0]):
+            for j in range(self.N[1]):
                 neighbors = [(i - 1, j), (i + 1, j), (i, j - 1), (i, j + 1)]
                 for ni, nj in neighbors:
-                    if 0 <= ni < self.N and 0 <= nj < self.N:  # Valid neighbor
+                    if 0 <= ni < self.N[0] and 0 <= nj < self.N[1]:  # Valid neighbor
                         self.messages[((i, j), (ni, nj))] = [0.5, 0.5]
 
     def local_evidence(self, z, x):
@@ -158,8 +158,8 @@ class OccupancyMap:
                     self.messages[((ni_, nj_), (i, j))]
                     for ni_, nj_ in [(i - 1, j), (i + 1, j), (i, j - 1), (i, j + 1)]
                     if (ni_, nj_) != (ni, nj)
-                    and 0 <= ni_ < self.N
-                    and 0 <= nj_ < self.N
+                    and 0 <= ni_ < self.N[0]
+                    and 0 <= nj_ < self.N[1]
                 ]
                 # Product of incoming messages
                 prod_incoming = np.prod(incoming_messages, axis=0)
@@ -178,13 +178,13 @@ class OccupancyMap:
         Returns:
             Marginals array of shape (N, N, 2).
         """
-        marginals = np.zeros((self.N, self.N, 2))
-        for i in range(self.N):
-            for j in range(self.N):
+        marginals = np.zeros((self.N[0], self.N[1], 2))
+        for i in range(self.N[0]):
+            for j in range(self.N[1]):
                 incoming_messages = [
                     self.messages[((ni, nj), (i, j))]
                     for ni, nj in [(i - 1, j), (i + 1, j), (i, j - 1), (i, j + 1)]
-                    if 0 <= ni < self.N and 0 <= nj < self.N
+                    if 0 <= ni < self.N[0] and 0 <= nj < self.N[1]
                 ]
                 prod_incoming = np.prod(incoming_messages, axis=0)
                 marginals[i, j] = self.phi[i, j] * prod_incoming

@@ -2,7 +2,7 @@ import math
 import numpy as np
 # from helper import id_converter, sample_event_matrix, 
 from helper import uav_position
-from terrain_creation import terrain
+# from terrain_creation import terrain
 
 
 class camera:
@@ -30,7 +30,7 @@ class camera:
         self.a = 1
         self.b = 0.015
         self.actions = {"up", "down", "front", "back", "left", "right", "hover"}
-        self.z = terrain(self.grid)
+        # self.z = terrain(self.grid)
 
     def set_position(self, pos):
         self.position = pos
