@@ -1,7 +1,7 @@
 import os
 import csv
 import numpy as np
-from classifier import predict
+from classifier import predict, predict_batch
 from utilities import img_NED, gps_ned
 import pickle
 
@@ -99,19 +99,48 @@ class TileOperations:
                 tile_dict[tile] = gps_center
         return tile_dict
 
+    # def observed_submap(self, xrange, yrange):
+    #     """Generate an observed submap for the given range."""
+    #     submap = np.zeros((xrange[1] - xrange[0], yrange[1] - yrange[0]))
+    #     for c in range(xrange[0], xrange[1]):
+    #         for r in range(yrange[0], yrange[1]):
+    #             tile_loc = (r + 3, c + 13)  # Offset for 100% coverage rect
+    #             tile_img_path, _ = self.find_closest_image(tile_loc)
+    #             img_path = os.path.join(self.tiles_dir, tile_img_path)
+    #             pred = predict(img_path)[0]
+    #             if pred == 2:
+    #                 pred = 1
+    #             submap[c - xrange[0], r - yrange[0]] = pred
+    #         return submap
+        
+
+    # Modify observed_submap to use batch prediction
     def observed_submap(self, xrange, yrange):
-        """Generate an observed submap for the given range."""
+        """Generate an observed submap for the given range, with batch prediction."""
         submap = np.zeros((xrange[1] - xrange[0], yrange[1] - yrange[0]))
+        
+        # Collect all tile image paths in a batch
+        img_paths_batch = []
+        tiles_to_predict = []
+        
         for c in range(xrange[0], xrange[1]):
             for r in range(yrange[0], yrange[1]):
                 tile_loc = (r + 3, c + 13)  # Offset for 100% coverage rect
                 tile_img_path, _ = self.find_closest_image(tile_loc)
                 img_path = os.path.join(self.tiles_dir, tile_img_path)
-                pred = predict(img_path)[0]
-                if pred == 2:
-                    pred = 1
-                submap[c - xrange[0], r - yrange[0]] = pred
+                img_paths_batch.append(img_path)
+                tiles_to_predict.append((c - xrange[0], r - yrange[0]))  # Store positions to map predictions later
+
+        # Batch predict for all images
+        predictions = predict_batch(img_paths_batch)
+
+        # Map predictions to submap grid
+        for pred, (c, r) in zip(predictions, tiles_to_predict):
+            # Update the submap with the predicted label
+            submap[c, r] = 1 if pred == 1 else 0  # Assuming binary classification, adjust if necessary
+
         return submap
+
 
     def find_closest_image(self, tile_to_test, ref_rel_alt=20):
         """
