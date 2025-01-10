@@ -4,7 +4,6 @@ from PIL import Image
 
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader, Dataset, random_split
 
 from torchvision import transforms
 
@@ -44,3 +43,33 @@ def predict(img_path):
 # dir_all_tiles = '/home/bota/Downloads/projtiles1/'
 # img_path = dir_all_tiles+'DJI_20240607121633_0156_D_point19_tile15_15_crop.png'
 # print(predict(img_path))
+
+
+
+# Update predict function to handle batch prediction with a fixed batch size
+def predict_batch(img_paths, batch_size=64):
+
+    # Initialize an empty list to hold all predictions
+    all_predictions = []
+
+    # Process images in batches
+    for i in range(0, len(img_paths), batch_size):
+        batch_paths = img_paths[i:i + batch_size]
+        
+        # Load and transform images in the current batch
+        images = [transform(Image.open(img_path)) for img_path in batch_paths]
+        images = torch.stack(images)
+
+        # Move images to the same device as the model
+        images = images.to(device)
+
+        with torch.no_grad():
+            # Make predictions for the current batch
+            outputs = model(images)
+            predictions = torch.argmax(outputs, dim=1).tolist()
+
+        # Append batch predictions to the final list
+        all_predictions.extend(predictions)
+
+    return all_predictions
+
