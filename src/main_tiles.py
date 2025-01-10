@@ -5,11 +5,13 @@ import timeit
 import os
 import numpy as np
 
+from tile_class import TileOperations
+
 version_to_use = "Luca"
 from helper import (
     FastLogger,
     compute_metrics,
-    gt_tiles,
+    gaussian_random_field,
     observed_m_ids,
     uav_position,
 )
@@ -18,18 +20,14 @@ from planner import planning
 from uav_camera import camera
 
 from viewer import plot_terrain, plot_metrics
-from tiles import init_tiles, observed_submap
+# from tiles import init_tiles, observed_submap
 
 desktop = "/home/bota/Desktop/active_sensing"
 # desktop = "/Users/botaduisenbay/active_sensing"
 
-dir_all_tiles = '/home/bota/Downloads/projtiles1/'
-tile_to_img_dict = init_tiles(dir_all_tiles)
-
-
 cache_dir = desktop + "/cache/"
 correlation_type = "equal"  # "biased", "equal" "adaptive"
-action_select_strategy = "ig_with_mexgen"  # "ig", "random" "sweep" ig_with_mexgen
+action_select_strategy = "ig"  # "ig", "random" "sweep" ig_with_mexgen
 desktop += f"/{correlation_type}_{action_select_strategy}"
 
 
@@ -40,7 +38,7 @@ if not os.path.exists(desktop):
 
 class grid_info:
     x = 60
-    y = 60
+    y = 110
     length = 1
     shape = (int(x / length), int(y / length))
 
@@ -56,9 +54,20 @@ logger = FastLogger(
     r=grf_r,
 )
 
-# ground_truth_map = gaussian_random_field(grf_r, grid_info.shape[0])
-# ground_truth_map = observed_submap((0, grid_info.x), (0, grid_info.y), tile_to_img_dict)
-ground_truth_map = gt_tiles(grid_info, tile_to_img_dict, cache_dir="cache")
+if isinstance(grf_r, str) and grf_r=="tiles":
+    tiles_dir = '/home/bota/Downloads/projtiles1/'
+    gps_csv = '/home/bota/Desktop/active_sensing/src/gpstiles.csv'
+    row_imgs_dir = "/media/bota/BOTA/wheat/APPEZZAMENTO_PICCOLO/"
+    tile_ops = TileOperations(tiles_dir, gps_csv, row_imgs_dir)
+    ground_truth_map = tile_ops.groundtruth_tiles(grid_info, cache_dir="cache")
+elif isinstance(grf_r, int):
+    ground_truth_map = gaussian_random_field(grf_r, grid_info.shape[0])
+else:
+    print(f"{grf_r}")
+    print("choose correct grf_r: int - guassian radius, 'tiles' - use prediction on tiles")
+
+
+
 if version_to_use=="Bota":
     mapper = OccupancyMap(grid_info.shape)
 else:

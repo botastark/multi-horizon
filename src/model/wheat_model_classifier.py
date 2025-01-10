@@ -372,10 +372,10 @@ class InceptionResNetV2(nn.Module):
 #     #transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.1),
 #     # transforms.CenterCrop(224),
 #     transforms.ToTensor(),
-#     transforms.Normalize(
-#         mean=[0.485, 0.456, 0.406],
-#         std=[0.229, 0.224, 0.225]
-#     )
+#     # transforms.Normalize(
+#     #     mean=[0.485, 0.456, 0.406],
+#     #     std=[0.229, 0.224, 0.225]
+#     # )
 # ])
 
 
@@ -400,23 +400,23 @@ class InceptionResNetV2(nn.Module):
 
 # #class that prepares the dataset to be used with torch
 
-class DatasetNoTransform(Dataset):
+# class DatasetNoTransform(Dataset):
 
-    def __init__(self, image_list):
-        super(DatasetNoTransform, self).__init__()
-        self.features = [i for i in image_list]
-        self.target = [0 for i in image_list]
+#     def __init__(self, image_list):
+#         super().__init__()
+#         self.features = [i for i in image_list]
+#         self.target = [0 for i in image_list]
 
-    def __len__(self):
-        return len(self.features)
+#     def __len__(self):
+#         return len(self.features)
 
-    def __getitem__(self, idx):
+#     def __getitem__(self, idx):
         
-        x = self.features[idx]
+#         x = self.features[idx]
         
-        y = self.target[idx]
+#         y = self.target[idx]
 
-        return x, y  
+#         return x, y  
 
 # dataset = DatasetNoTransform(data)
 # #other torch things
