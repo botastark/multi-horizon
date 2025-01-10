@@ -13,9 +13,7 @@ num_classes = 3
 model = InceptionResNetV2(num_classes)
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.AdamW(model.parameters(), lr=0.00001)
-
-
-model.load_state_dict(torch.load("/home/bota/Desktop/active_sensing/src/model/model_wheat_classifier.p", weights_only=True))
+model.load_state_dict(torch.load("/home/bota/Desktop/active_sensing/src/model/model_resnet_single_image.p", weights_only=True))
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 model.to(device)
 
