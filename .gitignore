@@ -88,6 +88,8 @@ debug.log
 results
 *.txt
 
-#model
-/home/bota/Desktop/active_sensing/src/model/model_wheat_classifier.p
-/home/bota/Desktop/active_sensing/cache/*
+#models
+src/model/model_wheat_classifier.p
+src/model/model_resnet_single_image.p
+#cache fields
+cache
