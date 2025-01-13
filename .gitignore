@@ -88,8 +88,11 @@ debug.log
 results
 *.txt
 
-#models
-src/model/model_wheat_classifier.p
-src/model/model_resnet_single_image.p
+# models
+src/model/*.p
+
 #cache fields
 cache
+
+equal_ig/
+equal_ig*/
