@@ -87,3 +87,6 @@ debug.log
 # results folder
 results
 *.txt
+
+#model
+/home/bota/Desktop/active_sensing/src/model/model_wheat_classifier.p

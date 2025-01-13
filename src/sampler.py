@@ -42,7 +42,7 @@ def calculate_statistics(true_matrix, averaged_observation):
     f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
 
     accuracy = (true_positive + true_negative) / true_matrix.size
-
+    
     return {
         'True Positive': true_positive,
         'False Negative': false_negative,
@@ -167,7 +167,7 @@ for i, altitude in enumerate(hs):
     if rows==1 and cols==1:
         true_matrix = np.array([0,1])
         true_matrix = np.expand_dims(true_matrix, axis=0)
-        N_values = N_values[0:len(N_values)]
+        N_values = N_values[0:len(N_values)/2]
     else:
         true_matrix = generate_true_matrix(rows, cols, P_m)
     acc_avg_obs = []
