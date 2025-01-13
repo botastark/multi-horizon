@@ -84,15 +84,14 @@ Desktop.ini
 # Debugger specific files
 debug.log
 
-# results folder
-results
-*.txt
-
 # models
 src/model/*.p
 
-#cache fields
+# cache fields
 cache
 
+# ignore temp result folders
 equal_ig/
 equal_ig*/
+results
+*.txt

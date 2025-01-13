@@ -140,7 +140,9 @@ class TileOperations:
             submap[c, r] = 1 if pred == 1 else 0  # Assuming binary classification, adjust if necessary
 
         return submap
-
+    
+    def get_rawimagepath(self, tile_to_test):
+        return self.get_tile_img_path(tile_to_test)
 
     def find_closest_image(self, tile_to_test, ref_rel_alt=20):
         """
@@ -171,7 +173,7 @@ class TileOperations:
 Testing
 """
 
-"""
+# """
 tiles_dir = '/home/bota/Downloads/projtiles1/'
 gps_csv = '/home/bota/Desktop/active_sensing/src/gpstiles.csv'
 row_imgs_dir = "/media/bota/BOTA/wheat/APPEZZAMENTO_PICCOLO/"
@@ -186,4 +188,4 @@ closest_image_path, minimum_distance = tile_ops.find_closest_image(tile_to_test)
 
 print(f"Selected tile image: {closest_image_path}")
 print(f"Distance to tile center: {minimum_distance:.2f}")
-"""
+# """
