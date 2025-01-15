@@ -1,9 +1,12 @@
 import os
 import csv
+from matplotlib import pyplot as plt
 import numpy as np
 from classifier import predict, predict_batch
-from utilities import img_NED, gps_ned
+from utilities import get_image_properties, img_NED, gps_ned
 import pickle
+from proj import camera
+
 
 class TileOperations:
     def __init__(self, tiles_dir, gps_csv, row_imgs_dir):
@@ -19,6 +22,10 @@ class TileOperations:
         self.row_imgs_dir = row_imgs_dir
         self.tile_to_img_dict = self._init_tiles()
         self.gps_tile_dict = self._collect_tile_gps(gps_csv)
+        ref_img_path = "/media/bota/BOTA/wheat/APPEZZAMENTO_PICCOLO/DJI_20240607121133_0006_D_point0.JPG"
+        ref_point_info = get_image_properties(ref_img_path)
+
+        self.L2 = camera(ref_point_info)
 
     def parse_tiles(self, tile_list):
         """Parse tile filenames to extract tile row and column."""
@@ -169,11 +176,46 @@ class TileOperations:
         return closest_image_path, minimum_distance
 
 
+    def locate_wrt_tile(self, tile_to_test, ref_rel_alt=20):
+        """
+        Find the closest image to a given tile based on NED coordinates.
+        """
+        gps_coordinates = self.gps_tile_dict[tile_to_test]
+        tile_center_gps = [gps_coordinates[0], gps_coordinates[1], ref_rel_alt]
+        tile_center_ned = gps_ned(tile_center_gps,(tile_center_gps, [0,0,0]))
+        ref_point = (tile_center_gps, tile_center_ned)
+        tile_center_ned = gps_ned(tile_center_gps,ref_point)
+
+        # print(f"tile center gps: {tile_center_gps}")
+        # print(f"tile center ned: {tile_center_ned}")
+        image_paths_for_tile = self.get_tile_img_path(tile_to_test)
+
+        fov_corners_all = []
+        centers= []
+
+        for image_path in image_paths_for_tile:
+            
+            image_name = image_path.split("_tile")[0] + ".JPG"
+            img_path = os.path.join(self.row_imgs_dir, image_name)
+            tile_ned_coordinates = img_NED(img_path, ref_info=ref_point)
+            # # tile_ned_coordinates = gps_ned(image_ned_coordinates[0], ref_info=(tile_center_ned, [0,0,0]))
+            # print(tile_ned_coordinates)
+            
+            tile_ned_coordinates =tile_ned_coordinates[1]
+            centers.append(tile_ned_coordinates)
+            img_info = get_image_properties(img_path)
+            fov_corners = np.array(self.L2.imgToWorldCoord(tile_ned_coordinates, img_info))
+            # fov_corners = np.array(L2.get_fov_corners_in_ned(T, img_info))
+            fov_corners_all.append(fov_corners)
+            distance_to_tile = (tile_ned_coordinates[0]**2 + tile_ned_coordinates[1]**2)**0.5
+        return fov_corners_all, centers
+
+
 """
 Testing
 """
 
-# """
+"""
 tiles_dir = '/home/bota/Downloads/projtiles1/'
 gps_csv = '/home/bota/Desktop/active_sensing/src/gpstiles.csv'
 row_imgs_dir = "/media/bota/BOTA/wheat/APPEZZAMENTO_PICCOLO/"
@@ -183,9 +225,9 @@ tile_ops = TileOperations(tiles_dir, gps_csv, row_imgs_dir)
 
 
 # Test finding the closest image
-tile_to_test = (20, 20)
-closest_image_path, minimum_distance = tile_ops.find_closest_image(tile_to_test)
-
-print(f"Selected tile image: {closest_image_path}")
-print(f"Distance to tile center: {minimum_distance:.2f}")
-# """
+tile_to_test = (13, 39)
+# closest_image_path, minimum_distance = tile_ops.find_closest_image(tile_to_test)
+# print(f"Selected tile image: {closest_image_path}")
+# print(f"Distance to tile center: {minimum_distance:.2f}")
+tile_ops.locate_wrt_tile(tile_to_test)
+"""
