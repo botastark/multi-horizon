@@ -27,7 +27,10 @@ transform = transforms.Compose([
 
 
 def predict(img_path):
-    img=Image.open(img_path)
+    if isinstance(img_path, str):
+        img=Image.open(img_path)
+    else:
+        img = img_path
     data = transform(img)
     data = data.unsqueeze(0)
 
