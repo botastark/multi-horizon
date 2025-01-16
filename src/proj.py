@@ -25,8 +25,12 @@ class camera:
             [0, self.f_y, self.cy],
             [0, 0, 1],
         ]  # instrinsic matrix
+
     def camera_characteristics(self):
-        print(f"img size: w{self.img_width}-h{self.img_height}\n focal length: {self.f} fx:{self.f_x} fy:{self.f_y}\n sensor size: w{self.sensor_width}-h{self.sensor_height}\n")
+        print(
+            f"img size: w{self.img_width}-h{self.img_height}\n focal length: {self.f} fx:{self.f_x} fy:{self.f_y}\n sensor size: w{self.sensor_width}-h{self.sensor_height}\n"
+        )
+
     def _get_image_corners(self):
         img_corners = np.array(
             [
@@ -64,7 +68,7 @@ class camera:
         # Extract gimbal orientation
         gimbal_yaw, gimbal_pitch, gimbal_roll = (
             np.deg2rad(float(point_info["XMPInfo"]["GimbalYawDegree"])),
-            np.deg2rad(float(point_info["XMPInfo"]["GimbalPitchDegree"])+90),
+            np.deg2rad(float(point_info["XMPInfo"]["GimbalPitchDegree"]) + 90),
             np.deg2rad(float(point_info["XMPInfo"]["GimbalRollDegree"])),
             # 0.0,
         )
@@ -72,18 +76,17 @@ class camera:
 
         # Calculate combined rotation (world to camera)
         R_flight = (
-            cv2.Rodrigues(np.array([0, 0, flight_yaw]))[0] @
-            cv2.Rodrigues(np.array([0, flight_pitch, 0]))[0] @
-            cv2.Rodrigues(np.array([flight_roll, 0, 0]))[0]
+            cv2.Rodrigues(np.array([0, 0, flight_yaw]))[0]
+            @ cv2.Rodrigues(np.array([0, flight_pitch, 0]))[0]
+            @ cv2.Rodrigues(np.array([flight_roll, 0, 0]))[0]
         )
         R_gimbal = (
-            cv2.Rodrigues(np.array([0, 0, gimbal_yaw]))[0] @
-            cv2.Rodrigues(np.array([0, gimbal_pitch, 0]))[0] @
-            cv2.Rodrigues(np.array([gimbal_roll, 0, 0]))[0]
+            cv2.Rodrigues(np.array([0, 0, gimbal_yaw]))[0]
+            @ cv2.Rodrigues(np.array([0, gimbal_pitch, 0]))[0]
+            @ cv2.Rodrigues(np.array([gimbal_roll, 0, 0]))[0]
         )
 
         R_world_to_camera = R_flight @ R_gimbal
-
 
         # # https://developer.dji.com/mobile-sdk/documentation/introduction/component-guide-gimbal.html
 
@@ -93,12 +96,15 @@ class camera:
 
         # Normalize corners in the camera frame
         fov = np.deg2rad(60)
-        tan = np.tan(fov/2)
-        c_top_left      = [-tan,    tan,  -1]
-        c_top_right     = [tan,     tan,  -1]
-        c_bottom_left   = [-tan,    -tan, -1]
-        c_bottom_right  = [tan,     -tan, -1]
-        corners_camera_frame = np.array([c_top_left, c_top_right, c_bottom_right, c_bottom_left])*altitude
+        tan = np.tan(fov / 2)
+        c_top_left = [-tan, tan, -1]
+        c_top_right = [tan, tan, -1]
+        c_bottom_left = [-tan, -tan, -1]
+        c_bottom_right = [tan, -tan, -1]
+        corners_camera_frame = (
+            np.array([c_top_left, c_top_right, c_bottom_right, c_bottom_left])
+            * altitude
+        )
 
         # img_corners_normalized = self._normalize_corners()
 
