@@ -25,7 +25,8 @@ class camera:
             [0, self.f_y, self.cy],
             [0, 0, 1],
         ]  # instrinsic matrix
-
+    def camera_characteristics(self):
+        print(f"img size: w{self.img_width}-h{self.img_height}\n focal length: {self.f} fx:{self.f_x} fy:{self.f_y}\n sensor size: w{self.sensor_width}-h{self.sensor_height}\n")
     def _get_image_corners(self):
         img_corners = np.array(
             [
