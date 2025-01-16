@@ -209,13 +209,14 @@ class TileOperations:
             fov_corners_all.append(fov_corners)
             distance_to_tile = (tile_ned_coordinates[0]**2 + tile_ned_coordinates[1]**2)**0.5
         return fov_corners_all, centers
-
+    def get_camera(self):
+        return self.L2.camera_characteristics()
 
 """
 Testing
 """
 
-"""
+# """
 tiles_dir = '/home/bota/Downloads/projtiles1/'
 gps_csv = '/home/bota/Desktop/active_sensing/src/gpstiles.csv'
 row_imgs_dir = "/media/bota/BOTA/wheat/APPEZZAMENTO_PICCOLO/"
@@ -230,4 +231,5 @@ tile_to_test = (13, 39)
 # print(f"Selected tile image: {closest_image_path}")
 # print(f"Distance to tile center: {minimum_distance:.2f}")
 tile_ops.locate_wrt_tile(tile_to_test)
-"""
+tile_ops.get_camera()
+# """
