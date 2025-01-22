@@ -1,6 +1,7 @@
 # pairwise_factor_weights: equal, biased, adaptive
 from matplotlib import pyplot as plt
 import numpy as np
+from sklearn.metrics import confusion_matrix
 
 
 def collect_sample_set(grid):
@@ -113,7 +114,7 @@ def compute_entropy(belief):
     assert np.all(np.greater_equal(belief, 0.0)), f"{belief[np.isnan(belief)]}"
     assert np.all(np.less_equal(belief, 1.0)), f"{belief[np.isnan(belief)]}"
 
-    if belief.ndim==3:
+    if belief.ndim == 3:
         v1 = belief[:, :, 0]
         v2 = belief[:, :, 1]
     else:
@@ -141,7 +142,7 @@ def compute_entropy(belief):
 
 
 def compute_metrics(ground_truth_map, belief, ms_set, grid):
-    if belief.ndim==3:
+    if belief.ndim == 3:
         estimated_map = (belief[..., 1] >= 0.5).astype(np.uint8)
     else:
         estimated_map = (belief >= 0.5).astype(np.uint8)
@@ -184,7 +185,7 @@ class FastLogger:
             f.write(
                 f"Grid info: range: 0-{self.grid.x}-{self.grid.y}, cell_size:{self.grid.length}, map shape: {self.grid.shape}"
             )
-            if isinstance(self.r,str):
+            if isinstance(self.r, str):
                 f.write(f"using {self.r} \n")
             else:
                 f.write(f"Gaussian radius {self.r} \n")
@@ -236,6 +237,8 @@ class FastLogger:
             print(f"Error reading or parsing data: {e}")
 
         return info, (entropy, mse, height, coverage)
+
+
 import os
 import pickle
 
@@ -246,7 +249,8 @@ def gaussian_random_field(cluster_radius, n_cell, cache_dir="cache"):
      https://andrewwalker.github.io/statefultransitions/post/gaussian-fields/
     Parameters:
     - cluster_radius: Correlation radius for the Gaussian field.
-    - n_cell: Size of the field (n_cell x n_cell).
+    - n_cell: Size of the field (n_cell_x x n_cell_y).
+
     - cache_dir: Directory to store cached fields (default: "cache").
 
     Returns:
@@ -255,10 +259,11 @@ def gaussian_random_field(cluster_radius, n_cell, cache_dir="cache"):
 
     # Ensure cache directory exists
     os.makedirs(cache_dir, exist_ok=True)
+    n_cell_x, n_cell_y = n_cell
 
     # Generate cache filename
     cache_file = os.path.join(
-        cache_dir, f"field_radius_{cluster_radius}_size_{n_cell}.pkl"
+        cache_dir, f"field_radius_{cluster_radius}_size_{n_cell_x}x{n_cell_y}.pkl"
     )
 
     # Try loading from cache
@@ -282,15 +287,16 @@ def gaussian_random_field(cluster_radius, n_cell, cache_dir="cache"):
 
     # Generate amplitude for the given cluster_radius
     map_rng = np.random.default_rng(123)
-    amplitude = np.zeros((n_cell, n_cell))
-    fft_indices = _fft_indices(n_cell)
+    amplitude = np.zeros((n_cell_x, n_cell_y))
+    fft_indices_x = _fft_indices(n_cell_x)
+    fft_indices_y = _fft_indices(n_cell_y)
 
-    for i, kx in enumerate(fft_indices):
-        for j, ky in enumerate(fft_indices):
+    for i, kx in enumerate(fft_indices_x):
+        for j, ky in enumerate(fft_indices_y):
             amplitude[i, j] = _pk2(kx, ky)
 
     # Generate Gaussian random field
-    noise = np.fft.fft2(map_rng.normal(size=(n_cell, n_cell)))
+    noise = np.fft.fft2(map_rng.normal(size=(n_cell_x, n_cell_y)))
     random_field = np.fft.ifft2(noise * amplitude).real
     normalized_random_field = (random_field - np.min(random_field)) / (
         np.max(random_field) - np.min(random_field)
@@ -309,6 +315,7 @@ def gaussian_random_field(cluster_radius, n_cell, cache_dir="cache"):
 
     return binary_field
 
+
 import math
 
 
@@ -321,8 +328,8 @@ def get_range(uav_pos, grid, index_form=False):
     fov = np.pi / 3
     x_angle = fov / 2  # rads
     y_angle = fov / 2  # rads
-    x_dist = uav_pos.altitude * math.tan(x_angle )
-    y_dist = uav_pos.altitude * math.tan(y_angle )
+    x_dist = uav_pos.altitude * math.tan(x_angle)
+    y_dist = uav_pos.altitude * math.tan(y_angle)
 
     # adjust func: for smaller square ->int() and for larger-> round()
     x_dist = round(x_dist / grid.length) * grid.length
@@ -341,6 +348,7 @@ def get_range(uav_pos, grid, index_form=False):
 
     return [[x_min, x_max], [y_min, y_max]]
 
+
 # def get_observations(grid_info, ground_truth_map, uav_pos):
 #     [[x_min_id, x_max_id], [y_min_id, y_max_id]] = get_range(
 #         uav_pos, grid_info, index_form=True
@@ -358,7 +366,8 @@ def get_range(uav_pos, grid, index_form=False):
 
 #     return x, y, submap
 
-def get_observations(grid_info, ground_truth_map, uav_pos, seed = None, mexgen = None):
+
+def get_observations(grid_info, ground_truth_map, uav_pos, seed=None, mexgen=None):
     [[x_min_id, x_max_id], [y_min_id, y_max_id]] = get_range(
         uav_pos, grid_info, index_form=True
     )
@@ -369,7 +378,7 @@ def get_observations(grid_info, ground_truth_map, uav_pos, seed = None, mexgen =
     if mexgen is not None:
         success1 = sample_binary_observations(m, uav_pos.altitude)
         success0 = 1 - success1
-    else:  
+    else:
         if seed is None:
             seed = 1
         rng = np.random.default_rng(seed)
@@ -379,21 +388,18 @@ def get_observations(grid_info, ground_truth_map, uav_pos, seed = None, mexgen =
         random_values = rng.random(m.shape)
         success0 = random_values <= 1.0 - sigma
         success1 = random_values <= 1.0 - sigma
-    
+
     z0 = np.where(np.logical_and(success0, m == 0), 0, 1)
     z1 = np.where(np.logical_and(success1, m == 1), 1, 0)
     z = np.where(m == 0, z0, z1)
 
-    x = np.arange(
-        x_min_id , x_max_id 
-    )
-    y = np.arange(
-        y_min_id , y_max_id
-    )
+    x = np.arange(x_min_id, x_max_id)
+    y = np.arange(y_min_id, y_max_id)
 
     x, y = np.meshgrid(x, y, indexing="ij")
 
     return x, y, z
+
 
 def sample_binary_observations(belief_map, altitude, num_samples=5):
     """
@@ -412,7 +418,7 @@ def sample_binary_observations(belief_map, altitude, num_samples=5):
     sampled_observations = np.zeros((m, n, num_samples))
     a = 0.2
     b = 0.05
-    var = a*(1-np.exp(-b*altitude))
+    var = a * (1 - np.exp(-b * altitude))
     noise_std = np.sqrt(var)
 
     for i in range(num_samples):
@@ -426,3 +432,113 @@ def sample_binary_observations(belief_map, altitude, num_samples=5):
 
     # Return the averaged observation map
     return np.mean(sampled_observations, axis=-1)
+
+
+"""
+sampling updates start here
+"""
+
+
+def sigma(altitude):
+    a = 1
+    b = 0.015
+    return a * (1 - np.exp(-b * altitude))
+
+
+def sensor_model(true_matrix, altitude):
+    sig = sigma(altitude)
+    P_z_equals_m = 1 - sig
+    P_z_not_equals_m = sig
+
+    rows, cols = true_matrix.shape
+    observation_matrix = np.zeros((rows, cols))
+
+    for i in range(rows):
+        for j in range(cols):
+            if true_matrix[i, j] == 1:
+                observation_matrix[i, j] = np.random.choice(
+                    [1, 0], p=[P_z_equals_m, P_z_not_equals_m]
+                )
+            else:
+                observation_matrix[i, j] = np.random.choice(
+                    [0, 1], p=[P_z_equals_m, P_z_not_equals_m]
+                )
+
+    return observation_matrix
+
+
+def sampler(true_matrix, altitude, N):
+    cumulative_observation = np.empty(true_matrix.shape)
+    for i in range(N):
+        observation_matrix = sensor_model(true_matrix, altitude)
+        if i == 0:
+            cumulative_observation = observation_matrix.copy()
+            continue
+        cumulative_observation = np.vstack([cumulative_observation, observation_matrix])
+    return cumulative_observation
+
+
+def calculate_statistics(true_matrix_, observation):
+    n = int(observation.shape[0] / true_matrix_.shape[0])
+
+    true_matrix = np.tile(true_matrix_, (n, 1))
+    true_positive = np.sum((true_matrix == 1) & (observation == 1))
+    false_negative = np.sum((true_matrix == 1) & (observation == 0))
+    false_positive = np.sum((true_matrix == 0) & (observation == 1))
+    true_negative = np.sum((true_matrix == 0) & (observation == 0))
+
+    return {
+        "True Positive": true_positive,
+        "False Negative": false_negative,
+        "False Positive": false_positive,
+        "True Negative": true_negative,
+    }
+
+
+import json
+
+
+def get_s0_s1(true_matrix, altitude, e=0.3):
+    with open("/home/bota/Desktop/active_sensing/data/N_per_E.json", "r") as file:
+        loaded_dict = json.load(file)
+    altitude = round(altitude, 2)
+    N = int(float(loaded_dict[str(altitude)][str(e)]))
+    # # print(f"total n tiles: {true_matrix.shape[0]*true_matrix.shape[1]}")
+    # N1 = np.sum(true_matrix == 1) * N
+    # N0 = np.sum(true_matrix == 0) * N
+    # print(f"with n= {N}, N0 {N0} and N1 {N1}")
+    cum_obs = sampler(true_matrix, altitude, N)
+    # stats = calculate_statistics(true_matrix, cum_obs)
+    # print(f"stats: {stats}")
+    n = int(cum_obs.shape[0] / true_matrix.shape[0])
+    true_matrix_ = np.tile(true_matrix, (n, 1))
+    # print(true_matrix)
+    # print(cum_obs)
+
+    c = confusion_matrix(true_matrix_.flatten(), cum_obs.flatten())
+    c_norm = c / c.astype(np.float64).sum(axis=1, keepdims=True)
+    c_norm = np.round(c_norm, decimals=2).transpose()
+    c_norm = np.nan_to_num(c_norm) + 10e-10
+    # print(c_norm)
+
+    # matrix_dict = {
+    #     # "S": round(sigma(altitude), 2),
+    #     "FP": round(stats["False Positive"] / N0, 2),
+    #     "FN": round(stats["False Negative"] / N1, 2),
+    #     "TN": round(stats["True Negative"] / N0, 2),
+    #     "TP": round(stats["True Positive"] / N1, 2),
+    #     # "1-S": round(1 - sigma(altitude), 2),
+    # }
+    # # print(matrix_dict)
+
+    # TP = matrix_dict["TP"]
+    # FP = matrix_dict["FP"]
+    # TN = matrix_dict["TN"]
+    # FN = matrix_dict["FN"]
+
+    # s0 = matrix_dict["FP"]
+    # s1 = matrix_dict["FN"]
+    s0 = c_norm[1][0]
+    s1 = c_norm[0][1]
+    # return np.array([[TN, FN], [FP, TP]]), (s0, s1)
+    return c_norm, (s0, s1)
