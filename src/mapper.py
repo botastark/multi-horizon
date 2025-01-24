@@ -1,16 +1,18 @@
 import numpy as np
 import math
-from helper import adaptive_weights_matrix
+from helper import adaptive_weights_matrix, get_s0_s1
 
 
 class OccupancyMap:
-    def __init__(self, grid_shape ):
+    def __init__(self, grid_shape, conf_dict=None):
         self.N = grid_shape  # Grid size (100x100)
         self.states = [0, 1]  # Possible states
         # Initialize local evidence (uniform belief)
         self.phi = np.full((self.N[0], self.N[1], 2), 0.5)  # 2 states: [0, 1]
         self.last_observations = np.array([])
+        self.conf_dict = conf_dict
         # Initialize messages (for each edge, uniform message)
+
         self.messages = {}
         for i in range(self.N[0]):
             for j in range(self.N[1]):
@@ -39,7 +41,6 @@ class OccupancyMap:
         elif z == 1:
             return [sigma, 1 - sigma]  # [P(z=1|m=0), P(z=1|m=1)]
 
-
     # Pairwise potential function
     def pairwise_potential(self, correlation_type=None):
         """
@@ -64,7 +65,7 @@ class OccupancyMap:
     def update_observations(self, x, y, submap, uav_pos, marginals):
         """
         Update local evidence phi based on observations.
-        
+
         Parameters:
             x: Meshgrid of x-coordinates (1D array).
             y: Meshgrid of y-coordinates (1D array).
@@ -78,7 +79,6 @@ class OccupancyMap:
 
         i = (x / grid_length).astype(int)  # Convert x to grid indices
         j = (y / grid_length).astype(int)  # Convert y to grid indices
-        
 
         # Flatten submap and grid indices for vectorized processing
         z = submap.flatten()
@@ -89,12 +89,23 @@ class OccupancyMap:
         # Compute local evidence for all observations
         # altitude = uav_pos.altitude
         a, b = 1, 0.015
-        sigma = a * (1 - np.exp(-b * uav_pos.altitude))  # Error parameter based on altitude
+        sigma = a * (
+            1 - np.exp(-b * uav_pos.altitude)
+        )  # Error parameter based on altitude
 
         # Vectorized local evidence computation
+        if self.conf_dict is not None:
+
+            # _, (s0, s1) = get_s0_s1(
+            #     z, uav_pos.altitude, e=self.sampled_sigma_error_margin
+            # )
+            s0, s1 = self.conf_dict[uav_pos.altitude]
+        else:
+            s0, s1 = sigma, sigma
+
         local_evidence = np.zeros((len(z), 2))  # [P(free), P(occupied)]
-        local_evidence[:, 0] = np.where(z == 0, 1 - sigma, sigma)  # P(free)
-        local_evidence[:, 1] = np.where(z == 0, sigma, 1 - sigma)  # P(occupied)
+        local_evidence[:, 0] = np.where(z == 0, 1 - s0, s0)  # P(free)
+        local_evidence[:, 1] = np.where(z == 0, s1, 1 - s1)  # P(occupied)
 
         # Extract prior beliefs from marginals
         prior_beliefs = marginals[i_flat, j_flat]  # Shape (len(z), 2)
@@ -107,13 +118,11 @@ class OccupancyMap:
         self.phi[i_flat, j_flat] = fused_beliefs
         self.last_observations = np.array(submap)
 
-    
-
     def original_update_observations(self, observations, uav_pos, marginals):
-        
+
         # Update local evidence phi based on observations.
         # observations: List of tuples (i, j, {'free': p_free, 'occupied': p_occupied}).
-        
+
         # self.last_observations = observations
 
         for i, j, obs in observations:
@@ -133,7 +142,7 @@ class OccupancyMap:
 
             # Update phi with the fused belief
             self.phi[i, j] = fused_belief
-    
+
     def set_last_observations(self, submap):
         self.last_observations = np.array(submap)
 
@@ -164,13 +173,11 @@ class OccupancyMap:
                 # Product of incoming messages
                 prod_incoming = np.prod(incoming_messages, axis=0)
 
-
                 # Compute new message
                 new_message = np.dot(self.phi[i, j] * prod_incoming, psi)
                 new_message /= np.sum(new_message)  # Normalize
                 new_messages[((i, j), (ni, nj))] = new_message
             self.messages = new_messages
-
 
     def marginalize(self):
         """
