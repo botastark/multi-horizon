@@ -162,6 +162,7 @@ class FastLogger:
         strategy="ig",
         pairwise="equal",
         n_agent=1,
+        e=0.3,
         grid=None,
         r=None,
         init_x=None,
@@ -174,21 +175,35 @@ class FastLogger:
         self.init_x = init_x
         self.step = 0
         self.r = r
+        self.e = e
         self.filename = (
-            dir + "/" + self.strategy + "_" + self.pairwise + "_" + str(self.n) + ".txt"
+            dir
+            + "/"
+            + self.strategy
+            + "_"
+            + self.pairwise
+            + "_e"
+            + str(self.e)
+            + "_r"
+            + str(self.r)
+            + "_"
+            + str(self.n)
+            + ".txt"
         )
 
         with open(self.filename, "w") as f:
             f.write(f"Strategy: {self.strategy}\n")
             f.write(f"Pairwise: {self.pairwise}\n")
             f.write(f"N agents: {self.n}\n")
-            f.write(
-                f"Grid info: range: 0-{self.grid.x}-{self.grid.y}, cell_size:{self.grid.length}, map shape: {self.grid.shape}"
-            )
+            f.write(f"Error margin: {self.e}\n")
             if isinstance(self.r, str):
                 f.write(f"using {self.r} \n")
             else:
                 f.write(f"Gaussian radius {self.r} \n")
+            f.write(
+                f"Grid info: range: 0-{self.grid.x}-{self.grid.y}, cell_size:{self.grid.length}, map shape: {self.grid.shape}\n"
+            )
+
             f.write(
                 f"init UAV position: {self.init_x.position} - {self.init_x.altitude} \n"
             )
@@ -269,7 +284,7 @@ def gaussian_random_field(cluster_radius, n_cell, cache_dir="cache"):
     # Try loading from cache
     if os.path.exists(cache_file):
         with open(cache_file, "rb") as f:
-            print(f"Loading cached field from {cache_file}")
+            # print(f"Loading cached field from {cache_file}")
             return pickle.load(f)
 
     # Helper functions
@@ -478,67 +493,75 @@ def sampler(true_matrix, altitude, N):
     return cumulative_observation
 
 
-def calculate_statistics(true_matrix_, observation):
-    n = int(observation.shape[0] / true_matrix_.shape[0])
-
-    true_matrix = np.tile(true_matrix_, (n, 1))
-    true_positive = np.sum((true_matrix == 1) & (observation == 1))
-    false_negative = np.sum((true_matrix == 1) & (observation == 0))
-    false_positive = np.sum((true_matrix == 0) & (observation == 1))
-    true_negative = np.sum((true_matrix == 0) & (observation == 0))
-
-    return {
-        "True Positive": true_positive,
-        "False Negative": false_negative,
-        "False Positive": false_positive,
-        "True Negative": true_negative,
-    }
-
-
 import json
 
 
 def get_s0_s1(true_matrix, altitude, e=0.3):
     with open("/home/bota/Desktop/active_sensing/data/N_per_E.json", "r") as file:
         loaded_dict = json.load(file)
+
     altitude = round(altitude, 2)
     N = int(float(loaded_dict[str(altitude)][str(e)]))
-    # # print(f"total n tiles: {true_matrix.shape[0]*true_matrix.shape[1]}")
-    # N1 = np.sum(true_matrix == 1) * N
-    # N0 = np.sum(true_matrix == 0) * N
-    # print(f"with n= {N}, N0 {N0} and N1 {N1}")
     cum_obs = sampler(true_matrix, altitude, N)
-    # stats = calculate_statistics(true_matrix, cum_obs)
-    # print(f"stats: {stats}")
     n = int(cum_obs.shape[0] / true_matrix.shape[0])
     true_matrix_ = np.tile(true_matrix, (n, 1))
-    # print(true_matrix)
-    # print(cum_obs)
 
     c = confusion_matrix(true_matrix_.flatten(), cum_obs.flatten())
     c_norm = c / c.astype(np.float64).sum(axis=1, keepdims=True)
     c_norm = np.round(c_norm, decimals=2).transpose()
     c_norm = np.nan_to_num(c_norm) + 10e-10
-    # print(c_norm)
-
-    # matrix_dict = {
-    #     # "S": round(sigma(altitude), 2),
-    #     "FP": round(stats["False Positive"] / N0, 2),
-    #     "FN": round(stats["False Negative"] / N1, 2),
-    #     "TN": round(stats["True Negative"] / N0, 2),
-    #     "TP": round(stats["True Positive"] / N1, 2),
-    #     # "1-S": round(1 - sigma(altitude), 2),
-    # }
-    # # print(matrix_dict)
-
-    # TP = matrix_dict["TP"]
-    # FP = matrix_dict["FP"]
-    # TN = matrix_dict["TN"]
-    # FN = matrix_dict["FN"]
-
-    # s0 = matrix_dict["FP"]
-    # s1 = matrix_dict["FN"]
     s0 = c_norm[1][0]
     s1 = c_norm[0][1]
     # return np.array([[TN, FN], [FP, TP]]), (s0, s1)
     return c_norm, (s0, s1)
+
+
+def calc_n(h, e=np.array([0.5, 0.4, 0.3, 0.2, 0.1, 0.05, 0.03])):
+    p = sigma(h)
+    p_ = 1 - p
+    return np.round(1.96 * 1.96 * p * p_ / e / e, decimals=0)
+
+
+def get_N(altitudes):
+    errors = [0.5, 0.4, 0.3, 0.2, 0.1, 0.05, 0.03]
+    n_per_e = {}
+    for h in altitudes:
+        n_values = calc_n(h)
+        n_per_e[h] = {e: n for e, n in zip(errors, n_values)}
+    return n_per_e
+
+
+def get_confusion_matrix(altitude, N):
+    # with open("/home/bota/Desktop/active_sensing/data/N_per_E.json", "r") as file:
+    #     loaded_dict = json.load(file)
+
+    # altitude = round(altitude, 1)
+    # print(loaded_dict)
+    # N = int(float(loaded_dict[str(altitude)][str(e)]))
+
+    true_matrix = np.array([0, 1])
+    true_matrix = np.expand_dims(true_matrix, axis=0)
+    observation = sampler(true_matrix, altitude, int(N))
+    n = int(observation.shape[0] / true_matrix.shape[0])
+    true_matrix_ = np.tile(true_matrix, (n, 1))
+
+    c = confusion_matrix(true_matrix_.flatten(), observation.flatten())
+    c_norm = c / c.astype(np.float64).sum(axis=1, keepdims=True)
+    c_norm = np.round(c_norm, decimals=2).transpose()
+    c_norm = np.nan_to_num(c_norm) + 1e-6
+    s0 = c_norm[1][0]
+    s1 = c_norm[0][1]
+    # return np.array([[TN, FN], [FP, TP]]), (s0, s1)
+    return c_norm, (s0, s1)
+
+
+def init_s0_s1(h_step, e=0.3):
+    start = h_step
+    num_values = 6
+    end = num_values * start
+    altitudes = np.round(np.linspace(start, end, num=num_values), decimals=2)
+    conf_dict = {}
+    Ns = get_N(altitudes)
+    for altitude in altitudes:
+        conf_dict[altitude] = get_confusion_matrix(altitude, Ns[altitude][e])[1]
+    return conf_dict

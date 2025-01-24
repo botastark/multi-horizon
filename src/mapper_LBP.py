@@ -1,28 +1,28 @@
 import numpy as np
 import math
-from helper import adaptive_weights_matrix
+from helper import adaptive_weights_matrix, get_s0_s1
 
 
 class OccupancyMap:
-    def __init__(self, grid_size):
+    def __init__(self, grid_size, conf_dict=None):
         self.N = grid_size  # Grid size (100x100)
         self.states = [0, 1]  # Possible states
+        self.conf_dict = conf_dict
         # Initialize local evidence (uniform belief)
         self.phi = np.full((self.N[0], self.N[1], 2), 0.5)  # 2 states: [0, 1]
         self.last_observations = np.array([])
         self.msgs = None
         self.msgs_buffer = None
-        self.direction_to_slicing_data  = None
+        self.direction_to_slicing_data = None
         self._init_LBP_msgs()
         self.map_beliefs = np.full((self.N[0], self.N[1]), 0.5)
 
-
-    def _init_LBP_msgs(self ):
+    def _init_LBP_msgs(self):
         # n_cell = self.N
         # depth_to_direction = 0123_4 -> URDL_fake
         self.msgs = np.ones((4 + 1, self.N[0], self.N[1]), dtype=float) * 0.5
         self.msgs_buffer = np.ones_like(self.msgs) * 0.5
-        I, J = 0,1
+        I, J = 0, 1
 
         # self.pairwise_potential = np.array([[0.7, 0.3], [0.3, 0.7]], dtype=float)
 
@@ -44,7 +44,9 @@ class OccupancyMap:
                 ),
                 "write_slice": lambda fp_ij: (
                     2,
-                    slice(max(0, fp_ij["ul"][I] - 1), min(self.N[0], fp_ij["bl"][I] - 1)),
+                    slice(
+                        max(0, fp_ij["ul"][I] - 1), min(self.N[0], fp_ij["bl"][I] - 1)
+                    ),
                     slice(max(0, fp_ij["ul"][J]), min(self.N[1], fp_ij["br"][J])),
                 ),
             },
@@ -68,7 +70,9 @@ class OccupancyMap:
                 "write_slice": lambda fp_ij: (
                     3,
                     slice(max(0, fp_ij["ul"][I]), min(self.N[0], fp_ij["bl"][I])),
-                    slice(max(0, fp_ij["ul"][J] + 1), min(self.N[1], fp_ij["br"][J] + 1)),
+                    slice(
+                        max(0, fp_ij["ul"][J] + 1), min(self.N[1], fp_ij["br"][J] + 1)
+                    ),
                 ),
             },
             "down": {
@@ -90,7 +94,9 @@ class OccupancyMap:
                 ),
                 "write_slice": lambda fp_ij: (
                     0,
-                    slice(max(0, fp_ij["ul"][I] + 1), min(self.N[0], fp_ij["bl"][I] + 1)),
+                    slice(
+                        max(0, fp_ij["ul"][I] + 1), min(self.N[0], fp_ij["bl"][I] + 1)
+                    ),
                     slice(max(0, fp_ij["ul"][J]), min(self.N[1], fp_ij["br"][J])),
                 ),
             },
@@ -109,7 +115,9 @@ class OccupancyMap:
                 "write_slice": lambda fp_ij: (
                     1,
                     slice(max(0, fp_ij["ul"][I]), min(self.N[0], fp_ij["bl"][I])),
-                    slice(max(0, fp_ij["ul"][J] - 1), min(self.N[1], fp_ij["br"][J] - 1)),
+                    slice(
+                        max(0, fp_ij["ul"][J] - 1), min(self.N[1], fp_ij["br"][J] - 1)
+                    ),
                 ),
             },
         }
@@ -140,43 +148,58 @@ class OccupancyMap:
         j = np.array((y / grid_length).astype(int))  # Convert y to grid indices
         fp_vertices_ij = {
             "ul": np.array([np.min(i), np.min(j)]),
-            "bl": np.array([np.max(i)+1, np.min(j)]),
-            "ur": np.array([np.min(i), np.max(j)+1]),
-            "br": np.array([np.max(i)+1, np.max(j)+1]),
+            "bl": np.array([np.max(i) + 1, np.min(j)]),
+            "ur": np.array([np.min(i), np.max(j) + 1]),
+            "br": np.array([np.max(i) + 1, np.max(j) + 1]),
         }
         return fp_vertices_ij
 
-
-
-    def update_belief_OG(self, zx,zy,z, uav_pos, mexgen = None):
-        fp_vertices_ij = self.get_indices(zx,zy)
-        I, J=0,1
-        if mexgen==None:
+    def update_belief_OG(self, zx, zy, z, uav_pos, mexgen=None):
+        fp_vertices_ij = self.get_indices(zx, zy)
+        I, J = 0, 1
+        if mexgen == None:
             a, b = 1, 0.015
             sigma = a * (
                 1 - np.exp(-b * uav_pos.altitude)
             )  # Error parameter based on altitude
-            
-            likelihood_m_zero = np.where(z == 0, 1 - sigma, sigma)
-            likelihood_m_one = np.where(z == 0, sigma, 1 - sigma)
+
+            if self.conf_dict is not None:
+                s0, s1 = self.conf_dict[np.round(uav_pos.altitude, decimals=2)]
+
+                # _, (s0, s1) = get_s0_s1(
+                #     z, uav_pos.altitude, e=self.sampled_sigma_error_margin
+                # )
+                print(f"mapper: s0:{s0}, s1:{s1}")
+            else:
+                s0, s1 = sigma, sigma
+
+            likelihood_m_zero = np.where(z == 0, 1 - s0, s0)
+            likelihood_m_one = np.where(z == 0, s1, 1 - s1)
         else:
             likelihood_m_one = self.sample_binary_observations(z, uav_pos.altitude)
-            likelihood_m_zero = 1-likelihood_m_one
+            likelihood_m_zero = 1 - likelihood_m_one
 
-        assert np.all(np.greater_equal(likelihood_m_one, 0.0)) and np.all(np.less_equal(likelihood_m_one, 1.0))
-        assert np.all(np.greater_equal(likelihood_m_zero, 0.0)) and np.all(np.less_equal(likelihood_m_zero, 1.0))
+        assert np.all(np.greater_equal(likelihood_m_one, 0.0)) and np.all(
+            np.less_equal(likelihood_m_one, 1.0)
+        )
+        assert np.all(np.greater_equal(likelihood_m_zero, 0.0)) and np.all(
+            np.less_equal(likelihood_m_zero, 1.0)
+        )
 
         posterior_m_zero = likelihood_m_zero * (
             1.0
             - self.map_beliefs[
                 fp_vertices_ij["ul"][I] : fp_vertices_ij["bl"][I],
-                fp_vertices_ij["ul"][J] : fp_vertices_ij["ur"][J]
+                fp_vertices_ij["ul"][J] : fp_vertices_ij["ur"][J],
             ]
         )
-        posterior_m_one = likelihood_m_one* self.map_beliefs[
+        posterior_m_one = (
+            likelihood_m_one
+            * self.map_beliefs[
                 fp_vertices_ij["ul"][I] : fp_vertices_ij["bl"][I],
-                fp_vertices_ij["ul"][J] : fp_vertices_ij["ur"][J]
+                fp_vertices_ij["ul"][J] : fp_vertices_ij["ur"][J],
             ]
+        )
 
         assert np.all(np.greater_equal(posterior_m_zero, 0.0))
         assert np.all(np.less_equal(posterior_m_zero, 1.0))
@@ -196,21 +219,25 @@ class OccupancyMap:
 
         self.map_beliefs[
             fp_vertices_ij["ul"][I] : fp_vertices_ij["bl"][I],
-            fp_vertices_ij["ul"][J] : fp_vertices_ij["ur"][J]] = posterior_m_one_norm
+            fp_vertices_ij["ul"][J] : fp_vertices_ij["ur"][J],
+        ] = posterior_m_one_norm
 
-
-    def propagate_messages_(self, zx, zy, z, uav_pos,  max_iterations=5, correlation_type=None):
+    def propagate_messages_(
+        self, zx, zy, z, uav_pos, max_iterations=5, correlation_type=None
+    ):
         # Pairwise potential
         # self._update_belief_OG(zx,zy,z, uav_pos)
         self.last_observations = z
-        
+
         psi = self.pairwise_potential(correlation_type)
 
-        fp_vertices_ij = self.get_indices(zx,zy)
+        fp_vertices_ij = self.get_indices(zx, zy)
         # reset msgs and msgs_buffer
         self.msgs = np.ones_like(self.msgs) * 0.5
         self.msgs_buffer = np.ones_like(self.msgs) * 0.5
-        self.msgs[4, :, :] = self.map_beliefs[:, :]  # set msgs last channel with current map belief
+        self.msgs[4, :, :] = self.map_beliefs[
+            :, :
+        ]  # set msgs last channel with current map belief
         for _ in range(max_iterations):
             for direction, data in self.direction_to_slicing_data.items():
                 # print(direction)
@@ -226,47 +253,33 @@ class OccupancyMap:
                 mul_1 = np.prod(self.msgs[product_slice], axis=0)
 
                 # matrix-vector multiplication (factor-msg)
-                msg_0 = (psi[0, 0] * mul_0
-                    + psi[0, 1] * mul_1
-                )
-                msg_1 = (
-                    psi[1, 0] * mul_0
-                    + psi[1, 1] * mul_1
-                )
+                msg_0 = psi[0, 0] * mul_0 + psi[0, 1] * mul_1
+                msg_1 = psi[1, 0] * mul_0 + psi[1, 1] * mul_1
 
                 # normalize the first coordinate of the msg
                 norm_msg_1 = msg_1 / (msg_0 + msg_1)
                 # buffering
                 self.msgs_buffer[write_slice] = norm_msg_1[read_slice]
-                
 
             # copy the first 4 channels only
             # the 5th one is the map belief
             self.msgs[:4, :, :] = self.msgs_buffer[:4, :, :]
 
-        bel_0 = np.prod(
-            1 - self.msgs[:, product_slice[1], product_slice[2]], axis=0
-        )
+        bel_0 = np.prod(1 - self.msgs[:, product_slice[1], product_slice[2]], axis=0)
         bel_1 = np.prod(self.msgs[:, product_slice[1], product_slice[2]], axis=0)
 
         # norm_bel_0 = bel_0 / (bel_0 + bel_1)
-        self.map_beliefs[product_slice[1], product_slice[2]] = bel_1 / (
-            bel_0 + bel_1
-        )
+        self.map_beliefs[product_slice[1], product_slice[2]] = bel_1 / (bel_0 + bel_1)
 
         assert np.all(
-            np.greater_equal(
-                self.map_beliefs[product_slice[1], product_slice[2]], 0.0
-            )
+            np.greater_equal(self.map_beliefs[product_slice[1], product_slice[2]], 0.0)
         ) and np.all(
-            np.less_equal(
-                self.map_beliefs[product_slice[1], product_slice[2]], 1.0
-            )
+            np.less_equal(self.map_beliefs[product_slice[1], product_slice[2]], 1.0)
         )
 
     def get_belief(self):
         return self.map_beliefs
-    
+
     def sample_binary_observations(self, belief_map, altitude, num_samples=5):
         """
         Samples binary observations from a belief map with noise based on altitude.
@@ -284,7 +297,7 @@ class OccupancyMap:
         sampled_observations = np.zeros((m, n, num_samples))
         a = 0.2
         b = 0.05
-        var = a*(1-np.exp(-b*altitude))
+        var = a * (1 - np.exp(-b * altitude))
         noise_std = np.sqrt(var)
         # noise_std = noise_factor * altitude  # Noise increases with altitude
 
@@ -299,7 +312,8 @@ class OccupancyMap:
 
         # Return the averaged observation map
         return np.mean(sampled_observations, axis=-1)
-            
+
+
 # def get_range(uav_pos, grid, index_form=False):
 #     """
 #     calculates indices of camera footprints (part of terrain (therefore terrain indices) seen by camera at a given UAV pos and alt)
@@ -334,7 +348,7 @@ class OccupancyMap:
 #     if mexgen!=None:
 #         success1 = sample_binary_observations(m, uav_pos.altitude)
 #         success0 = 1 - success1
-#     else:  
+#     else:
 #         if seed is None:
 #             seed = np.identity
 #         rng = np.random.default_rng(seed)
@@ -344,12 +358,12 @@ class OccupancyMap:
 #         random_values = rng.random(m.shape)
 #         success0 = random_values <= 1.0 - sigma
 #         success1 = random_values <= 1.0 - sigma
-    
+
 #     z0 = np.where(np.logical_and(success0, m == 0), 0, 1)
 #     z1 = np.where(np.logical_and(success1, m == 1), 1, 0)
 #     z = np.where(m == 0, z0, z1)
 #     x = np.arange(
-#         x_min_id , x_max_id 
+#         x_min_id , x_max_id
 #     )
 #     y = np.arange(
 #         y_min_id , y_max_id
