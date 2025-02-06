@@ -1,6 +1,6 @@
 import numpy as np
 import math
-from helper import adaptive_weights_matrix, get_s0_s1
+from helper import adaptive_weights_matrix
 
 
 class OccupancyMap:
@@ -230,7 +230,7 @@ def get_range(uav_pos, grid, index_form=False):
     return [[x_min, x_max], [y_min, y_max]]
 
 
-def get_observations(grid_info, ground_truth_map, uav_pos):
+def get_observations(grid_info, ground_truth_map, uav_pos, rng, confidence_dict=None):
     [[x_min_id, x_max_id], [y_min_id, y_max_id]] = get_range(
         uav_pos, grid_info, index_form=True
     )
@@ -244,5 +244,22 @@ def get_observations(grid_info, ground_truth_map, uav_pos):
     )
 
     x, y = np.meshgrid(x, y, indexing="ij")
+    if confidence_dict is not None:
+        sigma0, sigma1 = confidence_dict[np.round(uav_pos.altitude, decimals=2)]
+    else:
 
-    return x, y, submap
+        a = 1
+        b = 0.015
+        sigma = a * (1 - np.exp(-b * uav_pos.altitude))
+        sigma0, sigma1 = sigma, sigma
+
+    # if seed is None:
+
+    random_values = rng.random(submap.shape)
+    success0 = random_values <= 1.0 - sigma0
+    success1 = random_values <= 1.0 - sigma1
+    z0 = np.where(np.logical_and(success0, submap == 0), 0, 1)
+    z1 = np.where(np.logical_and(success1, submap == 1), 1, 0)
+    z = np.where(submap == 0, z0, z1)
+
+    return x, y, z

@@ -6,14 +6,38 @@ from helper import uav_position
 
 
 class planning:
-    def __init__(self, belief, uav, strategy):
-        self.M = belief
+    def __init__(self, grid_info, uav, strategy, conf_dict=None):
+        self.M = np.full((grid_info.shape[0], grid_info.shape[1], 2), 0.5)
         self.uav = uav
         self.last_action = None
         self.strategy = strategy
+        self.conf_dict = conf_dict
+
+    def reset(self, conf_dict=None):
+        self.uav.reset()
+        self.conf_dict = conf_dict
+        self.last_action = None
+        self.M = np.ones_like(self.M) * 0.5
 
     def info_gain(self, var, x_future, mexgen=False):
-        ig = self.H(var) - self._expected_entropy(var, x_future, mexgen=mexgen)
+        if mexgen == False:
+            # print(f"B: curr entropy: {np.sum(self.H(var))}")
+            expected_entropy = self._expected_entropy(var, x_future)
+            # print(f"B expected entropy: {np.sum(expected_entropy)}")
+
+            ig = self.H(var) - expected_entropy
+        else:
+            # sampled_observation = self.sample_future_observation(5, var, x_future.altitude)
+            sampled_observation = self.sample_binary_observations(
+                var, x_future.altitude
+            )
+            # expected_entropy = self.calculate_entropy(var, mean_future_observation)
+            expected_entropy = self.compute_future_entropy(var, sampled_observation)
+            # print(f"{np.sum(self.H(var))} vs {expected_entropy}")
+
+            ig = np.sum(self.H(var)) - expected_entropy
+            # - self._expected_entropy(var, x_future, mexgen=True)
+
         return ig
 
     def get_entropy(self, belief):
@@ -34,9 +58,12 @@ class planning:
         # I could not make it work - problems with extreme values
         # entropy = -(var * np.log2(var, where=var > 0.0)
         #       + (1.0 - var) * np.log2((1.0 - var), where=(1.0 - var) > 0.0))
+        # Check for NaN values in var
+        assert not np.any(np.isnan(var)), f"NaN detected in var: {var}"
+        var = np.clip(var, 0.0, 1.0)  # Clamps values to the range [0, 1]
 
-        assert np.all(np.greater_equal(var, 0.0)), f"{var[np.isnan(var)]}"
-        assert np.all(np.less_equal(var, 1.0)), f"{var[np.isnan(var)]}"
+        # assert np.all(np.greater_equal(var, 0.0)), f"{var[np.isnan(var)]}"
+        # assert np.all(np.less_equal(var, 1.0)), f"{var[np.isnan(var)]}"
 
         v1 = var
         v2 = 1.0 - var
@@ -83,7 +110,7 @@ class planning:
         # p(z = 0) = p(z = 0|m = 0)p(m = 0) + p(z = 0|m = 1)p(m = 1)
         a = (1.0 - sigma0) * (1.0 - var) + (sigma1 * var)
         # p(z = 1) = 1 - p(z = 0)
-        b = 1.0 - a
+        b = 1.0 - a + 1e-10
 
         assert np.all(np.greater_equal(var, 0.0)), f"{var[np.isnan(var)]}"
         assert np.all(np.less_equal(var, 1.0)), f"{var[np.isnan(var)]}"
@@ -109,12 +136,18 @@ class planning:
 
         return cH
 
-    def _expected_entropy(self, var, x_future, mexgen=False):
+    def _expected_entropy(self, var, x_future):
         expected_entropy = 0
         a = 1
         b = 0.015
         sigma = a * (1 - np.exp(-b * x_future.altitude))
-        expected_entropy = self.cH(var, sigma, sigma)
+
+        if self.conf_dict is not None:
+            s0, s1 = self.conf_dict[np.round(x_future.altitude, decimals=2)]
+        else:
+            s0, s1 = sigma, sigma
+
+        expected_entropy = self.cH(var, s0, s1)
 
         return expected_entropy
 
@@ -152,8 +185,8 @@ class planning:
                     index_form=True,
                 )
             )
-            obs_M = self.M[obsd_m_i_min:obsd_m_i_max, obsd_m_j_min:obsd_m_j_max, 1]
-            info_gain_action_a = np.sum(self.info_gain(obs_M, x_future))
+            obs_M = self.M[obsd_m_i_min:obsd_m_i_max, obsd_m_j_min:obsd_m_j_max, 0]
+            info_gain_action_a = np.sum(self.info_gain(obs_M, x_future, mexgen=mexgen))
             info_gain_action[action] = info_gain_action_a
 
         # Find the maximum information gain
@@ -164,17 +197,48 @@ class planning:
             action for action, gain in info_gain_action.items() if gain == max_gain
         ]
 
-        # Prefer previous action if it's among the max-gain actions, otherwise choose randomly
-        # if self.last_action in max_gain_actions:
         next_action = random.choice(max_gain_actions)
-
         # Update previous action for the next step
         self.last_action = next_action
 
-        print(info_gain_action)
-        # next_action = max(info_gain_action, key=info_gain_action.get)
-        print(next_action)
-        return next_action
+        # print(info_gain_action)
+        # print(next_action)
+        return next_action, info_gain_action
+
+    def compute_future_entropy(
+        self, prior: np.ndarray, sampled_observation: np.ndarray
+    ) -> float:
+        """
+        Compute expected future entropy given sampled observation
+        """
+        # Clip values for numerical stability
+        prior = np.clip(prior, 1e-10, 1 - 1e-10)
+        sampled_observation = np.clip(sampled_observation, 1e-10, 1 - 1e-10)
+        # print(sampled_observation)
+        # Estimate posterior using sampled observation
+        # P(m|z) ∝ P(z|m)P(m)
+        # P(z=1|m=1)
+        likelihood_ratio = sampled_observation
+        P_z1 = likelihood_ratio * prior + (1 - likelihood_ratio) * (1 - prior)
+
+        P_z0 = 1 - P_z1
+        P_m1_given_z1 = likelihood_ratio * prior / P_z1
+        P_m1_given_z0 = (1 - likelihood_ratio) * prior / P_z0
+        P_m1_given_z1 = np.clip(P_m1_given_z1, 1e-10, 1 - 1e-10)
+        P_m1_given_z0 = np.clip(P_m1_given_z0, 1e-10, 1 - 1e-10)
+
+        # Entropy for P(m|z=1)
+        H_m_given_z1 = self.H(P_m1_given_z1)
+        H_m_given_z0 = self.H(P_m1_given_z0)
+        entropy = P_z0 * H_m_given_z0 + P_z1 * H_m_given_z1
+
+        # posterior = (likelihood_ratio * prior) / (likelihood_ratio * prior + (1-likelihood_ratio)*(1 - prior))
+
+        # Compute entropy of estimated posterior
+        # print(posterior)
+        # posterior = (likelihood_ratio * prior) / (likelihood_ratio * prior + (1 - prior))
+        # entropy = self.H(posterior)
+        return np.sum(entropy)
 
     def select_action(self, belief, visited_x):
         self.M = belief
@@ -191,3 +255,36 @@ class planning:
         else:
             mexgen = False
         return self.ig_based(permitted_actions, mexgen)
+
+    def sample_binary_observations(self, belief_map, altitude, num_samples=5):
+        """
+        Samples binary observations from a belief map with noise based on altitude.
+
+        Args:
+            belief_map (np.ndarray): Belief map of shape (m, n, 2), where belief_map[..., 1] is P(m=1).
+            altitude (float): UAV altitude affecting noise level.
+            num_samples (int): Number of samples for averaging.
+            noise_factor (float): Base noise factor scaled with altitude.
+
+        Returns:
+            np.ndarray: Averaged binary observation map of shape (m, n).
+        """
+        m, n = belief_map.shape
+        sampled_observations = np.zeros((m, n, num_samples))
+        a = 0.2
+        b = 0.05
+        var = a * (1 - np.exp(-b * altitude))
+        noise_std = np.sqrt(var)
+        # noise_std = noise_factor * altitude  # Noise increases with altitude
+
+        for i in range(num_samples):
+            # Sample from the probability map with added Gaussian noise
+            noise = np.random.normal(loc=0.0, scale=noise_std, size=(m, n))
+            noisy_prob = belief_map + noise  # Add noise to P(m=1)
+            noisy_prob = np.clip(noisy_prob, 0, 1)  # Ensure probabilities are valid
+
+            # Sample binary observation
+            sampled_observations[..., i] = np.random.binomial(1, noisy_prob)
+
+        # Return the averaged observation map
+        return np.mean(sampled_observations, axis=-1)

@@ -2,16 +2,22 @@ import math
 import random
 import numpy as np
 from typing import Dict, List, Tuple, Union
-from helper import get_s0_s1, uav_position
+from helper import uav_position
 
 
 class planning:
-    def __init__(self, belief, uav, strategy, conf_dict=None):
-        self.M = belief
+    def __init__(self, grid_info, uav, strategy, conf_dict=None):
+        self.M = np.full((grid_info.shape[0], grid_info.shape[1], 2), 0.5)
         self.uav = uav
         self.last_action = None
         self.strategy = strategy
         self.conf_dict = conf_dict
+
+    def reset(self, conf_dict=None):
+        self.uav.reset()
+        self.conf_dict = conf_dict
+        self.last_action = None
+        self.M = np.ones_like(self.M) * 0.5
 
     def info_gain(self, var, x_future, mexgen=False):
         if mexgen == False:
@@ -100,9 +106,7 @@ class planning:
         # p(z = 0) = p(z = 0|m = 0)p(m = 0) + p(z = 0|m = 1)p(m = 1)
         a = (1.0 - sigma0) * (1.0 - var) + (sigma1 * var)
         # p(z = 1) = 1 - p(z = 0)
-        b = 1.0 - a
-        epsilon = 1e-6  # Small constant to avoid division by very small values
-        b = np.maximum(b, epsilon)
+        b = 1.0 - a + 1e-10
 
         assert np.all(np.greater_equal(var, 0.0)), f"{var[np.isnan(var)]}"
         assert np.all(np.less_equal(var, 1.0)), f"{var[np.isnan(var)]}"
@@ -112,36 +116,13 @@ class planning:
         p10 = (sigma1 * var) / a
         # p(m = 1|z = 1) = (p(z = 1|m = 1)p(m = 1))/p(z = 1)
         p11 = ((1.0 - sigma1) * var) / b
-        # print(f"Debug: p10 values: {p10}")
-        # print(f"Debug: a values: {a}")
-        # print(f"Debug: sigma1: {sigma1}, var: {var}")
-
-        # print(f"Debug: p11 values: {p11}")
-        # print(f"Debug: b values: {b}")
-        # print(f"Debug: sigma1: {sigma1}, var: {var}")
-
-        # Debug values where p11 > 1.0
-        # indices_p11_gt_1 = np.where(p11 > 1.0)[0]
-        # print(f"Debug: Indices where p11 > 1.0: {indices_p11_gt_1}")
-        # if indices_p11_gt_1.size > 0:
-        #     print(f"Debug: Corresponding p11 values: {p11[indices_p11_gt_1]}")
-        #     print(f"Debug: Corresponding var values: {var[indices_p11_gt_1]}")
-        #     print(f"Debug: Corresponding b values: {b[indices_p11_gt_1]}")
 
         assert np.all(np.greater_equal(p10, 0.0)) and np.all(
             np.less_equal(p10, 1.0)
         ), f"{p10}"
-        # print(f"p11 raw values: {p11}")
-        # print(f"Inputs to calculation: sigma1={sigma1}, var={var}, b={b}")
-
-        # Updated assertion with tolerance
-        assert np.all(np.greater_equal(p11, 0.0 - epsilon)) and np.all(
-            np.less_equal(p11, 1.0 + epsilon)
+        assert np.all(np.greater_equal(p11, 0.0)) and np.all(
+            np.less_equal(p11, 1.0)
         ), f"{sigma1}-{var[np.greater(p11, 1.0)]}-{b[np.greater(p11, 1.0)]}"
-
-        # assert np.all(np.greater_equal(p11, 0.0)) and np.all(
-        #     np.less_equal(p11, 1.0)
-        # ), f"{sigma1}-{var[np.greater(p11, 1.0)]}-{b[np.greater(p11, 1.0)]}"
 
         # conditional entropy: average of the entropy of the posterior distribution probabilities
         # H(m|z) = p(z = 0)H(p(m = 1|z = 0)) + p(z = 1)H(p(m = 1|z = 1))
@@ -158,17 +139,9 @@ class planning:
         sigma = a * (1 - np.exp(-b * x_future.altitude))
 
         if self.conf_dict is not None:
-            # var is submap of belief that is P(m=1)
-            # therefore var: cont->binary by 0.5 classifying
-            binary_var = (var >= 0.5).astype(int)
             s0, s1 = self.conf_dict[np.round(x_future.altitude, decimals=2)]
-
-            # _, (s0, s1) = get_s0_s1(
-            #     binary_var, x_future.altitude, e=self.sampled_sigma_error_margin
-            # )
         else:
             s0, s1 = sigma, sigma
-        # print(f"planner: s0:{s0}, s1:{s1}")
 
         expected_entropy = self.cH(var, s0, s1)
 
@@ -224,9 +197,9 @@ class planning:
         # Update previous action for the next step
         self.last_action = next_action
 
-        # print(info_gain_action)
+        # print()
         # print(next_action)
-        return next_action
+        return next_action, info_gain_action
 
     def compute_future_entropy(
         self, prior: np.ndarray, sampled_observation: np.ndarray

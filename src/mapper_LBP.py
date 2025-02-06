@@ -1,10 +1,11 @@
+from typing import Dict, List
 import numpy as np
 import math
-from helper import adaptive_weights_matrix, get_s0_s1
+from helper import adaptive_weights_matrix
 
 
 class OccupancyMap:
-    def __init__(self, grid_size, conf_dict=None):
+    def __init__(self, grid_size, conf_dict=None, correlation_type=None):
         self.N = grid_size  # Grid size (100x100)
         self.states = [0, 1]  # Possible states
         self.conf_dict = conf_dict
@@ -16,6 +17,23 @@ class OccupancyMap:
         self.direction_to_slicing_data = None
         self._init_LBP_msgs()
         self.map_beliefs = np.full((self.N[0], self.N[1]), 0.5)
+        self.correlation_type = correlation_type
+
+        self.sigma0 = None
+        self.sigma1 = None
+
+    def reset(self, conf_dict=None):
+        self.conf_dict = conf_dict
+        self.phi = np.full((self.N[0], self.N[1], 2), 0.5)  # 2 states: [0, 1]
+        self.last_observations = np.array([])
+        self._init_LBP_msgs()
+        self.map_beliefs = np.full((self.N[0], self.N[1]), 0.5)
+
+        #         global states, map_beliefs, map_belief_entropies, agg_map_belief, agg_map_belief_entropy, news_map_beliefs
+        # map_belief_entropies = np.ones((self.n_cell, self.n_cell, self.n_agents), dtype=float)
+        # agg_map_belief = np.ones((self.n_cell, self.n_cell), dtype=float) * 0.5
+        # agg_map_belief_entropy = np.ones((self.n_cell, self.n_cell), dtype=float)
+        self.news_map_beliefs = np.ones((1, 1, self.N[0], self.N[1]), dtype=float) * 0.5
 
     def _init_LBP_msgs(self):
         # n_cell = self.N
@@ -166,15 +184,14 @@ class OccupancyMap:
             if self.conf_dict is not None:
                 s0, s1 = self.conf_dict[np.round(uav_pos.altitude, decimals=2)]
 
-                # _, (s0, s1) = get_s0_s1(
-                #     z, uav_pos.altitude, e=self.sampled_sigma_error_margin
-                # )
-                print(f"mapper: s0:{s0}, s1:{s1}")
             else:
                 s0, s1 = sigma, sigma
+            self.sigma0 = s0
+            self.sigma1 = s1
 
             likelihood_m_zero = np.where(z == 0, 1 - s0, s0)
             likelihood_m_one = np.where(z == 0, s1, 1 - s1)
+
         else:
             likelihood_m_one = self.sample_binary_observations(z, uav_pos.altitude)
             likelihood_m_zero = 1 - likelihood_m_one
@@ -206,7 +223,7 @@ class OccupancyMap:
 
         assert np.all(np.greater_equal(posterior_m_one, 0.0))
         assert np.all(np.less_equal(posterior_m_one, 1.0))
-        epsilon = 1e-10  # A small constant to prevent division by zero
+        epsilon = 1e-20  # A small constant to prevent division by zero
 
         # Normalize posterior_m_one
         denominator = posterior_m_zero + posterior_m_one
@@ -226,7 +243,7 @@ class OccupancyMap:
         self, zx, zy, z, uav_pos, max_iterations=5, correlation_type=None
     ):
         # Pairwise potential
-        # self._update_belief_OG(zx,zy,z, uav_pos)
+        # self.update_belief_OG(zx, zy, z, uav_pos)
         self.last_observations = z
 
         psi = self.pairwise_potential(correlation_type)
@@ -242,11 +259,8 @@ class OccupancyMap:
             for direction, data in self.direction_to_slicing_data.items():
                 # print(direction)
                 product_slice = data["product_slice"](fp_vertices_ij)
-                # print(f"product slice {product_slice}")
                 read_slice = data["read_slice"](fp_vertices_ij)
-                # print(f"read_slice {read_slice}")
                 write_slice = data["write_slice"](fp_vertices_ij)
-                # print(f"write_slice  {write_slice}")
 
                 # elementwise multiplication of msgs
                 mul_0 = np.prod(1 - self.msgs[product_slice], axis=0)
@@ -276,6 +290,130 @@ class OccupancyMap:
         ) and np.all(
             np.less_equal(self.map_beliefs[product_slice[1], product_slice[2]], 1.0)
         )
+        """
+            def update_news_belief_LBP_and_fuse_single(self, zx, zy, z):
+
+                # global news_map_beliefs, map_beliefs
+                fp_vertices_ij = self.get_indices(zx, zy)
+                I, J = 0, 1
+                sigma0, sigma1 = self.sigma0, self.sigma1
+
+                likelihood_m_zero = np.where(z == 0, 1 - sigma0, sigma0)
+                likelihood_m_one = np.where(z == 0, sigma1, 1 - sigma1)
+
+                posterior_m_zero = likelihood_m_zero * (
+                    1.0
+                    - self.news_map_beliefs[
+                        0,
+                        0,
+                        fp_vertices_ij["ul"][I] : fp_vertices_ij["bl"][I],
+                        fp_vertices_ij["ul"][J] : fp_vertices_ij["ur"][J],
+                    ]
+                )
+                posterior_m_one = (
+                    likelihood_m_one
+                    * self.news_map_beliefs[
+                        0,
+                        0,
+                        fp_vertices_ij["ul"][I] : fp_vertices_ij["bl"][I],
+                        fp_vertices_ij["ul"][J] : fp_vertices_ij["ur"][J],
+                    ]
+                )
+
+                assert np.all(np.greater_equal(posterior_m_one, 0.0))
+
+                posterior_m_one_norm = posterior_m_one / (posterior_m_zero + posterior_m_one)
+
+                assert np.all(np.greater_equal(posterior_m_one_norm, 0.0)) and np.all(
+                    np.less_equal(posterior_m_one_norm, 1.0)
+                )
+
+                self.news_map_beliefs[
+                    0,
+                    0,
+                    fp_vertices_ij["ul"][I] : fp_vertices_ij["bl"][I],
+                    fp_vertices_ij["ul"][J] : fp_vertices_ij["ur"][J],
+                ] = posterior_m_one_norm
+
+                # reset msgs and msgs_buffer
+                self.msgs = np.ones_like(self.msgs) * 0.5
+                self.msgs_buffer = np.ones_like(self.msgs) * 0.5
+                self.msgs[4, :, :] = self.news_map_beliefs[
+                    0, 0, :, :
+                ]  # set msgs last channel with current map belief
+                fp_vertices_ij = self.get_indices(zx, zy)
+
+                # just 1 iteration
+                for direction, data in self.direction_to_slicing_data.items():
+                    product_slice = data["product_slice"](fp_vertices_ij)
+                    read_slice = data["read_slice"](fp_vertices_ij)
+                    write_slice = data["write_slice"](fp_vertices_ij)
+
+                    # elementwise multiplication of msgs
+                    mul_0 = np.prod(1 - self.msgs[product_slice], axis=0)
+                    mul_1 = np.prod(self.msgs[product_slice], axis=0)
+
+                    psi = self.pairwise_potential(self.correlation_type)
+
+                    # matrix-vector multiplication (factor-msg)
+                    # matrix-vector multiplication (factor-msg)
+                    msg_0 = psi[0, 0] * mul_0 + psi[0, 1] * mul_1
+                    msg_1 = psi[1, 0] * mul_0 + psi[1, 1] * mul_1
+
+                    # normalize the first coordinate of the msg
+                    norm_msg_1 = msg_1 / (msg_0 + msg_1)
+
+                    # buffering
+                    self.msgs_buffer[write_slice] = norm_msg_1[read_slice]
+
+                    # copy the first 4 channels only
+                    # the 5th one is the map belief
+                    self.msgs[:4, :, :] = self.msgs_buffer[:4, :, :]
+
+                    bel_0 = np.prod(
+                        1 - self.msgs[:, product_slice[1], product_slice[2]], axis=0
+                    )
+                    bel_1 = np.prod(self.msgs[:, product_slice[1], product_slice[2]], axis=0)
+
+                    # norm_bel_0 = bel_0 / (bel_0 + bel_1)
+                    self.news_map_beliefs[0, 0, product_slice[1], product_slice[2]] = bel_1 / (
+                        bel_0 + bel_1
+                    )
+
+                    assert np.all(
+                        np.greater_equal(
+                            self.news_map_beliefs[0, 0, product_slice[1], product_slice[2]],
+                            0.0,
+                        )
+                    ) and np.all(
+                        np.less_equal(
+                            self.news_map_beliefs[0, 0, product_slice[1], product_slice[2]],
+                            1.0,
+                        )
+                    )
+
+                    # neighbors_ids = []
+                    # if len(observations) != 0:
+                    #     neighbors_ids = observations[agent_id]["neighbors_ids"]
+
+                    # for neighbor_id in neighbors_ids:
+                    #     mul = (
+                    #         news_map_beliefs[agent_id, agent_id, :, :]
+                    #         * map_beliefs[:, :, neighbor_id]
+                    #     )
+                    #     map_beliefs[:, :, neighbor_id] = mul / (
+                    #         mul
+                    #         + (1.0 - news_map_beliefs[agent_id, agent_id, :, :])
+                    #         * (1.0 - map_beliefs[:, :, neighbor_id])
+                    #     )
+
+                    #     assert np.all(
+                    #         np.greater_equal(map_beliefs[:, :, neighbor_id], 0.0)
+                    #     ) and np.all(np.less_equal(map_beliefs[:, :, neighbor_id], 1.0))
+
+                    # if len(neighbors_ids) != 0:
+                    #     news_map_beliefs[agent_id, agent_id, :, :] = 0.5
+        """
 
     def get_belief(self):
         return self.map_beliefs
@@ -312,87 +450,3 @@ class OccupancyMap:
 
         # Return the averaged observation map
         return np.mean(sampled_observations, axis=-1)
-
-
-# def get_range(uav_pos, grid, index_form=False):
-#     """
-#     calculates indices of camera footprints (part of terrain (therefore terrain indices) seen by camera at a given UAV pos and alt)
-#     """
-#     # position = position if position is not None else self.position
-#     # altitude = altitude if altitude is not None else self.altitude
-#     fov = 60
-#     x_angle = fov / 2  # degree
-#     y_angle = fov / 2  # degree
-#     x_dist = uav_pos.altitude * math.tan(x_angle / 180 * 3.14)
-#     y_dist = uav_pos.altitude * math.tan(y_angle / 180 * 3.14)
-#     # adjust func: for smaller square ->int() and for larger-> round()
-#     x_dist = round(x_dist / grid.length) * grid.length
-#     y_dist = round(y_dist / grid.length) * grid.length
-#     # Trim if out of scope (out of the map)
-#     x_min = max(uav_pos.position[0] - x_dist, 0.0)
-#     x_max = min(uav_pos.position[0] + x_dist, grid.x)
-#     y_min = max(uav_pos.position[1] - y_dist, 0.0)
-#     y_max = min(uav_pos.position[1] + y_dist, grid.y)
-#     if index_form:  # return as indix range
-#         return [
-#             [round(x_min / grid.length), round(x_max / grid.length)],
-#             [round(y_min / grid.length), round(y_max / grid.length)],
-#         ]
-#     return [[x_min, x_max], [y_min, y_max]]
-
-# def get_observations(grid_info, ground_truth_map, uav_pos, seed = None, mexgen = None):
-#     [[x_min_id, x_max_id], [y_min_id, y_max_id]] = get_range(
-#         uav_pos, grid_info, index_form=True
-#     )
-#     m = ground_truth_map[x_min_id:x_max_id, y_min_id:y_max_id]
-#     if mexgen!=None:
-#         success1 = sample_binary_observations(m, uav_pos.altitude)
-#         success0 = 1 - success1
-#     else:
-#         if seed is None:
-#             seed = np.identity
-#         rng = np.random.default_rng(seed)
-#         a = 1
-#         b = 0.015
-#         sigma = a * (1 - np.exp(-b * uav_pos.altitude))
-#         random_values = rng.random(m.shape)
-#         success0 = random_values <= 1.0 - sigma
-#         success1 = random_values <= 1.0 - sigma
-
-#     z0 = np.where(np.logical_and(success0, m == 0), 0, 1)
-#     z1 = np.where(np.logical_and(success1, m == 1), 1, 0)
-#     z = np.where(m == 0, z0, z1)
-#     x = np.arange(
-#         x_min_id , x_max_id
-#     )
-#     y = np.arange(
-#         y_min_id , y_max_id
-#     )
-#     x, y = np.meshgrid(x, y, indexing="ij")
-#     return x, y,z
-# def sample_binary_observations(belief_map, altitude, num_samples=5):
-#     """
-#     Samples binary observations from a belief map with noise based on altitude.
-#     Args:
-#         belief_map (np.ndarray): Belief map of shape (m, n, 2), where belief_map[..., 1] is P(m=1).
-#         altitude (float): UAV altitude affecting noise level.
-#         num_samples (int): Number of samples for averaging.
-#         noise_factor (float): Base noise factor scaled with altitude.
-#     Returns:
-#         np.ndarray: Averaged binary observation map of shape (m, n).
-#     """
-#     m, n = belief_map.shape
-#     sampled_observations = np.zeros((m, n, num_samples))
-#     a = 0.2
-#     b = 0.05
-#     var = a*(1-np.exp(-b*altitude))
-#     noise_std = np.sqrt(var)
-#     for i in range(num_samples):
-#         # Sample from the probability map with added Gaussian noise
-#         noise = np.random.normal(loc=0.0, scale=noise_std, size=(m, n))
-#         noisy_prob = belief_map + noise  # Add noise to P(m=1)
-#         noisy_prob = np.clip(noisy_prob, 0, 1)  # Ensure probabilities are valid
-#         # Sample binary observation
-#         sampled_observations[..., i] = np.random.binomial(1, noisy_prob)
-#     # Return the averaged observation map
-#     return np.mean(sampled_observations, axis=-1)

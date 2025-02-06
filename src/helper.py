@@ -1,5 +1,4 @@
 # pairwise_factor_weights: equal, biased, adaptive
-from matplotlib import pyplot as plt
 import numpy as np
 from sklearn.metrics import confusion_matrix
 
@@ -281,11 +280,11 @@ def gaussian_random_field(cluster_radius, n_cell, cache_dir="cache"):
         cache_dir, f"field_radius_{cluster_radius}_size_{n_cell_x}x{n_cell_y}.pkl"
     )
 
-    # Try loading from cache
-    if os.path.exists(cache_file):
-        with open(cache_file, "rb") as f:
-            # print(f"Loading cached field from {cache_file}")
-            return pickle.load(f)
+    # # Try loading from cache
+    # if os.path.exists(cache_file):
+    #     with open(cache_file, "rb") as f:
+    #         # print(f"Loading cached field from {cache_file}")
+    #         return pickle.load(f)
 
     # Helper functions
     def _fft_indices(n):
@@ -324,9 +323,9 @@ def gaussian_random_field(cluster_radius, n_cell, cache_dir="cache"):
     binary_field = normalized_random_field.astype(np.uint8)
 
     # Save to cache
-    with open(cache_file, "wb") as f:
-        pickle.dump(binary_field, f)
-    print(f"Field generated and saved to {cache_file}")
+    # with open(cache_file, "wb") as f:
+    #     pickle.dump(binary_field, f)
+    # # print(f"Field generated and saved to {cache_file}")
 
     return binary_field
 
@@ -362,24 +361,6 @@ def get_range(uav_pos, grid, index_form=False):
         ]
 
     return [[x_min, x_max], [y_min, y_max]]
-
-
-# def get_observations(grid_info, ground_truth_map, uav_pos):
-#     [[x_min_id, x_max_id], [y_min_id, y_max_id]] = get_range(
-#         uav_pos, grid_info, index_form=True
-#     )
-#     submap = ground_truth_map[x_min_id:x_max_id, y_min_id:y_max_id]
-
-#     x = np.arange(
-#         x_min_id * grid_info.length, x_max_id * grid_info.length, grid_info.length
-#     )
-#     y = np.arange(
-#         y_min_id * grid_info.length, y_max_id * grid_info.length, grid_info.length
-#     )
-
-#     x, y = np.meshgrid(x, y, indexing="ij")
-
-#     return x, y, submap
 
 
 def get_observations(grid_info, ground_truth_map, uav_pos, seed=None, mexgen=None):
@@ -491,29 +472,6 @@ def sampler(true_matrix, altitude, N):
             continue
         cumulative_observation = np.vstack([cumulative_observation, observation_matrix])
     return cumulative_observation
-
-
-import json
-
-
-def get_s0_s1(true_matrix, altitude, e=0.3):
-    with open("/home/bota/Desktop/active_sensing/data/N_per_E.json", "r") as file:
-        loaded_dict = json.load(file)
-
-    altitude = round(altitude, 2)
-    N = int(float(loaded_dict[str(altitude)][str(e)]))
-    cum_obs = sampler(true_matrix, altitude, N)
-    n = int(cum_obs.shape[0] / true_matrix.shape[0])
-    true_matrix_ = np.tile(true_matrix, (n, 1))
-
-    c = confusion_matrix(true_matrix_.flatten(), cum_obs.flatten())
-    c_norm = c / c.astype(np.float64).sum(axis=1, keepdims=True)
-    c_norm = np.round(c_norm, decimals=2).transpose()
-    c_norm = np.nan_to_num(c_norm) + 10e-10
-    s0 = c_norm[1][0]
-    s1 = c_norm[0][1]
-    # return np.array([[TN, FN], [FP, TP]]), (s0, s1)
-    return c_norm, (s0, s1)
 
 
 def calc_n(h, e=np.array([0.5, 0.4, 0.3, 0.2, 0.1, 0.05, 0.03])):

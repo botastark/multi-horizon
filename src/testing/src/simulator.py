@@ -202,13 +202,10 @@ class Camera:
 
         imgframe_x = x - (-field_len / 2)
         imgframe_y = -(y - field_len / 2)
-        # print(imgframe_x, imgframe_y)
         imgframe_x_in_cells = imgframe_x / field_cell_len
         imgframe_y_in_cells = imgframe_y / field_cell_len
 
         i, j = int(np.round(imgframe_y_in_cells)), int(np.round(imgframe_x_in_cells))
-
-        # print(np.round(imgframe_y_in_cells),np.round(imgframe_x_in_cells))
 
         return np.array([i, j])
 
@@ -391,6 +388,7 @@ class Agent:
         # agent random number generator
         if seed is None:
             seed = identity
+        seed = 0
         self.rng = np.random.default_rng(seed)
 
         # local map belief
@@ -459,7 +457,6 @@ class MappingEnv:
             self.min_space_z = self.h_displacement / np.tan(self.fov * 0.5)
 
         self.v_displacement = self.min_space_z
-        print(f"h_disp {self.h_displacement}: v disp {self.v_displacement}")
         self.max_space_z = self.n_v_act * self.min_space_z
 
         divisors = [
@@ -618,7 +615,6 @@ class MappingEnv:
                 ((rl[Y][1] - rl[Y][0]) / self.h_displacement) + 1
             )
             rl.append(n_tot_positions)
-
 
         # Agents
         # self.agents = [Agent(id,
@@ -1064,7 +1060,6 @@ class MappingEnv:
     def _generate_gaussian_map(self, cluster_radius):
         return self._gaussian_random_field(cluster_radius)
 
-
     def generate_map(self):
 
         if self.map_type == "gaussian":
@@ -1197,7 +1192,7 @@ class Mapper:
             pass
             # self._update_news_belief_OG_and_fuse_single(agents, observations)
         # if self.news_inference_type == "OG_multi":
-            # self._update_news_belief_OG_and_fuse_multi(agents, observations)
+        # self._update_news_belief_OG_and_fuse_multi(agents, observations)
         if self.news_inference_type == "LBP_single":
             self._update_news_belief_LBP_and_fuse_single(agents, observations)
         # if self.news_inference_type == "LBP_multi":
@@ -1243,7 +1238,6 @@ class Mapper:
                     a.id,
                 ]
             )
-
             assert np.all(np.greater_equal(posterior_m_one, 0.0))
 
             # posterior_m_zero_norm = posterior_m_zero / (posterior_m_zero + posterior_m_one)
@@ -1267,7 +1261,6 @@ class Mapper:
                     fp_vertices_ij["ul"][J] : fp_vertices_ij["ur"][J],
                     a.id,
                 ] = posterior_m_one_norm
-            return likelihood_m_zero
 
     def _init_LBP_graph(self, n_cell: int):
         self.graph: Dict[Tuple, Dict] = dict()
@@ -1312,7 +1305,6 @@ class Mapper:
                 self.graph[(i, j)]["msgs"] = msgs
                 self.graph[(i, j)]["masks"] = masks
 
-    
     def _init_LBP_msgs(self, n_cell):
         # depth_to_direction = 0123_4 -> URDL_fake
         self.msgs = np.ones((4 + 1, n_cell, n_cell), dtype=float) * 0.5
@@ -1407,6 +1399,7 @@ class Mapper:
                 ),
             },
         }
+
     def get_map_beliefs(self):
         global map_beliefs
         return map_beliefs
@@ -1458,7 +1451,6 @@ class Mapper:
         for a, o in zip(agents, observations):
 
             observation = o["z"]
-            # print(observation.shape)
 
             if (
                 observation.shape[0] % win_size != 0
@@ -1546,10 +1538,8 @@ class Mapper:
             #
             # W = np.array([[np.mean(p_conditional[0, 1:3]), 1-np.mean(p_conditional[0, 1:3])],
             #               [1-np.mean(p_conditional[1, 2:4]), np.mean(p_conditional[1, 2:4])]])
-
+            W = np.round(W, decimals=10)
             a.pairwise_potential = W
-            print(f"pairwise is {a.pairwise_potential}")
-
 
     def _update_belief_LBP_cts_vectorized_prova(
         self,
@@ -1573,7 +1563,7 @@ class Mapper:
             self.msgs[4, :, :] = map_beliefs[
                 :, :, agent.id
             ]  # set msgs last channel with current map belief
-            agent.pairwise_potential=np.round(agent.pairwise_potential, decimals=10)
+            agent.pairwise_potential = np.round(agent.pairwise_potential, decimals=10)
             fp_vertices_ij = o["fp_ij"]
             for _ in range(n_iteration):
                 for direction, data in self.direction_to_slicing_data.items():
@@ -1604,6 +1594,7 @@ class Mapper:
                 # copy the first 4 channels only
                 # the 5th one is the map belief
                 self.msgs[:4, :, :] = self.msgs_buffer[:4, :, :]
+                # return self.msgs[:4,:,:]
 
             bel_0 = np.prod(
                 1 - self.msgs[:, product_slice[1], product_slice[2]], axis=0
@@ -1625,6 +1616,8 @@ class Mapper:
                 )
             )
 
+    def get_msgs(self):
+        return self.msgs[:4, :, :]
 
     def _update_news_belief_LBP_and_fuse_single(
         self, agents: List[Agent], observations: List[Dict]
@@ -1701,7 +1694,9 @@ class Mapper:
                 # elementwise multiplication of msgs
                 mul_0 = np.prod(1 - self.msgs[product_slice], axis=0)
                 mul_1 = np.prod(self.msgs[product_slice], axis=0)
-                agents[agent_id].pairwise_potential=np.round(agents[agent_id].pairwise_potential, decimals=10)
+                agents[agent_id].pairwise_potential = np.round(
+                    agents[agent_id].pairwise_potential, decimals=10
+                )
 
                 # matrix-vector multiplication (factor-msg)
                 msg_0 = (
@@ -1717,6 +1712,8 @@ class Mapper:
                 norm_msg_1 = msg_1 / (msg_0 + msg_1)
 
                 # buffering
+                # self.msgs_buffer[write_slice] =  np.round(norm_msg_1[read_slice], decimals=10)
+
                 self.msgs_buffer[write_slice] = norm_msg_1[read_slice]
 
             # copy the first 4 channels only
@@ -1772,7 +1769,6 @@ class Mapper:
 
             if len(neighbors_ids) != 0:
                 news_map_beliefs[agent_id, agent_id, :, :] = 0.5
-
 
 
 class Planner:
@@ -2074,6 +2070,11 @@ class Planner:
                 # H(M_fp|Z) - conditional entropy of the posterior = sum of the averaged entropy of each cell in the footprint
                 sigma0, sigma1 = agent.camera.get_sigmas(position)
                 current_cH = cH(fp_map_belief, np.round(sigma0, 7), np.round(sigma1, 7))
+                # print(f"L: {action} current entropy: {np.sum(current_H)}")
+                # print(
+                #     f"L: {action}: obsd : {fp_vertices_ij['ul'][I]}:{fp_vertices_ij['bl'][I]},{fp_vertices_ij['ul'][J]}:{fp_vertices_ij['ur'][J]}"
+                # )
+                # print(f"L: {action} exptected entropy: {np.sum(current_cH)}")
 
                 # assert non-negativity
                 diff = current_H - current_cH
@@ -2123,16 +2124,10 @@ class Planner:
         synchronized_actions = []
 
         for agent in agents:
-            # print("PRIMA")
-            # print("----------", agent.id)
-            # print(selfish_actions[agent.id])
-            # pprint(data[agent.id]["admissible_action_to_IG"])
 
             neighbors_ids = []
             if len(observations) != 0:
                 neighbors_ids = observations[agent.id]["neighbors_ids"]
-
-            # print(neighbors_ids)
 
             for neighbor_id in neighbors_ids:
                 neighbor = agents[neighbor_id]
@@ -2191,8 +2186,6 @@ class Planner:
                 neighbor_action = self.__argmin_action(
                     neighbor, admissible_action_to_IG
                 )
-
-                # print(neighbor.id, neighbor_action)
 
                 neighbor_fp_ij = admissible_action_to_fp_ij[neighbor_action]
                 for action, agent_fp_ij in data[agent.id][
