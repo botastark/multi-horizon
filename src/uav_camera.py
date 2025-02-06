@@ -32,8 +32,10 @@ class camera:
         self.a = 1
         self.b = 0.015
         self.actions = {"up", "down", "front", "back", "left", "right", "hover"}
-        # print(f"alts: {self.h_range}")
-        # self.z = terrain(self.grid)
+
+    def reset(self):
+        self.position = (0.0, 0.0)
+        self.altitude = self.h_step
 
     def set_position(self, pos):
         self.position = pos
@@ -88,9 +90,9 @@ class camera:
     def x_future(self, action):
         # possible_actions = {"up", "down", "front", "back", "left", "right", "hover"}
 
-        if action == "up" and self.altitude + self.h_step <= self.h_range[1]:
+        if action == "up" and self.altitude + self.h_step <= self.h_range[1] + 1:
             return self.position, self.altitude + self.h_step
-        elif action == "down" and self.altitude - self.h_step >= self.h_range[0]:
+        elif action == "down" and self.altitude - self.h_step >= self.h_range[0] - 1:
             return (self.position, self.altitude - self.h_step)
         # front (+y)
         elif action == "front" and self.position[1] + self.xy_step <= self.y_range[1]:
@@ -112,9 +114,9 @@ class camera:
         # possible_actions = {"up", "down", "front", "back", "left", "right", "hover"}
         permitted_actions = ["hover"]
         for action in self.actions:
-            if action == "up" and x.altitude + self.h_step <= self.h_range[1]:
+            if action == "up" and x.altitude + self.h_step <= self.h_range[1] + 1:
                 permitted_actions.append(action)
-            elif action == "down" and x.altitude - self.h_step >= self.h_range[0]:
+            elif action == "down" and x.altitude - self.h_step >= self.h_range[0] - 1:
                 permitted_actions.append(action)
             elif action == "front" and x.position[1] + self.xy_step <= self.y_range[1]:
                 permitted_actions.append(action)

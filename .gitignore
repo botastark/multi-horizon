@@ -93,4 +93,7 @@ cache
 # ignore temp result folders
 equal_ig/
 equal_ig*/
+adaptive*/
+biased*/
+
 results

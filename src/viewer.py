@@ -84,7 +84,7 @@ def plot_terrain(filename, belief, grid, uav_pos, gt, submap, zx, zy):
     # ax3.set_xlim([0, self.x_range[1]])
     # ax3.set_ylim([0, self.y_range[1]])
 
-    if belief.ndim==3:
+    if belief.ndim == 3:
         map = belief[:, :, 1].T
     else:
         map = belief.T
@@ -104,8 +104,6 @@ def plot_terrain(filename, belief, grid, uav_pos, gt, submap, zx, zy):
     # Show the plots
     plt.savefig(filename)
     plt.close(fig)
-
-
 
 
 def plot_metrics(dir, entropy_list, mse_list, coverage_list, height_list):
@@ -153,7 +151,10 @@ def plot_metrics(dir, entropy_list, mse_list, coverage_list, height_list):
     plt.tight_layout()
 
     # Show the plot
-    plt.savefig(dir+"/final.png")
+    if dir[-4:] == ".png":
+        plt.savefig(dir)
+    else:
+        plt.savefig(dir + "/final.png")
     plt.close(fig)
 
     # plt.show()

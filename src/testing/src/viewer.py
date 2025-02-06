@@ -1,22 +1,23 @@
-from typing import List
 from matplotlib import colors
 import matplotlib.pyplot as plt
 import numpy as np
-import copy
 from mpl_toolkits.mplot3d import Axes3D  # Ensure this is imported
 
 
-def plot_terrain(filename, belief, grid, uav_pos, gt, submap, zx, zy):
+def plot_terrain(filename, belief, grid, uav_pos, gt, submap, obs, centered=False):
 
     # Plot both the 3D and 2D maps in subplots
     fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(15, 6))
     for ax in axes:
         ax.set_axis_off()
-
-    ox_min = np.min(zx)
-    ox_max = np.max(zx)
-    oy_min = np.min(zy)
-    oy_max = np.max(zy)
+    [
+        [ox_min, ox_max],
+        [oy_min, oy_max],
+    ] = obs
+    # ox_min = np.min(zx)
+    # ox_max = np.max(zx)
+    # oy_min = np.min(zy)
+    # oy_max = np.max(zy)
 
     o_x = [ox_min, ox_max, ox_max, ox_min, ox_min]
     o_y = [oy_min, oy_min, oy_max, oy_max, oy_min]
@@ -24,9 +25,15 @@ def plot_terrain(filename, belief, grid, uav_pos, gt, submap, zx, zy):
     # ---- Plot 1: uav position and ground truth 3D ----
 
     ax1 = fig.add_subplot(131, projection="3d")
+    if centered:
+        x_range = [-grid.x / 2, grid.x / 2]
+        y_range = [-grid.y / 2, grid.y / 2]
+    else:
+        x_range = [0, grid.x]
+        y_range = [0, grid.y]
 
-    ax1.set_xlim([0, grid.x])
-    ax1.set_ylim([0, grid.y])
+    ax1.set_xlim(x_range)
+    ax1.set_ylim(y_range)
     ax1.set_zlim([0, 35])
     ax1.set_xlabel("X (m)")
     ax1.set_ylabel("Y (m)")
@@ -40,8 +47,8 @@ def plot_terrain(filename, belief, grid, uav_pos, gt, submap, zx, zy):
     ax1.plot(x, y, z, marker="o", color="r", linestyle="-")
 
     # Truth terrain map
-    x = np.arange(0, grid.x, grid.length)
-    y = np.arange(0, grid.y, grid.length)
+    x = np.arange(x_range[0], x_range[1], grid.length)
+    y = np.arange(y_range[0], y_range[1], grid.length)
     x, y = np.meshgrid(x, y, indexing="ij")
 
     ax1.plot_surface(
@@ -63,8 +70,8 @@ def plot_terrain(filename, belief, grid, uav_pos, gt, submap, zx, zy):
     ax2.set_ylabel("Y-axis")
     ax2.set_title("last observation z_t")
     # ax2.set_aspect("equal")
-    ax2.set_xlim([0, grid.x])
-    ax2.set_ylim([0, grid.y])
+    ax2.set_xlim(x_range)
+    ax2.set_ylim(y_range)
 
     cmap = colors.ListedColormap(["green", "yellow"])
     bounds = [-0.5, 0.5, 1.5]
@@ -85,8 +92,14 @@ def plot_terrain(filename, belief, grid, uav_pos, gt, submap, zx, zy):
     ax3.set_title("Belief sampled map M")
     # ax3.set_xlim([0, self.x_range[1]])
     # ax3.set_ylim([0, self.y_range[1]])
+
+    if belief.ndim == 3:
+        map = belief[:, :, 1].T
+    else:
+        map = belief.T
+
     im2 = ax3.imshow(
-        belief[:, :, 1].T,
+        map,
         cmap="Blues",
         extent=[x.min(), x.max(), y.min(), y.max()],
         origin="lower",
@@ -100,50 +113,6 @@ def plot_terrain(filename, belief, grid, uav_pos, gt, submap, zx, zy):
     # Show the plots
     plt.savefig(filename)
     plt.close(fig)
-
-    # def plot_prob(self, filename):
-
-    #     fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(50, 50))
-
-    #     # # Example 2D grid of probabilities (replace with your actual probability values)
-    #     probability_map_0 = self.probability[0, :, :]  # First probability map
-    #     # print(self.probability[0].shape)
-    #     # probability_map_1 = self.probability[1, :, :]  # Second probability map
-
-    #     # # Plot the first probability map in ax[0]
-    #     cax0 = ax.imshow(
-    #         probability_map_0.T,
-    #         cmap="Blues",
-    #         interpolation="nearest",
-    #         origin="lower",
-    #         vmin=0,
-    #         vmax=1,
-    #         extent=[self.x.min(), self.x.max(), self.y.min(), self.y.max()],
-    #     )
-
-    #     # # Add text annotations for the first probability map
-    #     for (i, j), prob in np.ndenumerate(probability_map_0.T):
-    #         ax.text(
-    #             self.y[i, j] + self.grid.length / 4,
-    #             self.x[i, j] + self.grid.length / 4,
-    #             f"{prob:.2f}",
-    #             ha="center",
-    #             va="center",
-    #             color="black",
-    #             fontsize=10,
-    #         )
-
-    #     ax.set_title("Probability Map 0")
-    #     ax.set_xlabel("X-axis")
-    #     ax.set_ylabel("Y-axis")
-
-    #     # # Adjust the layout to make sure everything fits well
-    #     plt.tight_layout()
-
-    #     # # Save the figure to a file
-    #     plt.savefig(filename)
-    #     plt.close(fig)
-
 
 
 def plot_metrics(dir, entropy_list, mse_list, coverage_list, height_list):
@@ -189,9 +158,11 @@ def plot_metrics(dir, entropy_list, mse_list, coverage_list, height_list):
 
     # Adjust layout to avoid overlap
     plt.tight_layout()
-
     # Show the plot
-    plt.savefig(dir+"/final.png")
+    if dir[-4:] == ".png":
+        plt.savefig(dir)
+    else:
+        plt.savefig(dir + "/final.png")
     plt.close(fig)
 
     # plt.show()
