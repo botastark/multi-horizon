@@ -75,11 +75,11 @@ class grid_info:
 
 grf_r = 4
 # correlation_types = ["biased", "equal", "adaptive"]
-correlation_types = ["biased"]
+correlation_types = ["equal", "adaptive", "biased"]
 n_steps = 100
 iters = 20
-es = [None, 0.3, 0.1, 0.05]
-# es = [None]
+# es = [None, 0.3, 0.1, 0.05]
+es = [0.3]
 rng = np.random.default_rng(123)
 
 # Initialize the mapper's OccupancyMap

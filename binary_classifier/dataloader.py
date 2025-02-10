@@ -119,6 +119,9 @@ class WheatOthomapDataset(Dataset):
     def __len__(self):
         return len(self.tiles)
 
+    def get_tile_info(self, tile):
+        return self._get_tile_img(tile), self.labels[tile[0], tile[1]]
+
 
 # train = WheatOthomapDataset(dataset_path, annotation_path, tile_ortomappixel_path)
 # train_loader = torch.utils.data.DataLoader(
