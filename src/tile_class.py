@@ -1,15 +1,23 @@
+#!/usr/bin/env python3
+import sys
 import os
 import csv
 from matplotlib import pyplot as plt
 import numpy as np
-from classifier import predict, predict_batch
+
+sys.path.append(os.path.abspath("/home/bota/Desktop/active_sensing"))
+from binary_classifier.classifier import Predicter
+
+# from classifier import predict, predict_batch
 from utilities import get_image_properties, img_NED, gps_ned
 import pickle
 from proj import camera
 
 
 class TileOperations:
-    def __init__(self, tiles_dir, gps_csv, row_imgs_dir):
+    def __init__(
+        self, tiles_dir, gps_csv, row_imgs_dir, model_path=None, num_classes=2
+    ):
         """
         Initialize TileOperations with paths and load necessary data.
 
@@ -26,6 +34,11 @@ class TileOperations:
         ref_point_info = get_image_properties(ref_img_path)
 
         self.L2 = camera(ref_point_info)
+        if model_path is None:
+            model_path = "/home/bota/Desktop/active_sensing/binary_classifier/models/best_model_95_lr7-5-06bs128_wd-07.pth"
+        self.predictor = Predicter(
+            model_weights_path=model_path, num_classes=num_classes
+        )
 
     def parse_tiles(self, tile_list):
         """Parse tile filenames to extract tile row and column."""
@@ -140,7 +153,8 @@ class TileOperations:
                 )  # Store positions to map predictions later
 
         # Batch predict for all images
-        predictions = predict_batch(img_paths_batch)
+
+        predictions = self.predictor.predict_batch(img_paths_batch)
 
         # Map predictions to submap grid
         for pred, (c, r) in zip(predictions, tiles_to_predict):
