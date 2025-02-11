@@ -7,6 +7,7 @@ import torch.optim as optim
 
 from torchvision import transforms
 
+
 num_classes = 3
 
 model = InceptionResNetV2(num_classes)
