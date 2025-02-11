@@ -24,16 +24,20 @@ class Predicter(nn.Module):
     def __init__(
         self,
         num_classes=2,
+        img_size=180,
         model_weights_path=None,
     ):
         super(Predicter, self).__init__()
         if num_classes == 3:
+            # self.img_size= 150,
+            self.img_size = 150
 
             self.model = InceptionResNetV2(num_classes)
             if model_weights_path is None:
                 model_weights_path = "/home/bota/Desktop/active_sensing/src/model/model_resnet_single_image.p"
 
         elif num_classes == 2:
+            self.img_size = 180
             self.model = ModifiedClassifier(num_classes=num_classes)
 
         else:
@@ -54,13 +58,14 @@ class Predicter(nn.Module):
         # super(ModifiedClassifier, self).__init__()
         self.transform = transforms.Compose(
             [
-                transforms.Resize((150, 150)),
+                transforms.Resize((self.img_size, self.img_size)),
                 transforms.ToTensor(),
                 transforms.Normalize(
                     mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
                 ),
             ]
         )
+
         self.num_classes = num_classes
 
     def predict(self, img_path):
@@ -84,10 +89,14 @@ class Predicter(nn.Module):
 
             else:
                 probs = torch.sigmoid(outputs)
-                preds = torch.argmax(probs, dim=1)
-                # preds = (probs > 0.5).float()
+                preds = (probs > 0.5).float()
+                preds = preds.cpu().numpy()
+                preds = np.argmax(preds)
+                # pred = np.argmax(preds[0])
+                # Convert probabilities to class predictions (0 or 1)
+                # preds = torch.argmax(preds, dim=1).tolist()
 
-                return preds.cpu().numpy()
+                return preds
 
     # Update predict function to handle batch prediction with a fixed batch size
     def predict_batch(self, img_paths, batch_size=64):
@@ -113,10 +122,12 @@ class Predicter(nn.Module):
                 if self.num_classes == 3:
                     predictions = torch.argmax(outputs, dim=1).tolist()
                 else:
-                    # probs = torch.sigmoid(outputs)
-                    # preds = (probs > 0.5).float()
-                    predictions = torch.argmax(outputs, dim=1).tolist()
-                    # predictions = preds.cpu().numpy()
+                    probs = torch.sigmoid(outputs)
+                    preds = (probs > 0.5).float()
+
+                    # Convert probabilities to class predictions (0 or 1)
+                    # preds = torch.argmax(preds, dim=1).tolist()
+                    predictions = preds.cpu().numpy()
 
             # Append batch predictions to the final list
             all_predictions.extend(predictions)
