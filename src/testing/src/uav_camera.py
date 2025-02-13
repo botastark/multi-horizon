@@ -14,19 +14,26 @@ class camera:
         fov_angle,
         camera_altitude=0,
         camera_pos=(0.0, 0.0),
-        x_range=(-25, 25),
-        y_range=(-25, 25),
+        rng=np.random.default_rng(123),
     ):
 
         self.grid = grid
         self.altitude = camera_altitude
         self.position = camera_pos
+        self.rng = rng
         self.fov = fov_angle
-        self.x_range = x_range
-        self.y_range = y_range
+        if self.grid.center:
+            self.x_range = [-self.grid.x / 2, self.grid.x / 2]
+            self.y_range = [-self.grid.y / 2, self.grid.y / 2]
+        else:
+            self.x_range = [0, self.grid.x]
+            self.y_range = [0, self.grid.y]
 
         # Dynamic xy_step and h_step calculation if not explicitly provided
-        self.xy_step = (self.x_range[1] - self.x_range[0]) / 2 / 8
+        min_range = min(
+            self.x_range[1] - self.x_range[0], self.y_range[1] - self.y_range[0]
+        )
+        self.xy_step = min_range / 2 / 8
         self.h_step = self.xy_step / np.tan(np.deg2rad(self.fov * 0.5))
         self.h_range = (self.h_step, 6 * self.h_step)
         self.a = 1
@@ -50,115 +57,86 @@ class camera:
     def get_x(self):
         return uav_position((self.position, self.altitude))
 
-    # def get_range(self, position=None, altitude=None, index_form=False):
-    #     """
-    #     calculates indices of camera footprints (part of terrain (therefore terrain indices) seen by camera at a given UAV pos and alt)
-    #     """
-    #     position = position if position is not None else self.position
-    #     altitude = altitude if altitude is not None else self.altitude
-
-    #     x_angle = self.fov / 2  # degree
-    #     y_angle = self.fov / 2  # degree
-    #     x_dist = altitude * math.tan(x_angle / 180 * np.pi)
-    #     y_dist = altitude * math.tan(y_angle / 180 * np.pi)
-
-    #     # adjust func: for smaller square ->int() and for larger-> round()
-    #     x_dist = round(x_dist / self.grid.length) * self.grid.length
-    #     y_dist = round(y_dist / self.grid.length) * self.grid.length
-    #     # Trim if out of scope (out of the map)
-    #     x_min = max(position[1] - x_dist, 0.0)
-    #     x_max = min(position[1] + x_dist, self.grid.x)
-
-    #     y_min = max(position[0] - y_dist, 0.0)
-    #     y_max = min(position[0] + y_dist, self.grid.y)
-    #     if index_form:  # return as indix range
-    #         return [
-    #             [round(x_min / self.grid.length), round(x_max / self.grid.length)],
-    #             [round(y_min / self.grid.length), round(y_max / self.grid.length)],
-    #         ]
-
-    #     return [[x_min, x_max], [y_min, y_max]]
-
-    def transform_coordinates(self, x, y, x_min=-25, x_max=25, X_min=0, X_max=400):
-        scale = (X_max - X_min) / (x_max - x_min)  # Scale factor
-        i = (x - x_min) * scale + X_min
-        j = (y - x_min) * scale + X_min
-
+    def convert_xy_ij(self, x, y, centered):
+        if centered:
+            center_j, center_i = (dim // 2 for dim in self.grid.shape)
+            j = x / self.grid.length + center_j
+            i = -y / self.grid.length + center_i
+        else:
+            j = x / self.grid.length
+            i = self.grid.y - y / self.grid.length
         return int(i), int(j)
 
-    def tranf_coord(
-        self,
-        pos_x,
-        pos_y,
-        dist_x,
-        dist_y,
-        grid_length,
-        index_form=False,
-        centered=False,
-    ):
-        if index_form:
-            x_min = int(max((-pos_y - dist_y) / grid_length + 200, 0))
-            x_max = int(min((-pos_y + dist_y) / grid_length + 200, 400))
-            y_min = int(max((pos_x - dist_x) / grid_length + 200, 0))
-            y_max = int(min((pos_x + dist_x) / grid_length + 200, 400))
-
-            return [
-                [x_min, x_max],
-                [y_min, y_max],
-            ]
-        else:
-            if centered:
-                x_min = int(max((-pos_y - dist_y), -self.grid.y / 2))
-                x_max = int(min((-pos_y + dist_y), self.grid.y / 2))
-                y_min = int(max((pos_x - dist_x), -self.grid.x / 2))
-                y_max = int(min((pos_x + dist_x), self.grid.x / 2))
-                # x_min = int(max((pos_x - dist_x), -self.grid.x / 2))
-                # x_max = int(min((pos_x + dist_x), self.grid.x / 2))
-                # y_min = int(max((pos_y - dist_y), -self.grid.y / 2))
-                # y_max = int(min((pos_y + dist_y), self.grid.y / 2))
-            else:
-                x_min = int(max((pos_x - dist_x), 0))
-                x_max = int(min((pos_x + dist_x), self.grid.x))
-                y_min = int(max((pos_y - dist_y), 0))
-                y_max = int(min((pos_y + dist_y), self.grid.y))
-
-            return [
-                [x_min, x_max],
-                [y_min, y_max],
-            ]
-
-    def get_range(self, position=None, altitude=None, index_form=False, centered=False):
+    def get_range(self, position=None, altitude=None, index_form=False):
         """
         calculates indices of camera footprints (part of terrain (therefore terrain indices) seen by camera at a given UAV pos and alt)
         """
         position = position if position is not None else self.position
         altitude = altitude if altitude is not None else self.altitude
         # print(f"get range alt:{altitude}")
+        grid_length = self.grid.length
+        fov_rad = np.deg2rad(self.fov) / 2
 
-        fp_d = altitude * math.tan(
-            np.deg2rad(self.fov) / 2
-        )  # Ensure consistency with get_fp_vertices_ij
-        # adjust func: for smaller square ->int() and for larger-> round()
-        x_dist = round(fp_d / self.grid.length) * self.grid.length
-        y_dist = round(fp_d / self.grid.length) * self.grid.length
-        return self.tranf_coord(
-            position[0],
-            position[1],
-            x_dist,
-            y_dist,
-            self.grid.length,
-            index_form=index_form,
-            centered=centered,
+        x_dist = round(altitude * math.tan(fov_rad) / grid_length) * grid_length
+        y_dist = round(altitude * math.tan(fov_rad) / grid_length) * grid_length
+
+        # print(f"dist x:{x_dist} y:{y_dist}")
+        # print(f"ranges x{self.x_range} y{self.y_range}")
+        # print(f"pos: {uav_pos.position} {uav_pos.altitude}")
+
+        x_min, x_max = np.clip(
+            [position[0] - x_dist, position[0] + x_dist], *self.x_range
         )
+        y_min, y_max = np.clip(
+            [position[1] - y_dist, position[1] + y_dist], *self.y_range
+        )
+        if x_max - x_min == 0 or y_max - y_min == 0:
+            return [[0, 0], [0, 0]]
 
-    def pos2grid(self, pos):
-        # from position in meters into grid coordinates
-        return min(
-            max(round(pos[0] / self.grid.length), 0), self.grid.shape[0] - 1
-        ), min(max(round(pos[1] / self.grid.length), 0), self.grid.shape[1] - 1)
+        # print(f"visible ranges x:({x_min}:{x_max}) y:({y_min}:{y_max})")
+        if not index_form:
+            return [[x_min, x_max], [y_min, y_max]]
+        i_max, j_min = self.convert_xy_ij(x_min, y_min, self.grid.center)
+        i_min, j_max = self.convert_xy_ij(x_max, y_max, self.grid.center)
+        # if not centered:
+        #     i_min, i_max = i_max, i_min
 
-    def grid2pos(self, coords):
-        return coords[0] * self.grid.length, coords[1] * self.grid.length
+        # print(f"visible ranges i:({i_min}:{i_max}) j:({j_min}:{j_max})")
+        return [[i_min, i_max], [j_min, j_max]]
+
+    """
+    upd
+    """
+
+    def get_observations(self, ground_truth_map, sigmas=None):
+        [[x_min_id, x_max_id], [y_min_id, y_max_id]] = self.get_range(
+            # uav_pos, grid_info,
+            index_form=True
+        )
+        # print(f"obs area ids:{x_min_id}:{x_max_id}, {y_min_id}:{y_max_id} ")
+        # print(f"gt map shape:{ground_truth_map.shape}")
+
+        submap = ground_truth_map[x_min_id:x_max_id, y_min_id:y_max_id]
+        # print(f"gt submap shape:{submap.shape}")
+        x = np.arange(x_min_id, x_max_id, 1)
+        y = np.arange(y_min_id, y_max_id, 1)
+        if sigmas is None:
+            sigma = self.a * (1 - np.exp(-self.b * self.altitude))
+            sigmas = [sigma, sigma]
+
+        sigma0, sigma1 = sigmas[0], sigmas[1]
+
+        # rng = np.random.default_rng()
+        random_values = self.rng.random(submap.shape)
+        success0 = random_values <= 1.0 - sigma0
+        success1 = random_values <= 1.0 - sigma1
+        z0 = np.where(np.logical_and(success0, submap == 0), 0, 1)
+        z1 = np.where(np.logical_and(success1, submap == 1), 1, 0)
+        z = np.where(submap == 0, z0, z1)
+
+        x, y = np.meshgrid(x, y, indexing="ij")
+
+        return x, y, z
 
     def x_future(self, action):
         # possible_actions = {"up", "down", "front", "back", "left", "right", "hover"}
