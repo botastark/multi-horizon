@@ -5,19 +5,20 @@ from helper import (
     FastLogger,
     compute_metrics,
     gaussian_random_field,
-    get_observations,
+    # get_observations,
     init_s0_s1,
     observed_m_ids,
     uav_position,
 )
 
+# from mapper import get_observations
 from mapper_LBP import OccupancyMap as OML
 from planner import planning
 from uav_camera import camera
 from tqdm import tqdm
 from viewer import plot_metrics, plot_terrain
 
-desktop = "/home/bota/Desktop/active_sensing/cache/tester_cache"
+desktop = "/home/bota/Desktop/active_sensing/cache"
 belief_buffer = None
 
 # from simulator import MappingEnv, Mapper, Agent, State, Camera, Proximity
@@ -71,15 +72,16 @@ class grid_info:
     y = 50  # 110 for real field
     length = 0.125  # 1
     shape = (int(x / length), int(y / length))
+    center = True
 
 
 grf_r = 4
 # correlation_types = ["biased", "equal", "adaptive"]
-correlation_types = ["equal", "adaptive", "biased"]
+correlation_types = ["equal"]
 n_steps = 100
-iters = 20
+iters = 1
 # es = [None, 0.3, 0.1, 0.05]
-es = [0.3]
+es = [None]
 rng = np.random.default_rng(123)
 
 # Initialize the mapper's OccupancyMap
@@ -98,16 +100,12 @@ for correlation_type in tqdm(correlation_types, desc="pairwise", position=0):
 
             folder = (
                 desktop
-                + f"/{correlation_type}_{action_select_strategy}_e{sampled_sigma_error_margin}_r{grf_r}"
+                + f"/txt_new/{correlation_type}_{action_select_strategy}_e{sampled_sigma_error_margin}_r{grf_r}"
             )
             ground_truth_map = gaussian_random_field(grf_r, grid_info.shape)
 
             belief_map = np.full((grid_info.shape[0], grid_info.shape[1], 2), 0.5)
-            camera1 = camera(
-                grid_info,
-                60,
-                #  x_range=(0, grid_info.x), y_range=(0, grid_info.y)
-            )
+            camera1 = camera(grid_info, 60, rng=rng)
 
             if sampled_sigma_error_margin is not None:
                 conf_dict = init_s0_s1(
@@ -169,34 +167,18 @@ for correlation_type in tqdm(correlation_types, desc="pairwise", position=0):
                 # x_, y_ = np.meshgrid(x, y, indexing="ij")
                 # submap = first_observation["z"]
 
-                a = 1
-                b = 0.015
-                sigma = a * (1 - np.exp(-b * uav_pos.altitude))
-                sigmas = [sigma, sigma]
                 # s0, s1 = conf_dict[np.round(uav_pos.altitude, decimals=2)]
                 # sigmas = [s0, s1]
-                x__, y__, submap_ = get_observations(
-                    grid_info,
+                x__, y__, submap_ = camera1.get_observations(
                     ground_truth_map,
-                    uav_pos,
-                    sigmas,
-                    center=True,
-                    rng=rng,
+                    # sigmas,
                 )
-                obd_field_id = camera1.get_range(
-                    position=uav_pos.position,
-                    altitude=uav_pos.altitude,
-                    index_form=True,
-                )
-                # print(f"observed field id: {obd_field_id}")
 
                 obd_field = camera1.get_range(
                     position=uav_pos.position,
                     altitude=uav_pos.altitude,
                     index_form=False,
-                    centered=True,
                 )
-                # print(f"observed field: {obd_field}")
 
                 # print(f"diff obs z: {np.max(submap_-submap)} {np.min(submap_-submap)}")
                 # plt.figure(figsize=(12, 5))

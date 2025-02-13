@@ -200,7 +200,7 @@ class FastLogger:
             else:
                 f.write(f"Gaussian radius {self.r} \n")
             f.write(
-                f"Grid info: range: 0-{self.grid.x}-{self.grid.y}, cell_size:{self.grid.length}, map shape: {self.grid.shape}\n"
+                f"Grid info: range: 0-{self.grid.x}-{self.grid.y}, cell_size:{self.grid.length}, map shape: {self.grid.shape}, center:{self.grid.center}\n"
             )
 
             f.write(
@@ -328,112 +328,6 @@ def gaussian_random_field(cluster_radius, n_cell, cache_dir="cache"):
     # # print(f"Field generated and saved to {cache_file}")
 
     return binary_field
-
-
-import math
-
-
-def tranf_coord(pos_x, pos_y, dist_x, dist_y, grid_length):
-    x_min = int(max((-pos_y - dist_y) / grid_length + 200, 0))
-    x_max = int(min((-pos_y + dist_y) / grid_length + 200, 400))
-    y_min = int(max((pos_x - dist_x) / grid_length + 200, 0))
-    y_max = int(min((pos_x + dist_x) / grid_length + 200, 400))
-
-    return [
-        [x_min, x_max],
-        [y_min, y_max],
-    ]
-
-
-def get_range(uav_pos, grid, center=False, index_form=False):
-    """
-    calculates indices of camera footprints (part of terrain (therefore terrain indices) seen by camera at a given UAV pos and alt)
-    """
-    # position = position if position is not None else self.position
-    # altitude = altitude if altitude is not None else self.altitude
-    fov = np.deg2rad(60)
-    x_angle = fov / 2  # degree
-    y_angle = fov / 2  # degree
-    x_dist = uav_pos.altitude * math.tan(x_angle)
-    y_dist = uav_pos.altitude * math.tan(y_angle)
-
-    # adjust func: for smaller square ->int() and for larger-> round()
-    x_dist = round(x_dist / grid.length) * grid.length
-    y_dist = round(y_dist / grid.length) * grid.length
-    # Trim if out of scope (out of the map)
-    x_range = [0, grid.x]
-    y_range = [0, grid.y]
-
-    if center:
-        x_range = [-grid.x / 2, grid.x / 2]
-        y_range = [-grid.y / 2, grid.y / 2]
-        [
-            [x_min_i, x_max_i],
-            [y_min_j, y_max_j],
-        ] = tranf_coord(
-            uav_pos.position[0], uav_pos.position[1], x_dist, y_dist, grid.length
-        )
-        if index_form:
-            return [
-                [x_min_i, x_max_i],
-                [y_min_j, y_max_j],
-            ]
-
-    x_min = max(uav_pos.position[0] - x_dist, x_range[0])
-    x_max = min(uav_pos.position[0] + x_dist, x_range[1])
-
-    y_min = max(uav_pos.position[1] - y_dist, y_range[0])
-    y_max = min(uav_pos.position[1] + y_dist, y_range[1])
-    if index_form:  # return as indix range
-        return [
-            [round(x_min / grid.length), round(x_max / grid.length)],
-            [round(y_min / grid.length), round(y_max / grid.length)],
-        ]
-
-    return [[x_min, x_max], [y_min, y_max]]
-
-
-def get_observations(
-    grid_info, ground_truth_map, uav_pos, sigmas=None, center=False, rng=None
-):
-    [[x_min_id, x_max_id], [y_min_id, y_max_id]] = get_range(
-        uav_pos, grid_info, index_form=True, center=center
-    )
-    submap = ground_truth_map[x_min_id:x_max_id, y_min_id:y_max_id]
-    # if mexgen is not None:
-    #     success1 = sample_binary_observations(m, uav_pos.altitude)
-    #     success0 = 1 - success1
-
-    # x = np.arange(
-    #     x_min_id * grid_info.length, x_max_id * grid_info.length, grid_info.length
-    # )
-    # y = np.arange(
-    #     y_min_id * grid_info.length, y_max_id * grid_info.length, grid_info.length
-    # )
-    # print(f"get obs x,y:{ get_range(uav_pos, grid_info, center=True)}")
-    x = np.arange(x_min_id, x_max_id, 1)
-    y = np.arange(y_min_id, y_max_id, 1)
-    if sigmas is None:
-        a = 1
-        b = 0.015
-        sigma = a * (1 - np.exp(-b * uav_pos.altitude))
-        sigmas = [sigma, sigma]
-    sigma0, sigma1 = sigmas[0], sigmas[1]
-
-    # if seed is None:
-    # seed = 0
-    if rng is None:
-        rng = np.random.default_rng(0)
-    random_values = rng.random(submap.shape)
-    success0 = random_values <= 1.0 - sigma0
-    success1 = random_values <= 1.0 - sigma1
-    z0 = np.where(np.logical_and(success0, submap == 0), 0, 1)
-    z1 = np.where(np.logical_and(success1, submap == 1), 1, 0)
-    z = np.where(submap == 0, z0, z1)
-
-    x, y = np.meshgrid(x, y, indexing="ij")
-
-    return x, y, z
 
 
 def sample_binary_observations(belief_map, altitude, num_samples=5):
