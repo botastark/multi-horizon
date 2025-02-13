@@ -5,7 +5,6 @@ from helper import (
     FastLogger,
     compute_metrics,
     gaussian_random_field,
-    # get_observations,
     init_s0_s1,
     observed_m_ids,
     uav_position,
@@ -320,7 +319,6 @@ for correlation_type in tqdm(correlation_types, desc="pairwise", position=0):
                     ground_truth_map,
                     submap_,
                     obd_field,
-                    centered=True,
                 )
 
                 # Optionally visualize the differences

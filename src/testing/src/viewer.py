@@ -4,7 +4,7 @@ import numpy as np
 from mpl_toolkits.mplot3d import Axes3D  # Ensure this is imported
 
 
-def plot_terrain(filename, belief, grid, uav_pos, gt, submap, obs, centered=False):
+def plot_terrain(filename, belief, grid, uav_pos, gt, submap, obs):
 
     # Plot both the 3D and 2D maps in subplots
     fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(15, 6))
@@ -25,7 +25,7 @@ def plot_terrain(filename, belief, grid, uav_pos, gt, submap, obs, centered=Fals
     # ---- Plot 1: uav position and ground truth 3D ----
 
     ax1 = fig.add_subplot(131, projection="3d")
-    if centered:
+    if grid.center:
         x_range = [-grid.x / 2, grid.x / 2]
         y_range = [-grid.y / 2, grid.y / 2]
     else:
