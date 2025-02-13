@@ -64,7 +64,7 @@ class camera:
             i = -y / self.grid.length + center_i
         else:
             j = x / self.grid.length
-            i = self.grid.y - y / self.grid.length
+            i = self.grid.shape[1] - y / self.grid.length
         return int(i), int(j)
 
     def get_range(self, position=None, altitude=None, index_form=False):
@@ -73,16 +73,11 @@ class camera:
         """
         position = position if position is not None else self.position
         altitude = altitude if altitude is not None else self.altitude
-        # print(f"get range alt:{altitude}")
         grid_length = self.grid.length
         fov_rad = np.deg2rad(self.fov) / 2
 
         x_dist = round(altitude * math.tan(fov_rad) / grid_length) * grid_length
         y_dist = round(altitude * math.tan(fov_rad) / grid_length) * grid_length
-
-        # print(f"dist x:{x_dist} y:{y_dist}")
-        # print(f"ranges x{self.x_range} y{self.y_range}")
-        # print(f"pos: {uav_pos.position} {uav_pos.altitude}")
 
         x_min, x_max = np.clip(
             [position[0] - x_dist, position[0] + x_dist], *self.x_range
@@ -92,15 +87,17 @@ class camera:
         )
         if x_max - x_min == 0 or y_max - y_min == 0:
             return [[0, 0], [0, 0]]
+        """
+        print(f"dist x:{x_dist} y:{y_dist}")
+        print(f"ranges x{self.x_range} y{self.y_range}")
+        print(f"pos: {self.position} {self.altitude}")
+        print(f"visible ranges x:({x_min}:{x_max}) y:({y_min}:{y_max})")
+        """
 
-        # print(f"visible ranges x:({x_min}:{x_max}) y:({y_min}:{y_max})")
         if not index_form:
             return [[x_min, x_max], [y_min, y_max]]
         i_max, j_min = self.convert_xy_ij(x_min, y_min, self.grid.center)
         i_min, j_max = self.convert_xy_ij(x_max, y_max, self.grid.center)
-        # if not centered:
-        #     i_min, i_max = i_max, i_min
-
         # print(f"visible ranges i:({i_min}:{i_max}) j:({j_min}:{j_max})")
         return [[i_min, i_max], [j_min, j_max]]
 
@@ -113,11 +110,13 @@ class camera:
             # uav_pos, grid_info,
             index_form=True
         )
-        # print(f"obs area ids:{x_min_id}:{x_max_id}, {y_min_id}:{y_max_id} ")
-        # print(f"gt map shape:{ground_truth_map.shape}")
-
         submap = ground_truth_map[x_min_id:x_max_id, y_min_id:y_max_id]
-        # print(f"gt submap shape:{submap.shape}")
+        """
+        
+        print(f"obs area ids:{x_min_id}:{x_max_id}, {y_min_id}:{y_max_id} ")
+        print(f"gt map shape:{ground_truth_map.shape}")
+        print(f"gt submap shape:{submap.shape}")
+        """
         x = np.arange(x_min_id, x_max_id, 1)
         y = np.arange(y_min_id, y_max_id, 1)
         if sigmas is None:
