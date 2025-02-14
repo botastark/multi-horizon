@@ -1,8 +1,0 @@
-35     70131.13   0.1732   16.2     0.7734    
-actions: ['up', 'up', 'front', 'right', 'right', 'front', 'right', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'back', 'back', 'back', 'back', 'back', 'back', 'back']
-35     70159.38   0.1727   16.2     0.7734    
-actions: ['up', 'up', 'front', 'right', 'right', 'front', 'right', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'back', 'back', 'back', 'back', 'back', 'back', 'back']
-35     70168.73   0.065    16.2     0.7734    
-actions: ['up', 'up', 'front', 'right', 'front', 'right', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'left', 'left', 'left', 'left', 'left', 'left', 'left']
-35     70130.2    0.1739   16.2     0.7734    
-actions: ['up', 'up', 'right', 'front', 'right', 'front', 'right', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'front', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'back', 'back', 'back', 'back', 'back', 'back', 'back']

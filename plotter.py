@@ -212,7 +212,7 @@ print(f"unique pairwise: {all_stats['Pairwise'].unique()}")
 
 
 # pritn(all_stats)
-plot_category_stats_by_e(all_stats, (4, "biased"))
+plot_category_stats_by_e(all_stats, (4, "adaptive"))
 
 setting_data = all_stats[
     (all_stats["Pairwise"] == "equal")

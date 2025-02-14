@@ -37,7 +37,7 @@ class Predicter(nn.Module):
                 model_weights_path = "/home/bota/Desktop/active_sensing/src/model/model_resnet_single_image.p"
 
         elif num_classes == 2:
-            self.img_size = 180
+            self.img_size = img_size
             self.model = ModifiedClassifier(num_classes=num_classes)
 
         else:

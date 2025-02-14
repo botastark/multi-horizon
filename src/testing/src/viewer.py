@@ -23,7 +23,6 @@ def plot_terrain(filename, belief, grid, uav_pos, gt, submap, obs):
     o_y = [oy_min, oy_min, oy_max, oy_max, oy_min]
 
     # ---- Plot 1: uav position and ground truth 3D ----
-
     ax1 = fig.add_subplot(131, projection="3d")
     if grid.center:
         x_range = [-grid.x / 2, grid.x / 2]
@@ -61,8 +60,8 @@ def plot_terrain(filename, belief, grid, uav_pos, gt, submap, obs):
     )
     o_z = np.zeros_like(o_x) + 0.01  # Slightly above z=0
 
-    # Plot the line in 3D
-    ax1.plot(o_x, o_y, o_z, color="red", lw=1)
+    # Plot the observation lines in 3D
+    ax1.plot(o_y, o_x, o_z, color="red", lw=1)
 
     # ---- Plot 2: 2D last observation z_t ----
     ax2 = fig.add_subplot(132)
@@ -81,7 +80,7 @@ def plot_terrain(filename, belief, grid, uav_pos, gt, submap, obs):
         submap.T,
         cmap=cmap,
         norm=norm,
-        extent=[ox_min, ox_max, oy_min, oy_max],
+        extent=[oy_min, oy_max, ox_min, ox_max],
         origin="lower",
     )
 
@@ -90,8 +89,6 @@ def plot_terrain(filename, belief, grid, uav_pos, gt, submap, obs):
     ax3.set_xlabel("X Axis")
     ax3.set_ylabel("Y Axis")
     ax3.set_title("Belief sampled map M")
-    # ax3.set_xlim([0, self.x_range[1]])
-    # ax3.set_ylim([0, self.y_range[1]])
 
     if belief.ndim == 3:
         map = belief[:, :, 1].T
@@ -101,7 +98,7 @@ def plot_terrain(filename, belief, grid, uav_pos, gt, submap, obs):
     im2 = ax3.imshow(
         map,
         cmap="Blues",
-        extent=[x.min(), x.max(), y.min(), y.max()],
+        extent=[y.min(), y.max(), x.min(), x.max()],
         origin="lower",
         # interpolation="nearest",
         vmin=0,

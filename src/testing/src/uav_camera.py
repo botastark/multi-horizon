@@ -106,19 +106,19 @@ class camera:
     """
 
     def get_observations(self, ground_truth_map, sigmas=None):
-        [[x_min_id, x_max_id], [y_min_id, y_max_id]] = self.get_range(
+        [[i_min, i_max], [j_min, j_max]] = self.get_range(
             # uav_pos, grid_info,
             index_form=True
         )
-        submap = ground_truth_map[x_min_id:x_max_id, y_min_id:y_max_id]
+
+        submap = ground_truth_map[i_min:i_max, j_min:j_max]
         """
-        
         print(f"obs area ids:{x_min_id}:{x_max_id}, {y_min_id}:{y_max_id} ")
         print(f"gt map shape:{ground_truth_map.shape}")
         print(f"gt submap shape:{submap.shape}")
         """
-        x = np.arange(x_min_id, x_max_id, 1)
-        y = np.arange(y_min_id, y_max_id, 1)
+        x = np.arange(i_min, i_max, 1)
+        y = np.arange(j_min, j_max, 1)
         if sigmas is None:
             sigma = self.a * (1 - np.exp(-self.b * self.altitude))
             sigmas = [sigma, sigma]

@@ -155,11 +155,12 @@ class OccupancyMap:
             # Adaptive: Pearson correlation coefficient
             return np.array(adaptive_weights_matrix(self.last_observations))
 
-    def get_indices(self, x, y):
-        grid_length = x[0, 1] - x[0, 0]  # First row, consecutive columns
+    # def get_indices(self, x, y):
+    def get_indices(self, i, j):
+        # grid_length = x[0, 1] - x[0, 0]  # First row, consecutive columns
 
-        i = np.array((x / grid_length).astype(int))  # Convert x to grid indices
-        j = np.array((y / grid_length).astype(int))  # Convert y to grid indices
+        # i = np.array((x / grid_length).astype(int))  # Convert x to grid indices
+        # j = np.array((y / grid_length).astype(int))  # Convert y to grid indices
         fp_vertices_ij = {
             "ul": np.array([np.min(i), np.min(j)]),
             "bl": np.array([np.max(i) + 1, np.min(j)]),
