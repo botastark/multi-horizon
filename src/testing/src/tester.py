@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
+import matplotlib.colors as colors
 from helper import (
     FastLogger,
     compute_metrics,
@@ -20,50 +21,50 @@ from viewer import plot_metrics, plot_terrain
 desktop = "/home/bota/Desktop/active_sensing/cache"
 belief_buffer = None
 
-# from simulator import MappingEnv, Mapper, Agent, State, Camera, Proximity
-# from simulator import Planner, Viewer
+from simulator import MappingEnv, Mapper, Agent, State, Camera, Proximity
+from simulator import Planner, Viewer
 
 
 # Parameters for testing
-# params = dict(
-#     a0=1.0,
-#     a1=1.0,
-#     b0=0.015,
-#     b1=0.015,
-#     inference_type="LBP_cts_vectorized",
-#     cluster_radius=4,
-#     news_inference_type="LBP_single",
-#     map_type="gaussian",
-#     planner_type="selfish",
-#     env_type="adhoc",
-#     altitude=0,
-#     n_agents=1,
-#     centralized=False,
-#     n_runs=1,
-#     n_steps=100,
-#     render=True,
-#     weights_type="equal",
-#     p_eq=0.5,
-# )
-# field_len = 50.0
-# sim_env = MappingEnv(field_len=field_len, fov=np.pi / 3, **params)
-# ground_truth_map_lucas = sim_env.generate_map()
+params = dict(
+    a0=1.0,
+    a1=1.0,
+    b0=0.015,
+    b1=0.015,
+    inference_type="LBP_cts_vectorized",
+    cluster_radius=4,
+    news_inference_type="LBP_single",
+    map_type="gaussian",
+    planner_type="selfish",
+    env_type="adhoc",
+    altitude=0,
+    n_agents=1,
+    centralized=False,
+    n_runs=1,
+    n_steps=100,
+    render=True,
+    weights_type="equal",
+    p_eq=0.5,
+)
+field_len = 50.0
+sim_env = MappingEnv(field_len=field_len, fov=np.pi / 3, **params)
+ground_truth_map_lucas = sim_env.generate_map()
 # Initialize the simulator's Mapper
-# sim_mapper = Mapper(
-#     n_cell=sim_env.n_cell,
-#     min_space_z=sim_env.min_space_z,
-#     max_space_z=sim_env.max_space_z,
-#     **params,
-# )
-# planner_luca = Planner(
-#     sim_env.action_to_direction,
-#     sim_env.altitude_to_size,
-#     sim_env.position_graph,
-#     sim_env.position_to_data,
-#     sim_env.regions_limits,
-#     sim_env.optimal_altitude,
-#     **params,
-# )
+sim_mapper = Mapper(
+    n_cell=sim_env.n_cell,
+    min_space_z=sim_env.min_space_z,
+    max_space_z=sim_env.max_space_z,
+    **params,
+)
+planner_luca = Planner(
+    sim_env.action_to_direction,
+    sim_env.altitude_to_size,
+    sim_env.position_graph,
+    sim_env.position_to_data,
+    sim_env.regions_limits,
+    sim_env.optimal_altitude,
+    **params,
+)
 
 
 class grid_info:
@@ -77,7 +78,7 @@ class grid_info:
 grf_r = 4
 # correlation_types = ["biased", "equal", "adaptive"]
 correlation_types = ["equal"]
-n_steps = 100
+n_steps = 10
 iters = 1
 # es = [None, 0.3, 0.1, 0.05]
 es = [None]
@@ -123,14 +124,12 @@ for correlation_type in tqdm(correlation_types, desc="pairwise", position=0):
                 conf_dict=conf_dict,
             )
 
-            # uav_pos = uav_position(((grid_info.x / 2, grid_info.y / 2), camera1.get_hstep()))
             uav_pos = uav_position(((0.0, 0.0), camera1.get_hstep()))
-            # pos = sim_env.agents[0].state.position
+            pos = sim_env.agents[0].state.position
             uav_positions, actions_bota = [uav_pos], []
 
             camera1.set_altitude(uav_pos.altitude)
             camera1.set_position(uav_pos.position)
-            # count_disagree = 0
             obs_ms = set()
             entropy, mse, height, coverage = [], [], [], []
 
@@ -148,50 +147,91 @@ for correlation_type in tqdm(correlation_types, desc="pairwise", position=0):
             for step in tqdm(
                 range(0, n_steps),
                 desc=f"steps",
-                position=4,
-                # leave=False,
+                position=3,
+                leave=False,
             ):
                 # print(f"\n=== mapping {[step]} ===")
-
-                # pos = sim_env.agents[0].state.position
-                # uav_pos = uav_position(((pos[0], pos[1]), pos[2]))
-                # observations = sim_env.get_observations(ground_truth_map)
+                current_pos = camera1.get_x()
+                print(f"current pos: {current_pos.position} {current_pos.altitude}")
+                pos = sim_env.agents[0].state.position
+                print(f"current lucas pos: {pos} ")
+                # sim_env.agents[0].state.position = []
+                pos = sim_env.agents[0].state.position
+                uav_pos = uav_position(((pos[0], pos[1]), pos[2]))
+                observations = sim_env.get_observations(ground_truth_map)
 
                 # adapt observations for occupancy map
-                # first_observation = observations[0]
+                first_observation = observations[0]
 
-                # fp_ij = first_observation["fp_ij"]
-                # y = np.arange(fp_ij["ul"][1], fp_ij["ur"][1])  # Horizontal indices
-                # x = np.arange(fp_ij["ul"][0], fp_ij["bl"][0])  # Vertical indices
-                # x_, y_ = np.meshgrid(x, y, indexing="ij")
-                # submap = first_observation["z"]
+                fp_ij = first_observation["fp_ij"]
+                yluca = np.arange(fp_ij["ul"][1], fp_ij["ur"][1])  # Horizontal indices
+                xluca = np.arange(fp_ij["ul"][0], fp_ij["bl"][0])  # Vertical indices
+                x_luca, y_luca = np.meshgrid(xluca, yluca, indexing="ij")
+                submap_luca = first_observation["z"]
+                print(f"lucas shape : {submap_luca.shape}")
 
                 # s0, s1 = conf_dict[np.round(uav_pos.altitude, decimals=2)]
                 # sigmas = [s0, s1]
-                x__, y__, submap_ = camera1.get_observations(
+
+                """
+                Get observations
+                """
+
+                x_, y_, submap = camera1.get_observations(
                     ground_truth_map,
                     # sigmas,
                 )
 
                 obd_field = camera1.get_range(
-                    position=uav_pos.position,
-                    altitude=uav_pos.altitude,
+                    # position=uav_pos.position,
+                    # altitude=uav_pos.altitude,
                     index_form=False,
                 )
+                [[x_min, x_max], [y_min, y_max]] = obd_field
+                print(f"obs field not index: x({x_min},{x_max}) y({y_min},{y_max})")
+                print(f"submap shape : {submap.shape}")
 
-                # print(f"diff obs z: {np.max(submap_-submap)} {np.min(submap_-submap)}")
-                # plt.figure(figsize=(12, 5))
-                # plt.subplot(1, 2, 1)
-                # plt.title("obs from get obs")
-                # plt.imshow(submap_, cmap="viridis")  # Probability of "occupied"
-                # plt.colorbar()
+                # fig, ax = plt.subplots()
+                # ax.set_xlabel("X-axis")
+                # ax.set_ylabel("Y-axis")
+                # ax.set_title("Last Observation z_t from main")
 
-                # plt.subplot(1, 2, 2)
-                # plt.title("obs from env")
-                # plt.imshow(submap, cmap="viridis")  # Probability of "occupied"
-                # plt.colorbar()
-                # plt.tight_layout()
+                # cmap = colors.ListedColormap(["green", "yellow"])
+                # bounds = [-0.5, 0.5, 1.5]
+                # norm = colors.BoundaryNorm(bounds, cmap.N)
+
+                # # Plot the submap
+                # ax.imshow(
+                #     submap.T,
+                #     cmap=cmap,
+                #     norm=norm,
+                #     extent=[x_min, x_max, y_min, y_max],
+                #     origin="lower",
+                # )
+                # ox = np.arange(x_min, x_max, grid_info.length)
+                # oy = np.arange(y_min, y_max, grid_info.length)
+
+                # # Overlay x_, y_ points
+                # # ax.scatter(ox, oy, color="red", marker="x", label="Observation Points")
+
+                # ax.legend()
                 # plt.show()
+
+                print(
+                    f"diff obs z: {np.max(submap_luca-submap)} {np.min(submap_luca-submap)}"
+                )
+                plt.figure(figsize=(12, 5))
+                plt.subplot(1, 2, 1)
+                plt.title("obs from get obs")
+                plt.imshow(submap_luca, cmap="viridis")  # Probability of "occupied"
+                plt.colorbar()
+
+                plt.subplot(1, 2, 2)
+                plt.title("obs from env mine")
+                plt.imshow(submap, cmap="viridis")  # Probability of "occupied"
+                plt.colorbar()
+                plt.tight_layout()
+                plt.show()
 
                 # first_observation["z"] = submap_
                 # observations[0] = first_observation
@@ -215,9 +255,9 @@ for correlation_type in tqdm(correlation_types, desc="pairwise", position=0):
                 # plt.tight_layout()
                 # plt.show()
 
-                occupancy_map.update_belief_OG(x__.T, y__.T, submap_, uav_pos)
+                occupancy_map.update_belief_OG(x_.T, y_.T, submap, uav_pos)
                 occupancy_map.propagate_messages_(
-                    x__.T, y__.T, submap_, uav_pos, max_iterations=1
+                    x_.T, y_.T, submap, uav_pos, max_iterations=1
                 )
 
                 # # Update the simulator's mapper beliefs
@@ -315,9 +355,9 @@ for correlation_type in tqdm(correlation_types, desc="pairwise", position=0):
                     f"{desktop}/step_{step}.png",
                     belief_map,
                     grid_info,
-                    uav_positions,
+                    uav_positions[0:-1],
                     ground_truth_map,
-                    submap_,
+                    submap,
                     obd_field,
                 )
 
