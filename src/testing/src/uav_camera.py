@@ -59,12 +59,12 @@ class camera:
 
     def convert_xy_ij(self, x, y, centered):
         if centered:
-            center_j, center_i = (dim // 2 for dim in self.grid.shape)
+            center_i, center_j = (dim // 2 for dim in self.grid.shape)
             j = x / self.grid.length + center_j
             i = -y / self.grid.length + center_i
         else:
             j = x / self.grid.length
-            i = self.grid.shape[1] - y / self.grid.length
+            i = self.grid.shape[0] - y / self.grid.length
         return int(i), int(j)
 
     def get_range(self, position=None, altitude=None, index_form=False):
@@ -101,10 +101,6 @@ class camera:
         # print(f"visible ranges i:({i_min}:{i_max}) j:({j_min}:{j_max})")
         return [[i_min, i_max], [j_min, j_max]]
 
-    """
-    upd
-    """
-
     def get_observations(self, ground_truth_map, sigmas=None):
         [[i_min, i_max], [j_min, j_max]] = self.get_range(
             # uav_pos, grid_info,
@@ -117,8 +113,8 @@ class camera:
         print(f"gt map shape:{ground_truth_map.shape}")
         print(f"gt submap shape:{submap.shape}")
         """
-        x = np.arange(i_min, i_max, 1)
-        y = np.arange(j_min, j_max, 1)
+        # x = np.arange(i_min, i_max, 1)
+        # y = np.arange(j_min, j_max, 1)
         if sigmas is None:
             sigma = self.a * (1 - np.exp(-self.b * self.altitude))
             sigmas = [sigma, sigma]
@@ -133,9 +129,15 @@ class camera:
         z1 = np.where(np.logical_and(success1, submap == 1), 1, 0)
         z = np.where(submap == 0, z0, z1)
 
-        x, y = np.meshgrid(x, y, indexing="ij")
+        # x, y = np.meshgrid(x, y, indexing="ij")
+        fp_vertices_ij = {
+            "ul": np.array([i_min, j_min]),
+            "bl": np.array([i_max, j_min]),
+            "ur": np.array([i_min, j_max]),
+            "br": np.array([i_max, j_max]),
+        }
 
-        return x, y, z
+        return fp_vertices_ij, z
 
     def x_future(self, action):
         # possible_actions = {"up", "down", "front", "back", "left", "right", "hover"}
