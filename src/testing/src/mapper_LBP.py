@@ -169,9 +169,8 @@ class OccupancyMap:
         }
         return fp_vertices_ij
 
-    def update_belief_OG(self, zx, zy, z, uav_pos, mexgen=None):
-        # print(f"mexgen: {mexgen}")
-        fp_vertices_ij = self.get_indices(zx, zy)
+    # def update_belief_OG(self, zx, zy, z, uav_pos, mexgen=None):
+    def update_belief_OG(self, fp_vertices_ij, z, uav_pos, mexgen=None):
         I, J = 0, 1
         if mexgen == None:
             a, b = 1, 0.015
@@ -243,7 +242,7 @@ class OccupancyMap:
         ] = posterior_m_one_norm
 
     def propagate_messages_(
-        self, zx, zy, z, uav_pos, max_iterations=5, correlation_type=None
+        self, fp_vertices_ij, z, uav_pos, max_iterations=5, correlation_type=None
     ):
         # Pairwise potential
         # self.update_belief_OG(zx, zy, z, uav_pos)
@@ -253,7 +252,7 @@ class OccupancyMap:
 
         psi = self.pairwise_potential(correlation_type)
 
-        fp_vertices_ij = self.get_indices(zx, zy)
+        # fp_vertices_ij = self.get_indices(zx, zy)
         # reset msgs and msgs_buffer
         self.msgs = np.ones_like(self.msgs) * 0.5
         self.msgs_buffer = np.ones_like(self.msgs) * 0.5
