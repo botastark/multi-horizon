@@ -20,6 +20,7 @@ from viewer import plot_metrics, plot_terrain
 
 desktop = "/home/bota/Desktop/active_sensing/cache"
 belief_buffer = None
+"""
 
 from simulator import MappingEnv, Mapper, Agent, State, Camera, Proximity
 from simulator import Planner, Viewer
@@ -47,24 +48,26 @@ params = dict(
     p_eq=0.5,
 )
 field_len = 50.0
-# sim_env = MappingEnv(field_len=field_len, fov=np.pi / 3, **params)
-# ground_truth_map_lucas = sim_env.generate_map()
-# Initialize the simulator's Mapper
-# sim_mapper = Mapper(
-#     n_cell=sim_env.n_cell,
-#     min_space_z=sim_env.min_space_z,
-#     max_space_z=sim_env.max_space_z,
-#     **params,
-# )
-# planner_luca = Planner(
-#     sim_env.action_to_direction,
-#     sim_env.altitude_to_size,
-#     sim_env.position_graph,
-#     sim_env.position_to_data,
-#     sim_env.regions_limits,
-#     sim_env.optimal_altitude,
-#     **params,
-# )
+sim_env = MappingEnv(field_len=field_len, fov=np.pi / 3, **params)
+ground_truth_map_lucas = sim_env.generate_map()
+Initialize the simulator's Mapper
+sim_mapper = Mapper(
+    n_cell=sim_env.n_cell,
+    min_space_z=sim_env.min_space_z,
+    max_space_z=sim_env.max_space_z,
+    **params,
+)
+planner_luca = Planner(
+    sim_env.action_to_direction,
+    sim_env.altitude_to_size,
+    sim_env.position_graph,
+    sim_env.position_to_data,
+    sim_env.regions_limits,
+    sim_env.optimal_altitude,
+    **params,
+)
+
+"""
 
 
 class grid_info:
@@ -81,7 +84,7 @@ correlation_types = ["equal"]
 n_steps = 100
 iters = 1
 # es = [None, 0.3, 0.1, 0.05]
-es = [None]
+es = [0.3]
 rng = np.random.default_rng(123)
 
 # Initialize the mapper's OccupancyMap
@@ -126,7 +129,6 @@ for correlation_type in tqdm(correlation_types, desc="pairwise", position=0):
             )
 
             uav_pos = uav_position(((0.0, 0.0), camera1.get_hstep()))
-            # pos = sim_env.agents[0].state.position
             uav_positions, actions_bota = [uav_pos], []
 
             camera1.set_altitude(uav_pos.altitude)
@@ -153,13 +155,15 @@ for correlation_type in tqdm(correlation_types, desc="pairwise", position=0):
             ):
                 # print(f"\n=== mapping {[step]} ===")
                 current_pos = camera1.get_x()
+                sigmas = None
 
-                # s0, s1 = conf_dict[np.round(uav_pos.altitude, decimals=2)]
-                # sigmas = [s0, s1]
+                if conf_dict is not None:
+                    s0, s1 = conf_dict[np.round(uav_pos.altitude, decimals=2)]
+                    sigmas = [s0, s1]
 
                 fp_vertices_ij, submap = camera1.get_observations(
                     ground_truth_map,
-                    # sigmas,
+                    sigmas,
                 )
                 obd_field = camera1.get_range(
                     index_form=False,

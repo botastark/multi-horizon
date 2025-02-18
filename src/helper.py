@@ -189,6 +189,7 @@ class FastLogger:
             + str(self.n)
             + ".txt"
         )
+        os.makedirs(dir, exist_ok=True)
 
         with open(self.filename, "w") as f:
             f.write(f"Strategy: {self.strategy}\n")
@@ -200,7 +201,7 @@ class FastLogger:
             else:
                 f.write(f"Gaussian radius {self.r} \n")
             f.write(
-                f"Grid info: range: 0-{self.grid.x}-{self.grid.y}, cell_size:{self.grid.length}, map shape: {self.grid.shape}\n"
+                f"Grid info: range: 0-{self.grid.x}-{self.grid.y}, cell_size:{self.grid.length}, map shape: {self.grid.shape}, center:{self.grid.center}\n"
             )
 
             f.write(
@@ -330,73 +331,6 @@ def gaussian_random_field(cluster_radius, n_cell, cache_dir="cache"):
     return binary_field
 
 
-import math
-
-
-def get_range(uav_pos, grid, index_form=False):
-    """
-    calculates indices of camera footprints (part of terrain (therefore terrain indices) seen by camera at a given UAV pos and alt)
-    """
-    # position = position if position is not None else self.position
-    # altitude = altitude if altitude is not None else self.altitude
-    fov = np.pi / 3
-    x_angle = fov / 2  # rads
-    y_angle = fov / 2  # rads
-    x_dist = uav_pos.altitude * math.tan(x_angle)
-    y_dist = uav_pos.altitude * math.tan(y_angle)
-
-    # adjust func: for smaller square ->int() and for larger-> round()
-    x_dist = round(x_dist / grid.length) * grid.length
-    y_dist = round(y_dist / grid.length) * grid.length
-    # Trim if out of scope (out of the map)
-    x_min = max(uav_pos.position[0] - x_dist, 0.0)
-    x_max = min(uav_pos.position[0] + x_dist, grid.x)
-
-    y_min = max(uav_pos.position[1] - y_dist, 0.0)
-    y_max = min(uav_pos.position[1] + y_dist, grid.y)
-    if index_form:  # return as indix range
-        return [
-            [round(x_min / grid.length), round(x_max / grid.length)],
-            [round(y_min / grid.length), round(y_max / grid.length)],
-        ]
-
-    return [[x_min, x_max], [y_min, y_max]]
-
-
-def get_observations(grid_info, ground_truth_map, uav_pos, seed=None, mexgen=None):
-    [[x_min_id, x_max_id], [y_min_id, y_max_id]] = get_range(
-        uav_pos, grid_info, index_form=True
-    )
-    m = ground_truth_map[x_min_id:x_max_id, y_min_id:y_max_id]
-    # if tile_dict is not None:
-    #     m = observed_submap((x_min_id,x_max_id), (y_min_id,y_max_id), tile_dict)
-
-    if mexgen is not None:
-        success1 = sample_binary_observations(m, uav_pos.altitude)
-        success0 = 1 - success1
-    else:
-        if seed is None:
-            seed = 1
-        rng = np.random.default_rng(seed)
-        a = 1
-        b = 0.015
-        sigma = a * (1 - np.exp(-b * uav_pos.altitude))
-        random_values = rng.random(m.shape)
-        success0 = random_values <= 1.0 - sigma
-        success1 = random_values <= 1.0 - sigma
-
-    z0 = np.where(np.logical_and(success0, m == 0), 0, 1)
-    z1 = np.where(np.logical_and(success1, m == 1), 1, 0)
-    z = np.where(m == 0, z0, z1)
-
-    x = np.arange(x_min_id, x_max_id)
-    y = np.arange(y_min_id, y_max_id)
-
-    x, y = np.meshgrid(x, y, indexing="ij")
-
-    return x, y, z
-
-
 def sample_binary_observations(belief_map, altitude, num_samples=5):
     """
     Samples binary observations from a belief map with noise based on altitude.
@@ -435,91 +369,84 @@ sampling updates start here
 """
 
 
-def sigma(altitude):
-    a = 1
-    b = 0.015
-    return a * (1 - np.exp(-b * altitude))
+# def sigma(altitude):
+#     a = 1
+#     b = 0.015
+#     return a * (1 - np.exp(-b * altitude))
 
 
-def sensor_model(true_matrix, altitude):
-    sig = sigma(altitude)
-    P_z_equals_m = 1 - sig
-    P_z_not_equals_m = sig
+# def sensor_model(true_matrix, altitude):
+#     sig = sigma(altitude)
+#     P_z_equals_m = 1 - sig
+#     P_z_not_equals_m = sig
 
-    rows, cols = true_matrix.shape
-    observation_matrix = np.zeros((rows, cols))
+#     rows, cols = true_matrix.shape
+#     observation_matrix = np.zeros((rows, cols))
 
-    for i in range(rows):
-        for j in range(cols):
-            if true_matrix[i, j] == 1:
-                observation_matrix[i, j] = np.random.choice(
-                    [1, 0], p=[P_z_equals_m, P_z_not_equals_m]
-                )
-            else:
-                observation_matrix[i, j] = np.random.choice(
-                    [0, 1], p=[P_z_equals_m, P_z_not_equals_m]
-                )
+#     for i in range(rows):
+#         for j in range(cols):
+#             if true_matrix[i, j] == 1:
+#                 observation_matrix[i, j] = np.random.choice(
+#                     [1, 0], p=[P_z_equals_m, P_z_not_equals_m]
+#                 )
+#             else:
+#                 observation_matrix[i, j] = np.random.choice(
+#                     [0, 1], p=[P_z_equals_m, P_z_not_equals_m]
+#                 )
 
-    return observation_matrix
-
-
-def sampler(true_matrix, altitude, N):
-    cumulative_observation = np.empty(true_matrix.shape)
-    for i in range(N):
-        observation_matrix = sensor_model(true_matrix, altitude)
-        if i == 0:
-            cumulative_observation = observation_matrix.copy()
-            continue
-        cumulative_observation = np.vstack([cumulative_observation, observation_matrix])
-    return cumulative_observation
+#     return observation_matrix
 
 
-def calc_n(h, e=np.array([0.5, 0.4, 0.3, 0.2, 0.1, 0.05, 0.03])):
-    p = sigma(h)
-    p_ = 1 - p
-    return np.round(1.96 * 1.96 * p * p_ / e / e, decimals=0)
+# def sampler(true_matrix, altitude, N):
+#     cumulative_observation = np.empty(true_matrix.shape)
+#     for i in range(N):
+#         observation_matrix = sensor_model(true_matrix, altitude)
+#         if i == 0:
+#             cumulative_observation = observation_matrix.copy()
+#             continue
+#         cumulative_observation = np.vstack([cumulative_observation, observation_matrix])
+#     return cumulative_observation
 
 
-def get_N(altitudes):
-    errors = [0.5, 0.4, 0.3, 0.2, 0.1, 0.05, 0.03]
-    n_per_e = {}
-    for h in altitudes:
-        n_values = calc_n(h)
-        n_per_e[h] = {e: n for e, n in zip(errors, n_values)}
-    return n_per_e
+# def calc_n(h, e=np.array([0.5, 0.4, 0.3, 0.2, 0.1, 0.05, 0.03])):
+#     p = sigma(h)
+#     p_ = 1 - p
+#     return np.round(1.96 * 1.96 * p * p_ / e / e, decimals=0)
 
 
-def get_confusion_matrix(altitude, N):
-    # with open("/home/bota/Desktop/active_sensing/data/N_per_E.json", "r") as file:
-    #     loaded_dict = json.load(file)
-
-    # altitude = round(altitude, 1)
-    # print(loaded_dict)
-    # N = int(float(loaded_dict[str(altitude)][str(e)]))
-
-    true_matrix = np.array([0, 1])
-    true_matrix = np.expand_dims(true_matrix, axis=0)
-    observation = sampler(true_matrix, altitude, int(N))
-    n = int(observation.shape[0] / true_matrix.shape[0])
-    true_matrix_ = np.tile(true_matrix, (n, 1))
-
-    c = confusion_matrix(true_matrix_.flatten(), observation.flatten())
-    c_norm = c / c.astype(np.float64).sum(axis=1, keepdims=True)
-    c_norm = np.round(c_norm, decimals=2).transpose()
-    c_norm = np.nan_to_num(c_norm) + 1e-6
-    s0 = c_norm[1][0]
-    s1 = c_norm[0][1]
-    # return np.array([[TN, FN], [FP, TP]]), (s0, s1)
-    return c_norm, (s0, s1)
+# def get_N(altitudes):
+#     errors = [0.5, 0.4, 0.3, 0.2, 0.1, 0.05, 0.03]
+#     n_per_e = {}
+#     for h in altitudes:
+#         n_values = calc_n(h)
+#         n_per_e[h] = {e: n for e, n in zip(errors, n_values)}
+#     return n_per_e
 
 
-def init_s0_s1(h_step, e=0.3):
-    start = h_step
-    num_values = 6
-    end = num_values * start
-    altitudes = np.round(np.linspace(start, end, num=num_values), decimals=2)
-    conf_dict = {}
-    Ns = get_N(altitudes)
-    for altitude in altitudes:
-        conf_dict[altitude] = get_confusion_matrix(altitude, Ns[altitude][e])[1]
-    return conf_dict
+# def get_confusion_matrix(altitude, N):
+#     true_matrix = np.array([0, 1])
+#     true_matrix = np.expand_dims(true_matrix, axis=0)
+#     observation = sampler(true_matrix, altitude, int(N))
+#     n = int(observation.shape[0] / true_matrix.shape[0])
+#     true_matrix_ = np.tile(true_matrix, (n, 1))
+
+#     c = confusion_matrix(true_matrix_.flatten(), observation.flatten())
+#     c_norm = c / c.astype(np.float64).sum(axis=1, keepdims=True)
+#     c_norm = np.round(c_norm, decimals=2).transpose()
+#     c_norm = np.nan_to_num(c_norm) + 1e-6
+#     s0 = c_norm[1][0]
+#     s1 = c_norm[0][1]
+#     # return np.array([[TN, FN], [FP, TP]]), (s0, s1)
+#     return c_norm, (s0, s1)
+
+
+# def init_s0_s1(h_range, e=0.3):
+#     start = h_range[0]
+#     num_values = 6
+#     end = h_range[-1]
+#     altitudes = np.round(np.linspace(start, end, num=num_values), decimals=2)
+#     conf_dict = {}
+#     Ns = get_N(altitudes)
+#     for altitude in altitudes:
+#         conf_dict[altitude] = get_confusion_matrix(altitude, Ns[altitude][e])[1]
+#     return conf_dict
