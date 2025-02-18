@@ -14,11 +14,13 @@ class camera:
         fov_angle,
         camera_altitude=0,
         camera_pos=(0.0, 0.0),
+        rng=np.random.default_rng(123),
     ):
 
         self.grid = grid
         self.altitude = camera_altitude
         self.position = camera_pos
+        self.rng = rng
         self.fov = fov_angle
         if self.grid.center:
             self.x_range = [-self.grid.x / 2, self.grid.x / 2]
@@ -33,10 +35,12 @@ class camera:
         )
         self.xy_step = min_range / 2 / 8
         self.h_step = self.xy_step / np.tan(np.deg2rad(self.fov * 0.5))
-        self.h_range = (self.h_step, 6 * self.h_step)
+        # self.h_range = (self.h_step, 6 * self.h_step)
+        self.h_range = (20, 20 + 5 * self.h_step)
         self.a = 1
         self.b = 0.015
         self.actions = {"up", "down", "front", "back", "left", "right", "hover"}
+        # print(f"H range: {self.h_range}")
 
     def reset(self):
         self.position = (0.0, 0.0)
@@ -48,20 +52,23 @@ class camera:
     def get_hstep(self):
         return self.h_step
 
+    def get_hrange(self):
+        return self.h_range
+
     def set_altitude(self, alt):
         self.altitude = alt
 
     def get_x(self):
         return uav_position((self.position, self.altitude))
 
-    def convert_xy_ij(self, x, y):
-        if self.grid.center:
-            center_j, center_i = (dim // 2 for dim in self.grid.shape)
+    def convert_xy_ij(self, x, y, centered):
+        if centered:
+            center_i, center_j = (dim // 2 for dim in self.grid.shape)
             j = x / self.grid.length + center_j
             i = -y / self.grid.length + center_i
         else:
             j = x / self.grid.length
-            i = self.grid.y - y / self.grid.length
+            i = self.grid.shape[0] - y / self.grid.length
         return int(i), int(j)
 
     def get_range(self, position=None, altitude=None, index_form=False):
@@ -70,20 +77,11 @@ class camera:
         """
         position = position if position is not None else self.position
         altitude = altitude if altitude is not None else self.altitude
+        grid_length = self.grid.length
+        fov_rad = np.deg2rad(self.fov) / 2
 
-        x_dist = altitude * math.tan(np.deg2rad(self.fov / 2))
-        y_dist = altitude * math.tan(np.deg2rad(self.fov / 2))
-
-        # adjust func: for smaller square ->int() and for larger-> round()
-        x_dist = round(x_dist / self.grid.length) * self.grid.length
-        y_dist = round(y_dist / self.grid.length) * self.grid.length
-        # Trim if out of scope (out of the map)
-
-        # x_min = max(position[0] - x_dist, 0.0)
-        # x_max = min(position[0] + x_dist, self.grid.x)
-
-        # y_min = max(position[1] - y_dist, 0.0)
-        # y_max = min(position[1] + y_dist, self.grid.y)
+        x_dist = round(altitude * math.tan(fov_rad) / grid_length) * grid_length
+        y_dist = round(altitude * math.tan(fov_rad) / grid_length) * grid_length
 
         x_min, x_max = np.clip(
             [position[0] - x_dist, position[0] + x_dist], *self.x_range
@@ -93,39 +91,65 @@ class camera:
         )
         if x_max - x_min == 0 or y_max - y_min == 0:
             return [[0, 0], [0, 0]]
+        """
+        print(f"dist x:{x_dist} y:{y_dist}")
+        print(f"ranges x{self.x_range} y{self.y_range}")
+        print(f"pos: {self.position} {self.altitude}")
+        print(f"visible ranges x:({x_min}:{x_max}) y:({y_min}:{y_max})")
+        """
+
         if not index_form:
             return [[x_min, x_max], [y_min, y_max]]
-
-        # if index_form:  # return as indix range
-        #     return [
-        #         [round(x_min / self.grid.length), round(x_max / self.grid.length)],
-        #         [round(y_min / self.grid.length), round(y_max / self.grid.length)],
-        #     ]
-
-        # return [[x_min, x_max], [y_min, y_max]]
-        i_min, j_min = self.convert_xy_ij(x_min, y_min)
-        i_max, j_max = self.convert_xy_ij(x_max, y_max)
-        if not self.grid_info.center:
-            i_min, i_max = i_max, i_min
-
+        i_max, j_min = self.convert_xy_ij(x_min, y_min, self.grid.center)
+        i_min, j_max = self.convert_xy_ij(x_max, y_max, self.grid.center)
         # print(f"visible ranges i:({i_min}:{i_max}) j:({j_min}:{j_max})")
         return [[i_min, i_max], [j_min, j_max]]
 
-    def pos2grid(self, pos):
-        # from position in meters into grid coordinates
-        return min(
-            max(round(pos[0] / self.grid.length), 0), self.grid.shape[0] - 1
-        ), min(max(round(pos[1] / self.grid.length), 0), self.grid.shape[1] - 1)
+    def get_observations(self, ground_truth_map, sigmas=None):
+        [[i_min, i_max], [j_min, j_max]] = self.get_range(
+            # uav_pos, grid_info,
+            index_form=True
+        )
 
-    def grid2pos(self, coords):
-        return coords[0] * self.grid.length, coords[1] * self.grid.length
+        submap = ground_truth_map[i_min:i_max, j_min:j_max]
+        """
+        print(f"obs area ids:{x_min_id}:{x_max_id}, {y_min_id}:{y_max_id} ")
+        print(f"gt map shape:{ground_truth_map.shape}")
+        print(f"gt submap shape:{submap.shape}")
+        """
+        # x = np.arange(i_min, i_max, 1)
+        # y = np.arange(j_min, j_max, 1)
+        if sigmas is None:
+            sigma = self.a * (1 - np.exp(-self.b * self.altitude))
+            sigmas = [sigma, sigma]
+
+        sigma0, sigma1 = sigmas[0], sigmas[1]
+
+        # rng = np.random.default_rng()
+        random_values = self.rng.random(submap.shape)
+        success0 = random_values <= 1.0 - sigma0
+        success1 = random_values <= 1.0 - sigma1
+        z0 = np.where(np.logical_and(success0, submap == 0), 0, 1)
+        z1 = np.where(np.logical_and(success1, submap == 1), 1, 0)
+        z = np.where(submap == 0, z0, z1)
+
+        # x, y = np.meshgrid(x, y, indexing="ij")
+        fp_vertices_ij = {
+            "ul": np.array([i_min, j_min]),
+            "bl": np.array([i_max, j_min]),
+            "ur": np.array([i_min, j_max]),
+            "br": np.array([i_max, j_max]),
+        }
+
+        return fp_vertices_ij, z
 
     def x_future(self, action):
         # possible_actions = {"up", "down", "front", "back", "left", "right", "hover"}
-
-        if action == "up" and self.altitude + self.h_step <= self.h_range[1] + 1:
-            return self.position, self.altitude + self.h_step
-        elif action == "down" and self.altitude - self.h_step >= self.h_range[0] - 1:
+        if action == "up" and round(self.altitude + self.h_step, 1) <= round(
+            self.h_range[1], 1
+        ):
+            return (self.position, self.altitude + self.h_step)
+        elif action == "down" and self.altitude - self.h_step >= self.h_range[0]:
             return (self.position, self.altitude - self.h_step)
         # front (+y)
         elif action == "front" and self.position[1] + self.xy_step <= self.y_range[1]:
@@ -147,16 +171,18 @@ class camera:
         # possible_actions = {"up", "down", "front", "back", "left", "right", "hover"}
         permitted_actions = ["hover"]
         for action in self.actions:
-            if action == "up" and x.altitude + self.h_step <= self.h_range[1] + 1:
+            if action == "up" and round(x.altitude + self.h_step, 2) <= round(
+                self.h_range[1], 2
+            ):
                 permitted_actions.append(action)
-            elif action == "down" and x.altitude - self.h_step >= self.h_range[0] - 1:
+            elif action == "down" and x.altitude - self.h_step >= self.h_range[0]:
                 permitted_actions.append(action)
-            elif action == "front" and x.position[1] + self.xy_step <= self.y_range[1]:
+            elif action == "front" and x.position[0] - self.xy_step >= self.x_range[0]:
                 permitted_actions.append(action)
-            elif action == "back" and x.position[1] - self.xy_step >= self.y_range[0]:
+            elif action == "back" and x.position[0] + self.xy_step <= self.x_range[1]:
                 permitted_actions.append(action)
-            elif action == "right" and x.position[0] + self.xy_step <= self.x_range[1]:
+            elif action == "right" and x.position[1] + self.xy_step <= self.y_range[1]:
                 permitted_actions.append(action)
-            elif action == "left" and x.position[0] - self.xy_step >= self.x_range[0]:
+            elif action == "left" and x.position[1] - self.xy_step >= self.y_range[0]:
                 permitted_actions.append(action)
         return permitted_actions

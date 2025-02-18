@@ -1,150 +1,185 @@
 import numpy as np
-import matplotlib.pyplot as plt
-from tqdm import tqdm
 
 from helper import (
     FastLogger,
     compute_metrics,
-    gaussian_random_field,
-    init_s0_s1,
+    # init_s0_s1,
     observed_m_ids,
+    # sensor_model,
     uav_position,
 )
-from mapper import get_observations
+from orthomap import Field
+
 from mapper_LBP import OccupancyMap as OML
 from planner import planning
 from uav_camera import camera
+from tqdm import tqdm
 from viewer import plot_metrics, plot_terrain
 
-desktop = "/home/bota/Desktop/active_sensing/cache/"
-action_select_strategy = "ig"
-correlation_type = "equal"
-grf_r = 4
-sampled_sigma_error_margin = None
-n_steps = 100
-iters = 1
+desktop = "/home/bota/Desktop/active_sensing/cache"
+belief_buffer = None
 
 
 class grid_info:
-    x = 50  # 60
-    y = 50  # 110 for real field
-    length = 0.125  # 1
-    shape = (int(x / length), int(y / length))
+    x = 60  # 60
+    y = 110  # 110 for real field
+    length = 1  # 1
+    shape = (int(y / length), int(x / length))
+    center = True
 
 
-camera1 = camera(
+grf_r = 4
+# correlation_types = ["biased", "equal", "adaptive"]
+correlation_types = ["equal"]
+n_steps = 100
+iters = 1
+# es = [None, 0.3, 0.1, 0.05]
+es = [0.1]
+seed = 123
+rng = np.random.default_rng(seed)
+field_type = "Ortomap"
+
+map = Field(
     grid_info,
-    60,
-    #  x_range=(0, grid_info.x), y_range=(0, grid_info.y)
+    field_type,
 )
-uav_pos = uav_position(((0.0, 0.0), camera1.get_hstep()))
+use_sensor_model = False
+# Initialize the mapper's OccupancyMap
+action_select_strategy = "ig"
 
-logger = FastLogger(
-    desktop,
-    strategy=action_select_strategy,
-    pairwise=correlation_type,
-    grid=grid_info,
-    init_x=uav_pos,
-    r=grf_r,
-    n_agent=iter,
-    e=sampled_sigma_error_margin,
-)
-
-
-for iter in tqdm(range(iters), desc=f"Iterations", position=0):
-    ground_truth_map = gaussian_random_field(grf_r, grid_info.shape)
-    camera1 = camera(
-        grid_info,
-        60,
-        #  x_range=(0, grid_info.x), y_range=(0, grid_info.y)
-    )
-    mapper = OML(grid_info.shape)
-    planner_ = planning(
-        grid_info,
-        camera1,
-        action_select_strategy,
-    )
-
-    belief_map = np.full((grid_info.shape[0], grid_info.shape[1], 2), 0.5)
-
-    uav_positions, actions = [uav_pos], []
-
-    camera1.set_altitude(uav_pos.altitude)
-    camera1.set_position(uav_pos.position)
-    obs_ms = set()
-    entropy, mse, height, coverage = [], [], [], []
-    rng = np.random.default_rng()
-    for step in tqdm(
-        range(0, n_steps),
-        desc=f"steps",
-        position=1,
-        # leave=False,
+for correlation_type in tqdm(correlation_types, desc="pairwise", position=0):
+    for sampled_sigma_error_margin in tqdm(
+        es, desc=f"Error Margins (pairwise = {correlation_type})", position=1
     ):
-        # Generate observations
-        #     s0, s1 = self.conf_dict[np.round(x_future.altitude, decimals=2)]
+        for iter in tqdm(
+            range(iters),
+            desc=f"Iterations (e={sampled_sigma_error_margin})",
+            position=2,
+            leave=False,
+        ):
 
-        x_, y_, submap = get_observations(
-            grid_info,
-            ground_truth_map,
-            uav_pos,
-            rng,
-            #   center=True
-        )
+            folder = (
+                desktop
+                + f"/txt_new/{correlation_type}_{action_select_strategy}_e{sampled_sigma_error_margin}_r{grf_r}"
+            )
+            # ground_truth_map = gaussian_random_field(grf_r, grid_info.shape)
+            map.reset()
+            ground_truth_map = map.get_ground_truth()
+            belief_map = np.full((grid_info.shape[0], grid_info.shape[1], 2), 0.5)
+            assert ground_truth_map.shape == belief_map[:, :, 0].shape
+            camera1 = camera(grid_info, 60, rng=rng)
 
-        # Update the OccupancyMap with observations
+            if sampled_sigma_error_margin is not None:
+                conf_dict = map.init_s0_s1(
+                    camera1.get_hrange(),
+                    e=sampled_sigma_error_margin,
+                    sensor=use_sensor_model,
+                )
+            else:
+                conf_dict = None
+            print(f"confusuion matrix: {conf_dict}")
+            occupancy_map = OML(
+                grid_info.shape, conf_dict=conf_dict, correlation_type=correlation_type
+            )
+            planner_mine = planning(
+                grid_info,
+                camera1,
+                action_select_strategy,
+                conf_dict=conf_dict,
+            )
 
-        mapper.update_belief_OG(x_.T, y_.T, submap, uav_pos)
-        mapper.propagate_messages_(
-            x_.T,
-            y_.T,
-            submap,
-            uav_pos,
-            max_iterations=1,
-            correlation_type=correlation_type,
-        )
+            uav_pos = uav_position(((0.0, 0.0), camera1.get_hrange()[0]))
+            uav_positions, actions_bota = [uav_pos], []
 
-        # Extract the beliefs
+            camera1.set_altitude(uav_pos.altitude)
+            camera1.set_position(uav_pos.position)
+            obs_ms = set()
+            entropy, mse, height, coverage = [], [], [], []
 
-        belief_map[:, :, 1] = mapper.get_belief().copy()
-        belief_map[:, :, 0] = 1 - belief_map[:, :, 1]
+            logger = FastLogger(
+                folder,
+                strategy=action_select_strategy,
+                pairwise=correlation_type,
+                grid=grid_info,
+                init_x=uav_pos,
+                r=grf_r,
+                n_agent=iter,
+                e=sampled_sigma_error_margin,
+            )
+            # for step in range(0, n_steps):
+            for step in tqdm(
+                range(0, n_steps),
+                desc=f"steps",
+                position=3,
+                leave=False,
+            ):
+                # print(f"\n=== mapping {[step]} ===")
+                current_pos = camera1.get_x()
+                sigmas = None
 
-        # Plan
-        obs_ms.update(observed_m_ids(camera1, uav_pos))
-        entropy_val, mse_val, coverage_val = compute_metrics(
-            ground_truth_map, belief_map, obs_ms, grid_info
-        )
-        entropy.append(entropy_val)
-        mse.append(mse_val)
-        coverage.append(coverage_val)
-        height.append(uav_pos.altitude)
+                if conf_dict is not None:
+                    s0, s1 = conf_dict[np.round(uav_pos.altitude, decimals=2)]
+                    sigmas = [s0, s1]
 
-        logger.log_data(entropy[-1], mse[-1], height[-1], coverage[-1])
-        logger.log("actions: " + str(actions))
+                # fp_vertices_ij, submap = camera1.get_observations(
+                #     ground_truth_map,
+                #     sigmas,
+                # )
+                fp_vertices_ij, submap = map.get_observations(
+                    uav_pos,
+                    sigmas,
+                )
 
-        plot_metrics(desktop, entropy, mse, coverage, height)
+                obd_field = camera1.get_range(
+                    index_form=False,
+                )
 
-        next_action, info_gain_action = planner_.select_action(
-            belief_map, uav_positions
-        )
+                occupancy_map.update_belief_OG(fp_vertices_ij, submap, uav_pos)
+                occupancy_map.propagate_messages_(
+                    fp_vertices_ij, submap, uav_pos, max_iterations=1
+                )
 
-        # print(f"next actions: {actions}")
-        # print(f"next action: {info_gain_action}")
+                # Extract the beliefs
 
-        # ACT
-        actions.append(next_action)
-        uav_pos = uav_position(camera1.x_future(next_action))
+                belief_map[:, :, 1] = occupancy_map.get_belief().copy()
+                belief_map[:, :, 0] = 1 - belief_map[:, :, 1]
 
-        uav_positions.append(uav_pos)
+                # Plan
+                obs_ms.update(observed_m_ids(camera1, uav_pos))
+                entropy_val, mse_val, coverage_val = compute_metrics(
+                    ground_truth_map, belief_map, obs_ms, grid_info
+                )
+                entropy.append(entropy_val)
+                mse.append(mse_val)
+                coverage.append(coverage_val)
+                height.append(uav_pos.altitude)
+                logger.log_data(entropy[-1], mse[-1], height[-1], coverage[-1])
+                logger.log("actions: " + str(actions_bota))
+                plot_metrics(
+                    f"{desktop}/iter_{iter}.png", entropy, mse, coverage, height
+                )
 
-        camera1.set_altitude(uav_pos.altitude)
-        camera1.set_position(uav_pos.position)
-        plot_terrain(
-            f"{desktop}/step_{step}.png",
-            belief_map,
-            grid_info,
-            uav_positions,
-            ground_truth_map,
-            submap,
-            x_,
-            y_,
-        )
+                next_action, info_gain_action = planner_mine.select_action(
+                    belief_map, uav_positions
+                )
+
+                # ACT
+
+                uav_pos = uav_position(camera1.x_future(next_action))
+
+                actions_bota.append(next_action)
+                uav_positions.append(uav_pos)
+
+                camera1.set_altitude(uav_pos.altitude)
+                camera1.set_position(uav_pos.position)
+
+                plot_terrain(
+                    f"{desktop}/step_{step}.png",
+                    belief_map,
+                    grid_info,
+                    uav_positions[0:-1],
+                    ground_truth_map,
+                    submap,
+                    obd_field,
+                    fp_vertices_ij,
+                )

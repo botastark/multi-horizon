@@ -1,29 +1,22 @@
 #!/usr/bin/env python3
+import random
 import sys
 import os
 import math
-from turtle import position
+
 import numpy as np
+import cv2
+from sklearn.metrics import confusion_matrix
 
 from helper import gaussian_random_field
 
 sys.path.append(os.path.abspath("/home/bota/Desktop/active_sensing"))
 from binary_classifier.classifier import Predicter
 
-import pickle
-from proj import camera
-
 # dataset
-from PIL import Image
+from PIL import Image, ImageFilter
 from osgeo import gdal
 
-
-import torch
-import torch.nn.functional
-import random
-
-
-# def __init__(self, ortomap_path, annotation_path, tile_ortomappixel_path):
 
 annotation_path = "/home/bota/Desktop/active_sensing/src/annotation.txt"
 dataset_path = "/media/bota/BOTA/wheat/example-run-001_20241014T1739_ortho_dsm.tif"
@@ -31,28 +24,152 @@ tile_ortomappixel_path = "/home/bota/Desktop/active_sensing/data/tomatotiles.txt
 model_path = "/home/bota/Desktop/active_sensing/binary_classifier/models/best_model_auc91_lr1_-05_bs128_wd_2.5-04.pth"
 
 
+class img_sampler:
+    def __init__(self):
+        self.focal_length = 0.01229  # 12.29mm lens in meters
+        self.sensor_width = 0.017424  # sensor width in meters
+        self.sensor_height = 0.0130548  # sensor height in meters
+        self.resolution_x = 5280  # horizontal resolution (number of pixels)
+        self.resolution_y = 3956  # vertical resolution (number of pixels)
+        self.fov_h, self.fov_v = self._calculate_fov()
+
+    def _calculate_fov(self):
+        fov_horizontal = 2 * math.atan(self.sensor_width / (2 * self.focal_length))
+        fov_vertical = 2 * math.atan(self.sensor_height / (2 * self.focal_length))
+        return fov_horizontal, fov_vertical
+
+    # Function to calculate the size of a 1m x 1m tile on the image in pixels
+    def calculate_tile_size_on_image(self, altitude):
+        # Calculate ground coverage at altitude
+        coverage_horizontal = 2 * math.tan(self.fov_h / 2) * altitude
+        coverage_vertical = 2 * math.tan(self.fov_v / 2) * altitude
+
+        # Calculate tile size on image in pixels (1m x 1m tile)
+        tile_size_image_horizontal = self.resolution_x / coverage_horizontal
+        tile_size_image_vertical = self.resolution_y / coverage_vertical
+
+        return int(tile_size_image_horizontal), int(tile_size_image_vertical)
+
+    # Function to calculate the altitude from FOV and tile size on the image
+    def calculate_altitude_from_fov_and_tile_size(self, size):
+        tile_size_image_horizontal, tile_size_image_vertical = size
+        # Calculate the ground coverage corresponding to the pixel size of the tile on the image
+        coverage_horizontal = self.resolution_x / tile_size_image_horizontal
+        coverage_vertical = self.resolution_y / tile_size_image_vertical
+
+        # Calculate the altitude based on horizontal and vertical coverage
+        altitude_horizontal = coverage_horizontal / (2 * math.tan(self.fov_h / 2))
+        altitude_vertical = coverage_vertical / (2 * math.tan(self.fov_v / 2))
+
+        # Average the two altitudes for a more accurate result
+        altitude = (altitude_horizontal + altitude_vertical) / 2
+
+        return altitude
+
+    # Function for downsampling with Gaussian blur, with adjustable blur based on size
+    def downsample_with_blur(self, image, target_size, original_size):
+        # Calculate blur strength based on size difference
+        blur_radius = max(0.5, (original_size[0] / target_size[0]) / 2)
+        blurred = image.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+        return blurred.resize(target_size, Image.LANCZOS)
+
+    def simulate_higher_altitude(
+        self,
+        image,
+        target_altitude,
+        original_altitude=20,
+        base_blur_radius=2,
+        base_noise_std=20,
+        base_contrast_factor=0.8,
+        base_brightness_factor=1.1,
+    ):
+        altitude_ratio = target_altitude / original_altitude
+
+        # Step 1: Downsample the image (scale factor proportional to altitude ratio)
+        downsample_factor = int(np.round(altitude_ratio))
+        width, height = image.size
+        new_size = (width // downsample_factor, height // downsample_factor)
+        downsampled = image.resize(new_size, Image.BILINEAR)
+
+        # Step 2: Apply Gaussian blur (scale blur radius proportionally)
+        blur_radius = base_blur_radius * altitude_ratio
+        blurred = downsampled.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+
+        # Step 3: Add noise (scale noise standard deviation proportionally)
+        noise_std = base_noise_std * altitude_ratio
+        noisy_image = np.array(blurred).astype(np.float32)
+        noise = np.random.normal(0, noise_std, noisy_image.shape).astype(np.float32)
+        noisy_image = np.clip(noisy_image + noise, 0, 255).astype(np.uint8)
+        noisy_image = Image.fromarray(noisy_image)
+
+        # Step 4: Reduce contrast and brightness (scale factors proportionally)
+        contrast_factor = base_contrast_factor / altitude_ratio
+        brightness_factor = base_brightness_factor * altitude_ratio
+        adjusted = Image.eval(
+            noisy_image,
+            lambda x: np.clip(
+                contrast_factor * (x - 128) + 128 * brightness_factor, 0, 255
+            ),
+        )
+
+        # Step 5: Resize back to original size (optional, if footprint is not enlarged)
+        final_image = adjusted.resize((width, height), Image.BILINEAR)
+
+        return final_image
+
+    def img_at_alt(self, image, alt):
+
+        r0, c0 = image.size
+        orig_size = (r0, c0)
+        # alts = round(self.calculate_altitude_from_fov_and_tile_size(orig_size), 2)
+        target_size = self.calculate_tile_size_on_image(alt)
+
+        if target_size[0] < image.size[0] and target_size[1] < image.size[1]:
+            # return self.downsample_with_blur(image, target_size, orig_size)
+            return self.simulate_higher_altitude(image, alt)
+        else:
+            return image
+
+
 class Field:
     def __init__(
         self,
         grid_info,
         field_type,
+        seed=123,
         model_path=model_path,
         ortomap_path=dataset_path,
     ):
         self.grid_info = grid_info
+        self.seed = seed
+        self.rng = np.random.default_rng(seed)
+        self.a = 1
+        self.b = 0.015
         if isinstance(field_type, int):
             # self.field_type = f"Gaussian_r{field_type}"
             self.field_type = "Gaussian"
-            self.ground_truth_map = gaussian_random_field(field_type, grid_info.shape)
-            self.a = 1
-            self.b = 0.015
+            self.field_r = field_type
+            self.ground_truth_map = gaussian_random_field(self.field_r, grid_info.shape)
 
         elif field_type == "Ortomap":
             self.field_type = field_type
             self.model_path = model_path
             self.ortomap_path = ortomap_path
             self._init_ortomap()
+            self.img_sampler = img_sampler()
         print("field is ready!")
+
+    def reset(self):
+        if self.field_type == "Gaussian":
+            try:
+                self.ground_truth_map = gaussian_random_field(
+                    self.field_r, self.grid_info.shape
+                )
+                self.rng = np.random.default_rng(self.seed)
+            except Exception as e:
+                raise ValueError(
+                    f"Couldn't reset {self.field_type} field with rad {self.field_r}: {e}"
+                )
 
     def _init_ortomap(self):
 
@@ -113,7 +230,6 @@ class Field:
             if cut:
 
                 matrix = matrix[3:113, 13:73]
-            matrix = matrix.T
             assert matrix.shape == self.grid_info.shape
             return matrix
         except Exception as e:
@@ -124,6 +240,8 @@ class Field:
             r, c = tile
         else:
             r, c = tile[0], tile[1]
+        r += 3
+        c += 13
         tile_coords = self.tile_pixel_loc[r][c]
         x_range = slice(tile_coords[0][0], tile_coords[0][1])
         y_range = slice(tile_coords[1][0], tile_coords[1][1])
@@ -139,12 +257,12 @@ class Field:
 
     def convert_xy_ij(self, x, y):
         if self.grid_info.center:
-            center_j, center_i = (dim // 2 for dim in self.grid_info.shape)
+            center_i, center_j = (dim // 2 for dim in self.grid_info.shape)
             j = x / self.grid_info.length + center_j
             i = -y / self.grid_info.length + center_i
         else:
             j = x / self.grid_info.length
-            i = self.grid_info.shape[1] - y / self.grid_info.length
+            i = self.grid_info.shape[0] - y / self.grid_info.length
         return int(i), int(j)
 
     def get_visible_range(self, uav_pos, fov=60, index_form=False):
@@ -179,140 +297,189 @@ class Field:
         # print(f"visible ranges x:({x_min}:{x_max}) y:({y_min}:{y_max})")
         if not index_form:
             return [[x_min, x_max], [y_min, y_max]]
-        i_min, j_min = self.convert_xy_ij(x_min, y_min)
-        i_max, j_max = self.convert_xy_ij(x_max, y_max)
-        if not self.grid_info.center:
-            i_min, i_max = i_max, i_min
-
+        i_max, j_min = self.convert_xy_ij(x_min, y_min)
+        i_min, j_max = self.convert_xy_ij(x_max, y_max)
         # print(f"visible ranges i:({i_min}:{i_max}) j:({j_min}:{j_max})")
         return [[i_min, i_max], [j_min, j_max]]
 
     def get_observations(self, uav_pos, sigmas=None):
-        [[x_min_id, x_max_id], [y_min_id, y_max_id]] = self.get_visible_range(
+        [[i_min, i_max], [j_min, j_max]] = self.get_visible_range(
             uav_pos, index_form=True
         )
-        #     print(f"range x:{x_min_id} - {x_max_id}")
-        #     print(f"range y:{y_min_id} - {y_max_id}")
 
-        x = np.arange(x_min_id, x_max_id, 1)
-        y = np.arange(y_min_id, y_max_id, 1)
-        x, y = np.meshgrid(x, y, indexing="ij")
+        fp_vertices_ij = {
+            "ul": np.array([i_min, j_min]),
+            "bl": np.array([i_max, j_min]),
+            "ur": np.array([i_min, j_max]),
+            "br": np.array([i_max, j_max]),
+        }
 
         if self.field_type == "Gaussian" and self.ground_truth_map is not None:
             # get "perfect" observation from ground truth
-            submap = self.ground_truth_map[x_min_id:x_max_id, y_min_id:y_max_id]
+            submap = self.ground_truth_map[i_min:i_max, j_min:j_max]
             # add sigma noise to observation: if sigma not given, calculate it
             if sigmas is None:
                 sigma = self.a * (1 - np.exp(-self.b * uav_pos.altitude))
                 sigmas = [sigma, sigma]
 
             sigma0, sigma1 = sigmas[0], sigmas[1]
-            rng = np.random.default_rng()
-            random_values = rng.random(submap.shape)
+            random_values = self.rng.random(submap.shape)
             success0 = random_values <= 1.0 - sigma0
             success1 = random_values <= 1.0 - sigma1
             z0 = np.where(np.logical_and(success0, submap == 0), 0, 1)
             z1 = np.where(np.logical_and(success1, submap == 1), 1, 0)
             z = np.where(submap == 0, z0, z1)
+
         elif self.field_type == "Ortomap" and self.predictor is not None:
+            x = np.arange(i_min, i_max, 1)
+            y = np.arange(j_min, j_max, 1)
+            x, y = np.meshgrid(x, y, indexing="ij")
             z = np.zeros_like(x, dtype=int)
             # label = np.zeros_like(x, dtype=int)
             for ind, (r, c) in enumerate(zip(x.flatten(), y.flatten())):
                 tile_pil_img = self._get_tile_img((r, c))
+                tile_pil_img = self.img_sampler.img_at_alt(
+                    tile_pil_img, uav_pos.altitude
+                )
                 z.flat[ind] = int(self.predictor.predict(tile_pil_img))
                 # label.flat[ind] = self.ground_truth_map[r, c]
-        return x, y, z
+        return fp_vertices_ij, z
 
     def get_ground_truth(self):
         return self.ground_truth_map
 
-    # def __len__(self):
-    # return len(self.tiles)
+    """"
+    Sampler upd
+    """
 
+    def sample_random_tiles(self):
+        """
+        Sample a random "free" (label 0) and a random "occupied" (label 1) tile from the ground truth map.
 
-# tester for non center:
+        Returns:
+            free_tile (tuple): (row, column) of a random free tile.
+            occupied_tile (tuple): (row, column) of a random occupied tile.
+        """
+        # Indices of free and  occupied tiles
+        free_indices = np.argwhere(self.ground_truth_map == 0)
+        occupied_indices = np.argwhere(self.ground_truth_map == 1)
 
-# """
+        if len(free_indices) == 0:
+            raise ValueError("No free tiles (label 0) found in the ground truth map.")
+        if len(occupied_indices) == 0:
+            raise ValueError(
+                "No occupied tiles (label 1) found in the ground truth map."
+            )
+
+        # Randomly select one free and one occupied tile  (row, column)
+        free_tile = tuple(free_indices[random.randint(0, len(free_indices) - 1)])
+        occupied_tile = tuple(
+            occupied_indices[random.randint(0, len(occupied_indices) - 1)]
+        )
+
+        return free_tile, occupied_tile
+
+    def _pred_model(self, true_matrix, altitude):
+        tile_m0, tile_m1 = self.sample_random_tiles()
+        img_m0, img_m1 = self._get_tile_img(tile_m0), self._get_tile_img(tile_m1)
+        img_m0 = self.img_sampler.img_at_alt(img_m0, altitude)
+        img_m1 = self.img_sampler.img_at_alt(img_m1, altitude)
+
+        z_m0 = int(self.predictor.predict(img_m0))
+        z_m1 = int(self.predictor.predict(img_m1))
+
+        observation_matrix = [z_m0, z_m1]
+        return observation_matrix
+
+    def _sensor_model(self, true_matrix, altitude):
+        sig = self.a * (1 - np.exp(-self.b * altitude))
+        P_z_equals_m = 1 - sig
+        P_z_not_equals_m = sig
+
+        rows, cols = true_matrix.shape
+        observation_matrix = np.zeros((rows, cols))
+
+        for i in range(rows):
+            for j in range(cols):
+                if true_matrix[i, j] == 1:
+                    observation_matrix[i, j] = np.random.choice(
+                        [1, 0], p=[P_z_equals_m, P_z_not_equals_m]
+                    )
+                else:
+                    observation_matrix[i, j] = np.random.choice(
+                        [0, 1], p=[P_z_equals_m, P_z_not_equals_m]
+                    )
+
+        return observation_matrix
+
+    def _sampler(self, true_matrix, altitude, N, sensor=True):
+        cumulative_observation = np.empty(true_matrix.shape)
+        for i in range(N):
+            if sensor:
+                observation_matrix = self._sensor_model(true_matrix, altitude)
+            else:
+                observation_matrix = self._pred_model(true_matrix, altitude)
+
+            if i == 0:
+                cumulative_observation = observation_matrix.copy()
+                continue
+            cumulative_observation = np.vstack(
+                [cumulative_observation, observation_matrix]
+            )
+        return cumulative_observation
+
+    def _calc_n(self, h, e=np.array([0.5, 0.4, 0.3, 0.2, 0.1, 0.05, 0.03])):
+        p = self.a * (1 - np.exp(-self.b * h))
+        p_ = 1 - p
+        return np.round(1.96 * 1.96 * p * p_ / e / e, decimals=0)
+
+    def _get_N(self, altitudes):
+        errors = [0.5, 0.4, 0.3, 0.2, 0.1, 0.05, 0.03]
+        n_per_e = {}
+        for h in altitudes:
+            n_values = self._calc_n(h)
+            n_per_e[h] = {e: n for e, n in zip(errors, n_values)}
+        return n_per_e
+
+    def _get_confusion_matrix(self, altitude, N, sensor=True):
+        true_matrix = np.array([0, 1])
+        true_matrix = np.expand_dims(true_matrix, axis=0)
+        observation = self._sampler(true_matrix, altitude, int(N), sensor=sensor)
+        n = int(observation.shape[0] / true_matrix.shape[0])
+        true_matrix_ = np.tile(true_matrix, (n, 1))
+
+        c = confusion_matrix(true_matrix_.flatten(), observation.flatten())
+        c_norm = c / c.astype(np.float64).sum(axis=1, keepdims=True)
+        c_norm = np.round(c_norm, decimals=2).transpose()
+        c_norm = np.nan_to_num(c_norm) + 1e-6
+        s0 = c_norm[1][0]
+        s1 = c_norm[0][1]
+        # return np.array([[TN, FN], [FP, TP]]), (s0, s1)
+        return c_norm, (s0, s1)
+
+    def init_s0_s1(self, h_range, e=0.3, sensor=True):
+        start = h_range[0]
+        num_values = 6
+        end = h_range[-1]
+        altitudes = np.round(np.linspace(start, end, num=num_values), decimals=2)
+        conf_dict = {}
+        Ns = self._get_N(altitudes)
+        for altitude in altitudes:
+            conf_dict[altitude] = self._get_confusion_matrix(
+                altitude, Ns[altitude][e], sensor=sensor
+            )[1]
+        return conf_dict
 
 
 # class grid_info:
-#     x = 50  # 60
-#     y = 50  # 110 for real field
-#     length = 0.125  # 1
-#     shape = (int(x / length), int(y / length))
+#     x = 60  # 60
+#     y = 110  # 110 for real field
+#     length = 1  # 1
+#     shape = (int(y / length), int(x / length))
 #     center = True
 
 
-class grid_info:
-    x = 50  # 60
-    y = 50  # 110 for real field
-    length = 0.125
-    shape = (int(x / length), int(y / length))
-    center = False
-
-
-class uav_pos:
-    altitude = 5
-    position = (0, 0)
-
-
-print(f"grid info:{grid_info.shape}")
-
-field_type = 4
-field_type = "Ortomap"
-map = Field(
-    grid_info,
-    field_type,
-    # model_path=model_path,
-    # ortomap_path=dataset_path,
-)
-# xy = [
-#     (-30, 55),
-#     (0, 55),
-#     (30, 55),
-#     (30, 0),
-#     (30, -55),
-#     (-30, -55),
-#     (-30, 0),
-# ]
-# ij = [
-#     (0, 0),
-#     (0, 30),
-#     (0, 60),
-#     (55, 60),
-#     (110, 60),
-#     (110, 0),
-#     (55, 0),
-# ]
-xy_not_center = [
-    (0, 0),
-    #   (60, 0), (60, 110), (0, 110)
-]
-
-ij_not_center = [
-    (50, 0),
-    #   (110, 60), (0, 60), (0, 0)
-]
-
-
-for position, pixel in zip(xy_not_center, ij_not_center):
-    # print(f"point {point} pixel  {pixel} ij {map.convert_xy_ij(point[0], point[1])}")
-    assert pixel == map.convert_xy_ij(position[0], position[1])
-    # uav_pos.position = position
-    # visible_ij = map.get_visible_range(uav_pos, index_form=True)
-
-print("passed!")
-# x, y, z = map.get_observations(uav_pos)
-# print(f"{z.shape}")
-# gt = map.get_ground_truth()
-# print(f"gt shape:{gt.shape}")
-
-"""
-print(f"center: {center} uav pos:{uav_pos.position}")
-print(f"id: {get_range(uav_pos, grid_info, center=center, index_form=True)}")
-print(f"pos: {get_range(uav_pos, grid_info, center=center, index_form=False)}")
-uav_pos.position = (10, 0)
-print(f"center: {center} uav pos:{uav_pos.position}")
-print(f"id: {get_range(uav_pos, grid_info, center=center, index_form=True)}")
-print(f"pos: {get_range(uav_pos, grid_info, center=center, index_form=False)}")
-"""
+# map = Field(grid_info, "Ortomap", seed=1)
+# free, occ = map.sample_random_tiles()
+# print(f"free {free}")
+# print(f"occ {occ}")

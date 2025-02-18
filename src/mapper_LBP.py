@@ -29,12 +29,6 @@ class OccupancyMap:
         self._init_LBP_msgs()
         self.map_beliefs = np.full((self.N[0], self.N[1]), 0.5)
 
-        #         global states, map_beliefs, map_belief_entropies, agg_map_belief, agg_map_belief_entropy, news_map_beliefs
-        # map_belief_entropies = np.ones((self.n_cell, self.n_cell, self.n_agents), dtype=float)
-        # agg_map_belief = np.ones((self.n_cell, self.n_cell), dtype=float) * 0.5
-        # agg_map_belief_entropy = np.ones((self.n_cell, self.n_cell), dtype=float)
-        self.news_map_beliefs = np.ones((1, 1, self.N[0], self.N[1]), dtype=float) * 0.5
-
     def _init_LBP_msgs(self):
         # n_cell = self.N
         # depth_to_direction = 0123_4 -> URDL_fake
@@ -149,6 +143,8 @@ class OccupancyMap:
             - Biased: Fixed (0.7, 0.3).
             - Adaptive: Based on a metric like Pearson correlation.
         """
+        if correlation_type is None and self.correlation_type is not None:
+            correlation_type = self.correlation_type
         if correlation_type == "equal":
             # Default: Uniform potential
             return np.array([[0.5, 0.5], [0.5, 0.5]])
@@ -159,11 +155,12 @@ class OccupancyMap:
             # Adaptive: Pearson correlation coefficient
             return np.array(adaptive_weights_matrix(self.last_observations))
 
-    def get_indices(self, x, y):
-        grid_length = x[0, 1] - x[0, 0]  # First row, consecutive columns
+    # def get_indices(self, x, y):
+    def get_indices(self, i, j):
+        # grid_length = x[0, 1] - x[0, 0]  # First row, consecutive columns
 
-        i = np.array((x / grid_length).astype(int))  # Convert x to grid indices
-        j = np.array((y / grid_length).astype(int))  # Convert y to grid indices
+        # i = np.array((x / grid_length).astype(int))  # Convert x to grid indices
+        # j = np.array((y / grid_length).astype(int))  # Convert y to grid indices
         fp_vertices_ij = {
             "ul": np.array([np.min(i), np.min(j)]),
             "bl": np.array([np.max(i) + 1, np.min(j)]),
@@ -172,8 +169,8 @@ class OccupancyMap:
         }
         return fp_vertices_ij
 
-    def update_belief_OG(self, zx, zy, z, uav_pos, mexgen=None):
-        fp_vertices_ij = self.get_indices(zx, zy)
+    # def update_belief_OG(self, zx, zy, z, uav_pos, mexgen=None):
+    def update_belief_OG(self, fp_vertices_ij, z, uav_pos, mexgen=None):
         I, J = 0, 1
         if mexgen == None:
             a, b = 1, 0.015
@@ -184,10 +181,15 @@ class OccupancyMap:
             if self.conf_dict is not None:
                 s0, s1 = self.conf_dict[np.round(uav_pos.altitude, decimals=2)]
 
+                # _, (s0, s1) = get_s0_s1(
+                #     z, uav_pos.altitude, e=self.sampled_sigma_error_margin
+                # )
+                # print(f"mapper: s0:{s0}, s1:{s1}")
             else:
                 s0, s1 = sigma, sigma
             self.sigma0 = s0
             self.sigma1 = s1
+            # print(f"B: s1 {self.sigma0} s2 {self.sigma1}")
 
             likelihood_m_zero = np.where(z == 0, 1 - s0, s0)
             likelihood_m_one = np.where(z == 0, s1, 1 - s1)
@@ -240,15 +242,17 @@ class OccupancyMap:
         ] = posterior_m_one_norm
 
     def propagate_messages_(
-        self, zx, zy, z, uav_pos, max_iterations=5, correlation_type=None
+        self, fp_vertices_ij, z, uav_pos, max_iterations=5, correlation_type=None
     ):
         # Pairwise potential
         # self.update_belief_OG(zx, zy, z, uav_pos)
         self.last_observations = z
+        if correlation_type is None:
+            correlation_type = self.correlation_type
 
         psi = self.pairwise_potential(correlation_type)
 
-        fp_vertices_ij = self.get_indices(zx, zy)
+        # fp_vertices_ij = self.get_indices(zx, zy)
         # reset msgs and msgs_buffer
         self.msgs = np.ones_like(self.msgs) * 0.5
         self.msgs_buffer = np.ones_like(self.msgs) * 0.5
@@ -290,130 +294,129 @@ class OccupancyMap:
         ) and np.all(
             np.less_equal(self.map_beliefs[product_slice[1], product_slice[2]], 1.0)
         )
-        """
-            def update_news_belief_LBP_and_fuse_single(self, zx, zy, z):
 
-                # global news_map_beliefs, map_beliefs
-                fp_vertices_ij = self.get_indices(zx, zy)
-                I, J = 0, 1
-                sigma0, sigma1 = self.sigma0, self.sigma1
+    def update_news_belief_LBP_and_fuse_single(self, zx, zy, z):
 
-                likelihood_m_zero = np.where(z == 0, 1 - sigma0, sigma0)
-                likelihood_m_one = np.where(z == 0, sigma1, 1 - sigma1)
+        # global news_map_beliefs, map_beliefs
+        fp_vertices_ij = self.get_indices(zx, zy)
+        I, J = 0, 1
+        sigma0, sigma1 = self.sigma0, self.sigma1
 
-                posterior_m_zero = likelihood_m_zero * (
-                    1.0
-                    - self.news_map_beliefs[
-                        0,
-                        0,
-                        fp_vertices_ij["ul"][I] : fp_vertices_ij["bl"][I],
-                        fp_vertices_ij["ul"][J] : fp_vertices_ij["ur"][J],
-                    ]
+        likelihood_m_zero = np.where(z == 0, 1 - sigma0, sigma0)
+        likelihood_m_one = np.where(z == 0, sigma1, 1 - sigma1)
+
+        posterior_m_zero = likelihood_m_zero * (
+            1.0
+            - self.news_map_beliefs[
+                0,
+                0,
+                fp_vertices_ij["ul"][I] : fp_vertices_ij["bl"][I],
+                fp_vertices_ij["ul"][J] : fp_vertices_ij["ur"][J],
+            ]
+        )
+        posterior_m_one = (
+            likelihood_m_one
+            * self.news_map_beliefs[
+                0,
+                0,
+                fp_vertices_ij["ul"][I] : fp_vertices_ij["bl"][I],
+                fp_vertices_ij["ul"][J] : fp_vertices_ij["ur"][J],
+            ]
+        )
+
+        assert np.all(np.greater_equal(posterior_m_one, 0.0))
+
+        posterior_m_one_norm = posterior_m_one / (posterior_m_zero + posterior_m_one)
+
+        assert np.all(np.greater_equal(posterior_m_one_norm, 0.0)) and np.all(
+            np.less_equal(posterior_m_one_norm, 1.0)
+        )
+
+        self.news_map_beliefs[
+            0,
+            0,
+            fp_vertices_ij["ul"][I] : fp_vertices_ij["bl"][I],
+            fp_vertices_ij["ul"][J] : fp_vertices_ij["ur"][J],
+        ] = posterior_m_one_norm
+
+        # reset msgs and msgs_buffer
+        self.msgs = np.ones_like(self.msgs) * 0.5
+        self.msgs_buffer = np.ones_like(self.msgs) * 0.5
+        self.msgs[4, :, :] = self.news_map_beliefs[
+            0, 0, :, :
+        ]  # set msgs last channel with current map belief
+        fp_vertices_ij = self.get_indices(zx, zy)
+
+        # just 1 iteration
+        for direction, data in self.direction_to_slicing_data.items():
+            product_slice = data["product_slice"](fp_vertices_ij)
+            read_slice = data["read_slice"](fp_vertices_ij)
+            write_slice = data["write_slice"](fp_vertices_ij)
+
+            # elementwise multiplication of msgs
+            mul_0 = np.prod(1 - self.msgs[product_slice], axis=0)
+            mul_1 = np.prod(self.msgs[product_slice], axis=0)
+
+            psi = self.pairwise_potential(self.correlation_type)
+
+            # matrix-vector multiplication (factor-msg)
+            # matrix-vector multiplication (factor-msg)
+            msg_0 = psi[0, 0] * mul_0 + psi[0, 1] * mul_1
+            msg_1 = psi[1, 0] * mul_0 + psi[1, 1] * mul_1
+
+            # normalize the first coordinate of the msg
+            norm_msg_1 = msg_1 / (msg_0 + msg_1)
+
+            # buffering
+            self.msgs_buffer[write_slice] = norm_msg_1[read_slice]
+
+            # copy the first 4 channels only
+            # the 5th one is the map belief
+            self.msgs[:4, :, :] = self.msgs_buffer[:4, :, :]
+
+            bel_0 = np.prod(
+                1 - self.msgs[:, product_slice[1], product_slice[2]], axis=0
+            )
+            bel_1 = np.prod(self.msgs[:, product_slice[1], product_slice[2]], axis=0)
+
+            # norm_bel_0 = bel_0 / (bel_0 + bel_1)
+            self.news_map_beliefs[0, 0, product_slice[1], product_slice[2]] = bel_1 / (
+                bel_0 + bel_1
+            )
+
+            assert np.all(
+                np.greater_equal(
+                    self.news_map_beliefs[0, 0, product_slice[1], product_slice[2]],
+                    0.0,
                 )
-                posterior_m_one = (
-                    likelihood_m_one
-                    * self.news_map_beliefs[
-                        0,
-                        0,
-                        fp_vertices_ij["ul"][I] : fp_vertices_ij["bl"][I],
-                        fp_vertices_ij["ul"][J] : fp_vertices_ij["ur"][J],
-                    ]
+            ) and np.all(
+                np.less_equal(
+                    self.news_map_beliefs[0, 0, product_slice[1], product_slice[2]],
+                    1.0,
                 )
+            )
 
-                assert np.all(np.greater_equal(posterior_m_one, 0.0))
+            # neighbors_ids = []
+            # if len(observations) != 0:
+            #     neighbors_ids = observations[agent_id]["neighbors_ids"]
 
-                posterior_m_one_norm = posterior_m_one / (posterior_m_zero + posterior_m_one)
+            # for neighbor_id in neighbors_ids:
+            #     mul = (
+            #         news_map_beliefs[agent_id, agent_id, :, :]
+            #         * map_beliefs[:, :, neighbor_id]
+            #     )
+            #     map_beliefs[:, :, neighbor_id] = mul / (
+            #         mul
+            #         + (1.0 - news_map_beliefs[agent_id, agent_id, :, :])
+            #         * (1.0 - map_beliefs[:, :, neighbor_id])
+            #     )
 
-                assert np.all(np.greater_equal(posterior_m_one_norm, 0.0)) and np.all(
-                    np.less_equal(posterior_m_one_norm, 1.0)
-                )
+            #     assert np.all(
+            #         np.greater_equal(map_beliefs[:, :, neighbor_id], 0.0)
+            #     ) and np.all(np.less_equal(map_beliefs[:, :, neighbor_id], 1.0))
 
-                self.news_map_beliefs[
-                    0,
-                    0,
-                    fp_vertices_ij["ul"][I] : fp_vertices_ij["bl"][I],
-                    fp_vertices_ij["ul"][J] : fp_vertices_ij["ur"][J],
-                ] = posterior_m_one_norm
-
-                # reset msgs and msgs_buffer
-                self.msgs = np.ones_like(self.msgs) * 0.5
-                self.msgs_buffer = np.ones_like(self.msgs) * 0.5
-                self.msgs[4, :, :] = self.news_map_beliefs[
-                    0, 0, :, :
-                ]  # set msgs last channel with current map belief
-                fp_vertices_ij = self.get_indices(zx, zy)
-
-                # just 1 iteration
-                for direction, data in self.direction_to_slicing_data.items():
-                    product_slice = data["product_slice"](fp_vertices_ij)
-                    read_slice = data["read_slice"](fp_vertices_ij)
-                    write_slice = data["write_slice"](fp_vertices_ij)
-
-                    # elementwise multiplication of msgs
-                    mul_0 = np.prod(1 - self.msgs[product_slice], axis=0)
-                    mul_1 = np.prod(self.msgs[product_slice], axis=0)
-
-                    psi = self.pairwise_potential(self.correlation_type)
-
-                    # matrix-vector multiplication (factor-msg)
-                    # matrix-vector multiplication (factor-msg)
-                    msg_0 = psi[0, 0] * mul_0 + psi[0, 1] * mul_1
-                    msg_1 = psi[1, 0] * mul_0 + psi[1, 1] * mul_1
-
-                    # normalize the first coordinate of the msg
-                    norm_msg_1 = msg_1 / (msg_0 + msg_1)
-
-                    # buffering
-                    self.msgs_buffer[write_slice] = norm_msg_1[read_slice]
-
-                    # copy the first 4 channels only
-                    # the 5th one is the map belief
-                    self.msgs[:4, :, :] = self.msgs_buffer[:4, :, :]
-
-                    bel_0 = np.prod(
-                        1 - self.msgs[:, product_slice[1], product_slice[2]], axis=0
-                    )
-                    bel_1 = np.prod(self.msgs[:, product_slice[1], product_slice[2]], axis=0)
-
-                    # norm_bel_0 = bel_0 / (bel_0 + bel_1)
-                    self.news_map_beliefs[0, 0, product_slice[1], product_slice[2]] = bel_1 / (
-                        bel_0 + bel_1
-                    )
-
-                    assert np.all(
-                        np.greater_equal(
-                            self.news_map_beliefs[0, 0, product_slice[1], product_slice[2]],
-                            0.0,
-                        )
-                    ) and np.all(
-                        np.less_equal(
-                            self.news_map_beliefs[0, 0, product_slice[1], product_slice[2]],
-                            1.0,
-                        )
-                    )
-
-                    # neighbors_ids = []
-                    # if len(observations) != 0:
-                    #     neighbors_ids = observations[agent_id]["neighbors_ids"]
-
-                    # for neighbor_id in neighbors_ids:
-                    #     mul = (
-                    #         news_map_beliefs[agent_id, agent_id, :, :]
-                    #         * map_beliefs[:, :, neighbor_id]
-                    #     )
-                    #     map_beliefs[:, :, neighbor_id] = mul / (
-                    #         mul
-                    #         + (1.0 - news_map_beliefs[agent_id, agent_id, :, :])
-                    #         * (1.0 - map_beliefs[:, :, neighbor_id])
-                    #     )
-
-                    #     assert np.all(
-                    #         np.greater_equal(map_beliefs[:, :, neighbor_id], 0.0)
-                    #     ) and np.all(np.less_equal(map_beliefs[:, :, neighbor_id], 1.0))
-
-                    # if len(neighbors_ids) != 0:
-                    #     news_map_beliefs[agent_id, agent_id, :, :] = 0.5
-        """
+            # if len(neighbors_ids) != 0:
+            #     news_map_beliefs[agent_id, agent_id, :, :] = 0.5
 
     def get_belief(self):
         return self.map_beliefs

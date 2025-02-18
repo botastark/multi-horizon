@@ -4,101 +4,132 @@ import numpy as np
 from mpl_toolkits.mplot3d import Axes3D  # Ensure this is imported
 
 
-def plot_terrain(filename, belief, grid, uav_pos, gt, submap, zx, zy):
-
+def plot_terrain(filename, belief, grid, uav_pos, gt, submap, obs, fp):
     # Plot both the 3D and 2D maps in subplots
-    fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(15, 6))
+    fig, axes = plt.subplots(nrows=1, ncols=4, figsize=(15, 6))
     for ax in axes:
         ax.set_axis_off()
-
-    ox_min = np.min(zx)
-    ox_max = np.max(zx)
-    oy_min = np.min(zy)
-    oy_max = np.max(zy)
+    [
+        [ox_min, ox_max],
+        [oy_min, oy_max],
+    ] = obs
 
     o_x = [ox_min, ox_max, ox_max, ox_min, ox_min]
     o_y = [oy_min, oy_min, oy_max, oy_max, oy_min]
 
     # ---- Plot 1: uav position and ground truth 3D ----
+    ax1 = fig.add_subplot(141, projection="3d")
+    if grid.center:
+        x_range = [-grid.x / 2, grid.x / 2]
+        y_range = [-grid.y / 2, grid.y / 2]
+    else:
+        x_range = [0, grid.x]
+        y_range = [0, grid.y]
 
-    ax1 = fig.add_subplot(131, projection="3d")
+    ax1.set_xlim(x_range)
+    ax1.set_ylim(y_range)
 
-    ax1.set_xlim([0, grid.x])
-    ax1.set_ylim([0, grid.y])
-    ax1.set_zlim([0, 35])
     ax1.set_xlabel("X (m)")
     ax1.set_ylabel("Y (m)")
     ax1.set_zlabel("Altitude (m)")
     ax1.set_title("Truth Terrain and UAV position")
     ax1.xaxis.grid(visible=True)
     # uav
-    x, y, z = zip(
+
+    uav_x, uav_y, uav_z = zip(
         *[(uav.position[0], uav.position[1], uav.altitude) for uav in uav_pos]
     )
-    ax1.plot(x, y, z, marker="o", color="r", linestyle="-")
+    ax1.plot(uav_x, uav_y, uav_z, marker="o", color="r", linestyle="-")
+
+    z_max = 35
+    if max(uav_z) > 35:
+        z_max = max(uav_z)
+    ax1.set_zlim([0, z_max])
 
     # Truth terrain map
-    x = np.arange(0, grid.x, grid.length)
-    y = np.arange(0, grid.y, grid.length)
+    x = np.arange(x_range[0], x_range[1], grid.length)
+    y = np.arange(y_range[0], y_range[1], grid.length)
     x, y = np.meshgrid(x, y, indexing="ij")
-
     ax1.plot_surface(
-        x,
-        y,
-        np.zeros_like(x),
+        x.T,
+        -y.T,
+        np.zeros_like(x.T),
         facecolors=np.where(gt == 0, "green", "yellow"),
         alpha=0.6,
         edgecolor="none",
     )
     o_z = np.zeros_like(o_x) + 0.01  # Slightly above z=0
 
-    # Plot the line in 3D
+    # Plot the observation lines in 3D
     ax1.plot(o_x, o_y, o_z, color="red", lw=1)
 
     # ---- Plot 2: 2D last observation z_t ----
-    ax2 = fig.add_subplot(132)
+    ax2 = fig.add_subplot(142)
     ax2.set_xlabel("X-axis")
     ax2.set_ylabel("Y-axis")
     ax2.set_title("last observation z_t")
     # ax2.set_aspect("equal")
-    ax2.set_xlim([0, grid.x])
-    ax2.set_ylim([0, grid.y])
+    ax2.set_xlim(x_range)
+    ax2.set_ylim(y_range)
 
     cmap = colors.ListedColormap(["green", "yellow"])
     bounds = [-0.5, 0.5, 1.5]
     norm = colors.BoundaryNorm(bounds, cmap.N)
 
+    im0 = ax2.imshow(
+        gt,
+        cmap=cmap,
+        norm=norm,
+        extent=[x_range[0], x_range[1], y_range[0], y_range[1]],
+        origin="upper",
+    )
     im1 = ax2.imshow(
-        submap.T,
+        submap,
         cmap=cmap,
         norm=norm,
         extent=[ox_min, ox_max, oy_min, oy_max],
-        origin="lower",
+        origin="upper",
     )
+    ax2.plot(o_x, o_y, o_z, color="red", lw=3)
 
     # ---- Plot 3: Belief sampled map M----
-    ax3 = fig.add_subplot(133)
-    ax3.set_xlabel("X Axis")
-    ax3.set_ylabel("Y Axis")
+    ax3 = fig.add_subplot(143)
+    ax3.set_xlabel("j-axis")
+    ax3.set_ylabel("i-axis")
     ax3.set_title("Belief sampled map M")
-    # ax3.set_xlim([0, self.x_range[1]])
-    # ax3.set_ylim([0, self.y_range[1]])
 
     if belief.ndim == 3:
-        map = belief[:, :, 1].T
+        map = belief[:, :, 1]
     else:
-        map = belief.T
+        map = belief
 
     im2 = ax3.imshow(
         map,
         cmap="Blues",
-        extent=[x.min(), x.max(), y.min(), y.max()],
-        origin="lower",
-        # interpolation="nearest",
+        origin="upper",
         vmin=0,
         vmax=1,
     )
 
+    ax4 = fig.add_subplot(144)
+    ax4.set_xlabel("j-axis")
+    ax4.set_ylabel("i-axis")
+    ax4.set_title("GT in ij")
+
+    cmap = colors.ListedColormap(["green", "yellow"])
+    bounds = [-0.5, 0.5, 1.5]
+    norm = colors.BoundaryNorm(bounds, cmap.N)
+
+    im4 = ax4.imshow(
+        gt,
+        cmap=cmap,
+        norm=norm,
+        origin="upper",
+    )
+    I, J = 0, 1
+    o_i = [fp["ul"][I], fp["bl"][I], fp["br"][I], fp["ur"][I], fp["ul"][I]]
+    o_j = [fp["ul"][J], fp["bl"][J], fp["br"][J], fp["ur"][J], fp["ul"][J]]
+    ax4.plot(o_j, o_i, np.zeros_like(o_j), color="red", lw=2)
     plt.tight_layout()
 
     # Show the plots
@@ -149,7 +180,6 @@ def plot_metrics(dir, entropy_list, mse_list, coverage_list, height_list):
 
     # Adjust layout to avoid overlap
     plt.tight_layout()
-
     # Show the plot
     if dir[-4:] == ".png":
         plt.savefig(dir)
