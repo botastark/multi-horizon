@@ -35,8 +35,10 @@ class camera:
         )
         self.xy_step = min_range / 2 / 8
         self.h_step = self.xy_step / np.tan(np.deg2rad(self.fov * 0.5))
-        # self.h_range = (self.h_step, 6 * self.h_step)
-        self.h_range = (20, 20 + 5 * self.h_step)
+        if self.altitude == 0 or self.altitude is None:
+            self.altitude = self.h_step
+        self.h_range = (self.altitude, self.altitude + 5 * self.h_step)
+        # self.h_range = (20, 20 + 5 * self.h_step)
         self.a = 1
         self.b = 0.015
         self.actions = {"up", "down", "front", "back", "left", "right", "hover"}
