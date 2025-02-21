@@ -3,9 +3,7 @@ import numpy as np
 from helper import (
     FastLogger,
     compute_metrics,
-    # init_s0_s1,
     observed_m_ids,
-    # sensor_model,
     uav_position,
 )
 from orthomap import Field
@@ -16,14 +14,14 @@ from uav_camera import camera
 from tqdm import tqdm
 from viewer import plot_metrics, plot_terrain
 
-desktop = "/home/bota/Desktop/active_sensing/cache"
+desktop = "/home/bota/Desktop/active_sensing/results"
 belief_buffer = None
 
 
 class grid_info:
-    x = 60  # 60
-    y = 110  # 110 for real field
-    length = 1  # 1
+    x = 50  # 60
+    y = 50  # 110 for real field
+    length = 0.125  # 1
     shape = (int(y / length), int(x / length))
     center = True
 
@@ -32,17 +30,22 @@ grf_r = 4
 # correlation_types = ["biased", "equal", "adaptive"]
 correlation_types = ["equal"]
 n_steps = 100
-iters = 1
-# es = [None, 0.3, 0.1, 0.05]
-es = [0.1]
+iters = 20
+es = [None]  # , 0.3, 0.1, 0.05]
+# es = [0.1]
 seed = 123
 rng = np.random.default_rng(seed)
-field_type = "Ortomap"
+field_type = "Gaussian"
+if field_type == "Gaussian":
+    field_type = grf_r
 
 map = Field(
     grid_info,
     field_type,
 )
+start_pos = (0.0, 0.0)
+# start_pos = (-25, -25)
+
 use_sensor_model = False
 # Initialize the mapper's OccupancyMap
 action_select_strategy = "ig"
@@ -60,14 +63,14 @@ for correlation_type in tqdm(correlation_types, desc="pairwise", position=0):
 
             folder = (
                 desktop
-                + f"/txt_new/{correlation_type}_{action_select_strategy}_e{sampled_sigma_error_margin}_r{grf_r}"
+                + f"/txt/{correlation_type}_{action_select_strategy}_e{sampled_sigma_error_margin}_r{grf_r}"
             )
             # ground_truth_map = gaussian_random_field(grf_r, grid_info.shape)
             map.reset()
             ground_truth_map = map.get_ground_truth()
             belief_map = np.full((grid_info.shape[0], grid_info.shape[1], 2), 0.5)
             assert ground_truth_map.shape == belief_map[:, :, 0].shape
-            camera1 = camera(grid_info, 60, rng=rng)
+            camera1 = camera(grid_info, 60, rng=rng, camera_altitude=None)
 
             if sampled_sigma_error_margin is not None:
                 conf_dict = map.init_s0_s1(
@@ -77,7 +80,7 @@ for correlation_type in tqdm(correlation_types, desc="pairwise", position=0):
                 )
             else:
                 conf_dict = None
-            print(f"confusuion matrix: {conf_dict}")
+            # print(f"confusuion matrix: {conf_dict}")
             occupancy_map = OML(
                 grid_info.shape, conf_dict=conf_dict, correlation_type=correlation_type
             )
@@ -88,7 +91,7 @@ for correlation_type in tqdm(correlation_types, desc="pairwise", position=0):
                 conf_dict=conf_dict,
             )
 
-            uav_pos = uav_position(((0.0, 0.0), camera1.get_hrange()[0]))
+            uav_pos = uav_position((start_pos, camera1.get_hrange()[0]))
             uav_positions, actions_bota = [uav_pos], []
 
             camera1.set_altitude(uav_pos.altitude)
@@ -121,10 +124,6 @@ for correlation_type in tqdm(correlation_types, desc="pairwise", position=0):
                     s0, s1 = conf_dict[np.round(uav_pos.altitude, decimals=2)]
                     sigmas = [s0, s1]
 
-                # fp_vertices_ij, submap = camera1.get_observations(
-                #     ground_truth_map,
-                #     sigmas,
-                # )
                 fp_vertices_ij, submap = map.get_observations(
                     uav_pos,
                     sigmas,
@@ -174,7 +173,7 @@ for correlation_type in tqdm(correlation_types, desc="pairwise", position=0):
                 camera1.set_position(uav_pos.position)
 
                 plot_terrain(
-                    f"{desktop}/step_{step}.png",
+                    f"{desktop}/steps/step_{step}.png",
                     belief_map,
                     grid_info,
                     uav_positions[0:-1],
