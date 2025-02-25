@@ -106,7 +106,7 @@ class planning:
         # p(z = 0) = p(z = 0|m = 0)p(m = 0) + p(z = 0|m = 1)p(m = 1)
         a = (1.0 - sigma0) * (1.0 - var) + (sigma1 * var)
         # p(z = 1) = 1 - p(z = 0)
-        b = 1.0 - a + 1e-10
+        b = 1.0 - a + 1e-6
 
         assert np.all(np.greater_equal(var, 0.0)), f"{var[np.isnan(var)]}"
         assert np.all(np.less_equal(var, 1.0)), f"{var[np.isnan(var)]}"
