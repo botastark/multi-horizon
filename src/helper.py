@@ -165,6 +165,7 @@ class FastLogger:
         grid=None,
         r=None,
         init_x=None,
+        conf_dict=None,
     ):
 
         self.strategy = strategy
@@ -196,6 +197,13 @@ class FastLogger:
             f.write(f"Pairwise: {self.pairwise}\n")
             f.write(f"N agents: {self.n}\n")
             f.write(f"Error margin: {self.e}\n")
+            if conf_dict is not None:
+                f.write("confision matrix: {")
+
+                for key, value in conf_dict.items():
+                    value_str = ", ".join(map(str, value))
+                    f.write(f"{key}: [{value_str}] ")
+                f.write("}\n")
             if isinstance(self.r, str):
                 f.write(f"using {self.r} \n")
             else:
@@ -258,7 +266,7 @@ import os
 import pickle
 
 
-def gaussian_random_field(cluster_radius, n_cell, cache_dir="cache"):
+def gaussian_random_field(cluster_radius, n_cell):
     """
     Generate a 2D Gaussian random field and cache the results for reuse.
      https://andrewwalker.github.io/statefultransitions/post/gaussian-fields/
@@ -273,19 +281,7 @@ def gaussian_random_field(cluster_radius, n_cell, cache_dir="cache"):
     """
 
     # Ensure cache directory exists
-    os.makedirs(cache_dir, exist_ok=True)
     n_cell_x, n_cell_y = n_cell
-
-    # Generate cache filename
-    cache_file = os.path.join(
-        cache_dir, f"field_radius_{cluster_radius}_size_{n_cell_x}x{n_cell_y}.pkl"
-    )
-
-    # # Try loading from cache
-    # if os.path.exists(cache_file):
-    #     with open(cache_file, "rb") as f:
-    #         # print(f"Loading cached field from {cache_file}")
-    #         return pickle.load(f)
 
     # Helper functions
     def _fft_indices(n):
@@ -323,11 +319,6 @@ def gaussian_random_field(cluster_radius, n_cell, cache_dir="cache"):
 
     binary_field = normalized_random_field.astype(np.uint8)
 
-    # Save to cache
-    # with open(cache_file, "wb") as f:
-    #     pickle.dump(binary_field, f)
-    # # print(f"Field generated and saved to {cache_file}")
-
     return binary_field
 
 
@@ -362,91 +353,3 @@ def sample_binary_observations(belief_map, altitude, num_samples=5):
 
     # Return the averaged observation map
     return np.mean(sampled_observations, axis=-1)
-
-
-"""
-sampling updates start here
-"""
-
-
-# def sigma(altitude):
-#     a = 1
-#     b = 0.015
-#     return a * (1 - np.exp(-b * altitude))
-
-
-# def sensor_model(true_matrix, altitude):
-#     sig = sigma(altitude)
-#     P_z_equals_m = 1 - sig
-#     P_z_not_equals_m = sig
-
-#     rows, cols = true_matrix.shape
-#     observation_matrix = np.zeros((rows, cols))
-
-#     for i in range(rows):
-#         for j in range(cols):
-#             if true_matrix[i, j] == 1:
-#                 observation_matrix[i, j] = np.random.choice(
-#                     [1, 0], p=[P_z_equals_m, P_z_not_equals_m]
-#                 )
-#             else:
-#                 observation_matrix[i, j] = np.random.choice(
-#                     [0, 1], p=[P_z_equals_m, P_z_not_equals_m]
-#                 )
-
-#     return observation_matrix
-
-
-# def sampler(true_matrix, altitude, N):
-#     cumulative_observation = np.empty(true_matrix.shape)
-#     for i in range(N):
-#         observation_matrix = sensor_model(true_matrix, altitude)
-#         if i == 0:
-#             cumulative_observation = observation_matrix.copy()
-#             continue
-#         cumulative_observation = np.vstack([cumulative_observation, observation_matrix])
-#     return cumulative_observation
-
-
-# def calc_n(h, e=np.array([0.5, 0.4, 0.3, 0.2, 0.1, 0.05, 0.03])):
-#     p = sigma(h)
-#     p_ = 1 - p
-#     return np.round(1.96 * 1.96 * p * p_ / e / e, decimals=0)
-
-
-# def get_N(altitudes):
-#     errors = [0.5, 0.4, 0.3, 0.2, 0.1, 0.05, 0.03]
-#     n_per_e = {}
-#     for h in altitudes:
-#         n_values = calc_n(h)
-#         n_per_e[h] = {e: n for e, n in zip(errors, n_values)}
-#     return n_per_e
-
-
-# def get_confusion_matrix(altitude, N):
-#     true_matrix = np.array([0, 1])
-#     true_matrix = np.expand_dims(true_matrix, axis=0)
-#     observation = sampler(true_matrix, altitude, int(N))
-#     n = int(observation.shape[0] / true_matrix.shape[0])
-#     true_matrix_ = np.tile(true_matrix, (n, 1))
-
-#     c = confusion_matrix(true_matrix_.flatten(), observation.flatten())
-#     c_norm = c / c.astype(np.float64).sum(axis=1, keepdims=True)
-#     c_norm = np.round(c_norm, decimals=2).transpose()
-#     c_norm = np.nan_to_num(c_norm) + 1e-6
-#     s0 = c_norm[1][0]
-#     s1 = c_norm[0][1]
-#     # return np.array([[TN, FN], [FP, TP]]), (s0, s1)
-#     return c_norm, (s0, s1)
-
-
-# def init_s0_s1(h_range, e=0.3):
-#     start = h_range[0]
-#     num_values = 6
-#     end = h_range[-1]
-#     altitudes = np.round(np.linspace(start, end, num=num_values), decimals=2)
-#     conf_dict = {}
-#     Ns = get_N(altitudes)
-#     for altitude in altitudes:
-#         conf_dict[altitude] = get_confusion_matrix(altitude, Ns[altitude][e])[1]
-#     return conf_dict

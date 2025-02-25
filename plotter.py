@@ -12,8 +12,8 @@ import pandas as pd
 import glob
 
 
-dir = "/home/bota/Desktop/active_sensing/results"
-dir = "/home/bota/Desktop/active_sensing/cache/tester_cache"
+dir = "/home/bota/Desktop/active_sensing/results/txt/all"
+# dir = "/home/bota/Desktop/active_sensing/cache/tester_cache"
 
 
 def parse_file_to_table(file_path):
@@ -36,6 +36,8 @@ def parse_file_to_table(file_path):
         elif "Gaussian radius" in line:
             parts = line.split()
             gaussian_radius = int(parts[-1])  # The last element is the radius
+        elif "using orto" in line:
+            gaussian_radius = "orto"
 
     if pairwise is None or gaussian_radius is None:
         raise ValueError(
@@ -134,18 +136,11 @@ def plot_category_stats_by_settings(stats, categories):
         plt.show()
 
 
-def plot_category_stats_by_e(stats, unique_settings):
+def plot_category_stats_by_e(stats, unique_settings, save_dir):
 
     categories = ["Entropy", "MSE", "Height", "Coverage"]
     radius, pairwise = unique_settings
     error_margins = [0.0, 0.05, 0.1, 0.3]
-    # radii = stats["GaussianRadius"].unique()
-    # pairwises = stats["Pairwise"].unique()
-    # error_margins = stats["ErrorMargin"].unique()
-    # pairs = list(product(radii, pairwises, error_margins))
-    # unique_settings = set(pairs)
-
-    # for radius, pairwise, error_margin in unique_settings:
     fig, ax = plt.subplots(len(categories), 1, figsize=(7, 3 * len(categories)))
     colors = ["blue", "red", "green", "purple"]
 
@@ -187,8 +182,9 @@ def plot_category_stats_by_e(stats, unique_settings):
             ax[i].set_ylabel(category)
             ax[i].legend()
             ax[i].grid()
-
     plt.tight_layout()
+    os.makedirs(save_dir, exist_ok=True)
+    plt.savefig(os.path.join(save_dir, f"plot_r_{radius}_{pairwise}.png"), dpi=300)
     plt.show()
 
 
@@ -212,11 +208,13 @@ print(f"unique pairwise: {all_stats['Pairwise'].unique()}")
 
 
 # pritn(all_stats)
-plot_category_stats_by_e(all_stats, (4, "adaptive"))
+plot_category_stats_by_e(
+    all_stats, ("orto", "adaptive"), "/home/bota/Desktop/active_sensing/plots/"
+)
 
-setting_data = all_stats[
-    (all_stats["Pairwise"] == "equal")
-    & (all_stats["GaussianRadius"] == 4)
-    & (all_stats["ErrorMargin"] == 0.0)
-]
+# setting_data = all_stats[
+#     (all_stats["Pairwise"] == "equal")
+#     & (all_stats["GaussianRadius"] == 4)
+#     & (all_stats["ErrorMargin"] == 0.0)
+# ]
 # print(setting_data)

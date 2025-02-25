@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import pickle
 import random
 import sys
 import os
@@ -17,11 +18,14 @@ from binary_classifier.classifier import Predicter
 from PIL import Image, ImageFilter
 from osgeo import gdal
 
-
-annotation_path = "/home/bota/Desktop/active_sensing/src/annotation.txt"
+desktop = "/home/bota/Desktop/active_sensing"
+annotation_path = desktop + "/src/annotation.txt"
 dataset_path = "/media/bota/BOTA/wheat/example-run-001_20241014T1739_ortho_dsm.tif"
-tile_ortomappixel_path = "/home/bota/Desktop/active_sensing/data/tomatotiles.txt"
-model_path = "/home/bota/Desktop/active_sensing/binary_classifier/models/best_model_auc91_lr1_-05_bs128_wd_2.5-04.pth"
+tile_ortomappixel_path = desktop + "/data/tomatotiles.txt"
+model_path = (
+    desktop + "/binary_classifier/models/best_model_auc91_lr1_-05_bs128_wd_2.5-04.pth"
+)
+cache_dir = desktop + "/data/predictions_cache/"
 
 
 class img_sampler:
@@ -69,7 +73,7 @@ class img_sampler:
     # Function for downsampling with Gaussian blur, with adjustable blur based on size
     def downsample_with_blur(self, image, target_size, original_size):
         # Calculate blur strength based on size difference
-        blur_radius = max(0.5, (original_size[0] / target_size[0]) / 2)
+        blur_radius = max(0.5, abs(target_size[0] - original_size[0]) / 50)
         blurred = image.filter(ImageFilter.GaussianBlur(radius=blur_radius))
         return blurred.resize(target_size, Image.LANCZOS)
 
@@ -125,8 +129,8 @@ class img_sampler:
         target_size = self.calculate_tile_size_on_image(alt)
 
         if target_size[0] < image.size[0] and target_size[1] < image.size[1]:
-            # return self.downsample_with_blur(image, target_size, orig_size)
-            return self.simulate_higher_altitude(image, alt)
+            return self.downsample_with_blur(image, target_size, orig_size)
+            # return self.simulate_higher_altitude(image, alt)
         else:
             return image
 
@@ -136,6 +140,7 @@ class Field:
         self,
         grid_info,
         field_type,
+        cache_dir=cache_dir,
         seed=123,
         model_path=model_path,
         ortomap_path=dataset_path,
@@ -157,7 +162,40 @@ class Field:
             self.ortomap_path = ortomap_path
             self._init_ortomap()
             self.img_sampler = img_sampler()
-        print("field is ready!")
+            self.cache_dir = cache_dir
+            os.makedirs(self.cache_dir, exist_ok=True)
+            self.predictions_cache = self._load_cache()
+
+    def _cache_filepath(self):
+        return os.path.join(self.cache_dir, "predictions.pkl")
+
+    def _load_cache(self):
+        filepath = self._cache_filepath()
+        if os.path.exists(filepath):
+            with open(filepath, "rb") as f:
+                return pickle.load(f)
+        self.predictions_cache = {}
+        self._initialize_predictions()
+
+        # return {}
+
+    def _save_cache(self):
+        with open(self._cache_filepath(), "wb") as f:
+            pickle.dump(self.predictions_cache, f)
+
+    def _initialize_predictions(self):
+        altitudes = [20, 26.5, 33, 39.5, 46, 52.5]
+
+        for altitude in altitudes:
+            z = np.zeros_like(self.ground_truth_map, dtype=int)
+            for ind, (r, c) in enumerate(self.tiles):
+                tile_pil_img = self._get_tile_img((r, c))
+                tile_pil_img = self.img_sampler.img_at_alt(tile_pil_img, altitude)
+                z.flat[ind] = int(self.predictor.predict(tile_pil_img))
+
+            self.predictions_cache[altitude] = z
+
+        self._save_cache()
 
     def reset(self):
         if self.field_type == "Gaussian":
@@ -186,7 +224,8 @@ class Field:
 
         self.tile_pixel_loc = self._parse_tile_file(tile_ortomappixel_path)
         self.ground_truth_map = self._read_annotations_to_matrix(annotation_path)
-        self.tiles = [(row, col) for row in range(3, 113) for col in range(13, 73)]
+        # self.tiles = [(row, col) for row in range(3, 113) for col in range(13, 73)]
+        self.tiles = [(row, col) for row in range(0, 110) for col in range(0, 60)]
 
     def _parse_tile_file(self, file_path):
         """
@@ -230,7 +269,7 @@ class Field:
             if cut:
 
                 matrix = matrix[3:113, 13:73]
-            assert matrix.shape == self.grid_info.shape
+            assert matrix.shape == self.grid_info.shape, "check grid size and length"
             return matrix
         except Exception as e:
             raise ValueError(f"Error reading the file {file_path}: {e}")
@@ -275,7 +314,6 @@ class Field:
         x_dist = round(uav_pos.altitude * math.tan(fov_rad) / grid_length) * grid_length
         y_dist = round(uav_pos.altitude * math.tan(fov_rad) / grid_length) * grid_length
 
-        # print(f"dist x:{x_dist} y:{y_dist}")
         x_range = [0, self.grid_info.x]
         y_range = [0, self.grid_info.y]
 
@@ -336,13 +374,26 @@ class Field:
             x, y = np.meshgrid(x, y, indexing="ij")
             z = np.zeros_like(x, dtype=int)
             # label = np.zeros_like(x, dtype=int)
-            for ind, (r, c) in enumerate(zip(x.flatten(), y.flatten())):
-                tile_pil_img = self._get_tile_img((r, c))
-                tile_pil_img = self.img_sampler.img_at_alt(
-                    tile_pil_img, uav_pos.altitude
-                )
-                z.flat[ind] = int(self.predictor.predict(tile_pil_img))
-                # label.flat[ind] = self.ground_truth_map[r, c]
+            if self.predictions_cache is not None:
+                approx_alt = round(uav_pos.altitude, 1)
+                if not approx_alt in self.predictions_cache.keys():
+                    print(f"uav alt:{uav_pos.altitude} and approx {approx_alt}")
+                    print(f"pred cache alts: {list(self.predictions_cache.keys())}")
+
+                pred_at_alt = self.predictions_cache[approx_alt]
+                assert (
+                    pred_at_alt.shape == self.ground_truth_map.shape
+                ), f"check prediction cache shape: its {pred_at_alt.shape} and gt shape {self.ground_truth_map.shape}"
+                z = pred_at_alt[i_min:i_max, j_min:j_max]
+            else:
+
+                for ind, (r, c) in enumerate(zip(x.flatten(), y.flatten())):
+                    tile_pil_img = self._get_tile_img((r, c))
+                    tile_pil_img = self.img_sampler.img_at_alt(
+                        tile_pil_img, uav_pos.altitude
+                    )
+                    z.flat[ind] = int(self.predictor.predict(tile_pil_img))
+                    # label.flat[ind] = self.ground_truth_map[r, c]
         return fp_vertices_ij, z
 
     def get_ground_truth(self):
@@ -448,14 +499,23 @@ class Field:
         n = int(observation.shape[0] / true_matrix.shape[0])
         true_matrix_ = np.tile(true_matrix, (n, 1))
 
-        c = confusion_matrix(true_matrix_.flatten(), observation.flatten())
-        c_norm = c / c.astype(np.float64).sum(axis=1, keepdims=True)
-        c_norm = np.round(c_norm, decimals=2).transpose()
-        c_norm = np.nan_to_num(c_norm) + 1e-6
-        s0 = c_norm[1][0]
-        s1 = c_norm[0][1]
+        # c = confusion_matrix(true_matrix_.flatten(), observation.flatten())
+        # c_norm = c / c.astype(np.float64).sum(axis=1, keepdims=True)
+        # c_norm = np.round(c_norm, decimals=2).transpose()
+        # c_norm = np.nan_to_num(c_norm) + 1e-3
+        # c_norm = np.clip(c_norm, 1e-3, 1)
+        c = confusion_matrix(
+            true_matrix_.ravel(), observation.ravel(), normalize="true"
+        ).T
+        c = np.clip(np.nan_to_num(np.round(c, 2) + 1e-3), 1e-3, 1)
+
+        s0, s1 = c[1, 0], c[0, 1]
+
+        # s0 = c_norm[1][0]
+        # s1 = c_norm[0][1]
         # return np.array([[TN, FN], [FP, TP]]), (s0, s1)
-        return c_norm, (s0, s1)
+        # return c_norm, (s0, s1)
+        return c, (s0, s1)
 
     def init_s0_s1(self, h_range, e=0.3, sensor=True):
         start = h_range[0]
