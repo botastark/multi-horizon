@@ -1,17 +1,19 @@
-import math
 import random
 import numpy as np
-from typing import Dict, List, Tuple, Union
+
+# from typing import Dict, List, Tuple, Union
 from helper import uav_position
 
 
 class planning:
-    def __init__(self, grid_info, uav, strategy, conf_dict=None):
+    def __init__(self, grid_info, uav, strategy, conf_dict=None, optimal_alt=21.6):
         self.M = np.full((grid_info.shape[0], grid_info.shape[1], 2), 0.5)
         self.uav = uav
         self.last_action = None
         self.strategy = strategy
         self.conf_dict = conf_dict
+        self.optimal_altitude = optimal_alt
+        self.sweep_direction = None
 
     def reset(self, conf_dict=None):
         self.uav.reset()
@@ -104,6 +106,8 @@ class planning:
 
         # probability of the evidence
         # p(z = 0) = p(z = 0|m = 0)p(m = 0) + p(z = 0|m = 1)p(m = 1)
+        sigma0 = np.clip(sigma0, 0.0, 1.0)
+        sigma1 = np.clip(sigma1, 0.0, 1.0)
         a = (1.0 - sigma0) * (1.0 - var) + (sigma1 * var)
         # p(z = 1) = 1 - p(z = 0)
         b = 1.0 - a + 1e-6
@@ -117,8 +121,8 @@ class planning:
         # p(m = 1|z = 1) = (p(z = 1|m = 1)p(m = 1))/p(z = 1)
         p11 = ((1.0 - sigma1) * var) / b
 
-        assert np.all(np.greater_equal(p10, 0.0)) and np.all(
-            np.less_equal(p10, 1.0)
+        assert np.all(np.greater_equal(np.round(p10, decimals=2), 0.0)) and np.all(
+            np.less_equal(np.round(p10, decimals=2), 1.0)
         ), f"{p10}"
         assert np.all(np.greater_equal(p11, 0.0)) and np.all(
             np.less_equal(p11, 1.0)
@@ -157,16 +161,70 @@ class planning:
         return random.choice(permitted_actions)
 
     def sweep(self, permitted_actions, visited_x):
-        optimal_altitude = 21.6
-        if self.uav.get_x().altitude < optimal_altitude and "up" in permitted_actions:
-            return "up"
+        # print(f"uav alt {self.uav.get_x().altitude}\n")
+        if (
+            self.uav.get_x().altitude < self.optimal_altitude
+            and "up" in permitted_actions
+        ):
+            self.last_action = "up"
+            return "up", None
 
-        # visited_x = [s_[0] for s_ in self.s]
+        sweep_actions = []
         for action in permitted_actions:
             x_future = uav_position(self.uav.x_future(action))
             if x_future not in visited_x and action != "up" and action != "down":
-                return action
-        return random.choice(permitted_actions)
+                sweep_actions.append(action)
+
+        if self.sweep_direction is None:
+            if len(sweep_actions) == 1:
+                if sweep_actions[0] == "left" or sweep_actions[0] == "right":
+                    self.sweep_direction = "LeftRight"
+                else:
+                    self.sweep_direction = "BackFront"
+            else:
+                self.sweep_direction = random.choice(["LeftRight", "BackFront"])
+        # print(
+        #     f"Current UAV postion: {self.uav.get_x().position}, {self.uav.get_x().altitude}"
+        # )
+        # print(f"front pos:", uav_position(self.uav.x_future("front")).position)
+        # print(f"back pos:", uav_position(self.uav.x_future("back")).position)
+        # print(f"left pos:", uav_position(self.uav.x_future("left")).position)
+        # print(f"right pos:", uav_position(self.uav.x_future("right")).position)
+
+        # print(f"Permitted actions: {permitted_actions}")
+        # print(f"Sweep actions available: {sweep_actions}")
+        # print(f"Last action: {self.last_action}")
+        # print(f"Determined sweep direction: {self.sweep_direction}")
+        # print(f"Visited x: {[v.position for v in visited_x]}")
+        if self.sweep_direction == "LeftRight":
+            # give propriority to left or right (if one of them is present in sweep_actions, only one can be present at a time)
+            if "left" in sweep_actions:
+                self.last_action = "left"
+            elif "right" in sweep_actions:
+                self.last_action = "right"
+            elif "front" in sweep_actions:
+                self.last_action = "front"
+            elif "back" in sweep_actions:
+                self.last_action = "back"
+            else:
+                self.last_action = "hover"
+        if self.sweep_direction == "BackFront":
+            # give propriority to back or front (if one of them is present in sweep_actions, only one can be present at a time)
+            if "back" in sweep_actions:
+                self.last_action = "back"
+            elif "front" in sweep_actions:
+                self.last_action = "front"
+            elif "left" in sweep_actions:
+                self.last_action = "left"
+            elif "right" in sweep_actions:
+                self.last_action = "right"
+            else:
+                self.last_action = "hover"
+        # print(f"Selected action: {self.last_action}")
+        # if self.last_action == "hover":
+        #     print("hovering")
+        # self.last_action = random.choice(sweep_actions)
+        return self.last_action, None
 
     def ig_based(self, permitted_actions, mexgen):
         info_gain_action = {}
@@ -196,9 +254,6 @@ class planning:
         next_action = random.choice(max_gain_actions)
         # Update previous action for the next step
         self.last_action = next_action
-
-        # print()
-        # print(next_action)
         return next_action, info_gain_action
 
     def compute_future_entropy(
@@ -240,8 +295,8 @@ class planning:
         self.M = belief
 
         permitted_actions = self.uav.permitted_actions(self.uav)  # at UAV position x
-        if self.strategy == "random":
-            return self.random_action(permitted_actions)
+        # if self.strategy == "random":
+        # return self.random_action(permitted_actions)
         if self.strategy == "sweep":
             return self.sweep(permitted_actions, visited_x)
 

@@ -8,6 +8,7 @@ from helper import (
     uav_position,
 )
 from orthomap import Field
+import random
 
 from mapper_LBP import OccupancyMap as OML
 from planner import planning
@@ -15,22 +16,21 @@ from uav_camera import camera
 from tqdm import tqdm
 from viewer import plot_metrics, plot_terrain
 
-desktop = "/home/bota/Desktop/active_sensing/results"
+desktop = "/home/bota/Desktop/active_sensing/results_orthomap/results_random"
 belief_buffer = None
 
 field_type = "Ortomap"
-
-start_pos = (0.0, 0.0)
-# start_pos = (-25, -25)
+# field_type = "Gaussian"
+start = "corner"  # random corner or random border
+action_select_strategy = "ig"
 correlation_types = ["adaptive"]
-# correlation_types = ["equal","biased"]
 n_steps = 100
-iters = 20
-es = [0.1, 0.05]
+iters = 1
+es = [0.3]
 
 if field_type == "Ortomap":
     grf_r = "orto"
-    min_alt = 20
+    min_alt = 19.5
 
     class grid_info:
         x = 60
@@ -38,6 +38,8 @@ if field_type == "Ortomap":
         length = 1
         shape = (int(y / length), int(x / length))
         center = True
+
+    use_sensor_model = False
 
 else:
     grf_r = 4
@@ -52,24 +54,25 @@ else:
         center = True
 
 
+# use_sensor_model = False
+
+
 seed = 123
 rng = np.random.default_rng(seed)
-use_sensor_model = False
-action_select_strategy = "ig"
 
+
+camera1 = camera(grid_info, 60, rng=rng, camera_altitude=min_alt)
 map = Field(
-    grid_info,
-    field_type,
+    grid_info, field_type, sweep=action_select_strategy, h_range=camera1.get_hrange()
 )
-
 
 for correlation_type in tqdm(correlation_types, desc="pairwise", position=0):
     for sampled_sigma_error_margin in tqdm(
         es, desc=f"Error Margins (pairwise = {correlation_type})", position=1
     ):
         for iter in tqdm(
-            range(iters),
-            desc=f"Iterations (e={sampled_sigma_error_margin})",
+            range(0, iters),
+            desc=f"Iters (e={sampled_sigma_error_margin})",
             position=2,
             leave=False,
         ):
@@ -78,30 +81,65 @@ for correlation_type in tqdm(correlation_types, desc="pairwise", position=0):
                 desktop
                 + f"/txt/{correlation_type}_{action_select_strategy}_e{sampled_sigma_error_margin}_r{grf_r}"
             )
-            # ground_truth_map = gaussian_random_field(grf_r, grid_info.shape)
             map.reset()
             ground_truth_map = map.get_ground_truth()
             belief_map = np.full((grid_info.shape[0], grid_info.shape[1], 2), 0.5)
             assert ground_truth_map.shape == belief_map[:, :, 0].shape
-            camera1 = camera(grid_info, 60, rng=rng, camera_altitude=min_alt)
+
+            # min_alt = camera1.get_hstep()
 
             if sampled_sigma_error_margin is not None:
                 conf_dict = map.init_s0_s1(
-                    camera1.get_hrange(),
+                    # camera1.get_hrange(),
                     e=sampled_sigma_error_margin,
                     sensor=use_sensor_model,
                 )
+                # print(conf_dict)
+                # print(f"h_range: {camera1.get_hrange()}")
             else:
                 conf_dict = None
             occupancy_map = OML(
                 grid_info.shape, conf_dict=conf_dict, correlation_type=correlation_type
             )
+
             planner_mine = planning(
                 grid_info,
                 camera1,
                 action_select_strategy,
                 conf_dict=conf_dict,
+                optimal_alt=min_alt,
             )
+            if start == "border":
+                start_pos = random.choice(
+                    [
+                        (
+                            -grid_info.x / 2,
+                            random.uniform(-grid_info.y / 2, grid_info.y / 2),
+                        ),  # Left border
+                        (
+                            grid_info.x / 2,
+                            random.uniform(-grid_info.y / 2, grid_info.y / 2),
+                        ),  # Right border
+                        (
+                            random.uniform(-grid_info.x / 2, grid_info.x / 2),
+                            grid_info.y / 2,
+                        ),  # Top border
+                        (
+                            random.uniform(-grid_info.x / 2, grid_info.x / 2),
+                            -grid_info.y / 2,
+                        ),  # Bottom border
+                    ]
+                )
+            elif start == "corner":
+                start_pos = random.choice(
+                    [
+                        (-grid_info.x / 2, -grid_info.y / 2),
+                        (-grid_info.x / 2, grid_info.y / 2),
+                        (grid_info.x / 2, -grid_info.y / 2),
+                        (grid_info.x / 2, grid_info.y / 2),
+                    ]
+                )
+                # start_pos = (-grid_info.x / 2, -grid_info.y / 2)
 
             uav_pos = uav_position((start_pos, camera1.get_hrange()[0]))
             uav_positions, actions_bota = [uav_pos], []
@@ -110,7 +148,8 @@ for correlation_type in tqdm(correlation_types, desc="pairwise", position=0):
             camera1.set_position(uav_pos.position)
             obs_ms = set()
             entropy, mse, height, coverage = [], [], [], []
-            print(conf_dict)
+            if conf_dict is not None:
+                print(conf_dict)
 
             logger = FastLogger(
                 folder,
@@ -138,7 +177,7 @@ for correlation_type in tqdm(correlation_types, desc="pairwise", position=0):
                 leave=False,
             ):
                 # print(f"\n=== mapping {[step]} ===")
-                current_pos = camera1.get_x()
+                # current_pos = camera1.get_x()
                 sigmas = None
 
                 if conf_dict is not None:

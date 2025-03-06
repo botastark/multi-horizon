@@ -13,9 +13,13 @@ class camera:
         grid,
         fov_angle,
         h_step=None,
+        f_overlap=0.8,
+        s_overlap=0.7,
         camera_altitude=0,
         camera_pos=(0.0, 0.0),
         rng=np.random.default_rng(123),
+        a=1,
+        b=0.015,
     ):
 
         self.grid = grid
@@ -30,22 +34,36 @@ class camera:
             self.x_range = [0, self.grid.x]
             self.y_range = [0, self.grid.y]
 
-        # Dynamic xy_step and h_step calculation if not explicitly provided
-        min_range = min(
-            self.x_range[1] - self.x_range[0], self.y_range[1] - self.y_range[0]
-        )
-        self.xy_step = min_range / 2 / 8
+        if f_overlap != None and s_overlap != None:
+            theta_w = np.deg2rad(self.fov)  # Horizonatal FoV (radians)
+            theta_h = np.deg2rad(self.fov)  # Vertical FoV (radians)
+
+            # Compute ground footprint dimensions
+            W = 2 * self.altitude * np.tan(theta_w / 2)  # Ground width (meters)
+            H = 2 * self.altitude * np.tan(theta_h / 2)  # Ground height (meters)
+
+            # Compute step sizes based on overlap
+            xy_step_f = H * (1 - f_overlap)  # Forward step
+            xy_step_s = W * (1 - s_overlap)  # Side step
+            self.xy_step = round(xy_step_f, 2)
+        else:
+            min_range = min(
+                self.x_range[1] - self.x_range[0], self.y_range[1] - self.y_range[0]
+            )
+            self.xy_step = round(min_range / 2 / 8, 2)
+
         if h_step is None:
-            self.h_step = self.xy_step / np.tan(np.deg2rad(self.fov * 0.5))
+            self.h_step = round(self.xy_step / np.tan(np.deg2rad(self.fov * 0.5)), 2)
         else:
             self.h_step = h_step
         if self.altitude == 0 or self.altitude is None:
             self.altitude = self.h_step
         self.h_range = (self.altitude, self.altitude + 5 * self.h_step)
-        self.a = 1
-        self.b = 0.015
+        self.a = a
+        self.b = b
         self.actions = {"up", "down", "front", "back", "left", "right", "hover"}
         # print(f"H range: {self.h_range}")
+        # print(f"xy_step {self.xy_step}, h_step {self.h_step}")
 
     def reset(self):
         self.position = (0.0, 0.0)
@@ -148,46 +166,53 @@ class camera:
 
         return fp_vertices_ij, z
 
-    def x_future(self, action):
+    def x_future(self, action, x=None):
+        if x is None:
+            x = self.get_x()
         # possible_actions = {"up", "down", "front", "back", "left", "right", "hover"}
-        if action == "up" and round(self.altitude + self.h_step, 1) <= round(
+        if action == "up" and round(x.altitude + self.h_step, 1) <= round(
             self.h_range[1], 1
         ):
-            return (self.position, self.altitude + self.h_step)
-        elif action == "down" and self.altitude - self.h_step >= self.h_range[0]:
-            return (self.position, self.altitude - self.h_step)
+            return (x.position, x.altitude + self.h_step)
+        elif action == "down" and x.altitude - self.h_step >= self.h_range[0]:
+            return (x.position, x.altitude - self.h_step)
         # front (+y)
-        elif action == "front" and self.position[1] + self.xy_step <= self.y_range[1]:
-            return (self.position[0], self.position[1] + self.xy_step), self.altitude
+        elif action == "front" and x.position[1] + self.xy_step <= self.y_range[1]:
+            return (x.position[0], x.position[1] + self.xy_step), x.altitude
         # back (-y)
-        elif action == "back" and self.position[1] - self.xy_step >= self.y_range[0]:
-            return (self.position[0], self.position[1] - self.xy_step), self.altitude
+        elif action == "back" and x.position[1] - self.xy_step >= self.y_range[0]:
+            return (x.position[0], x.position[1] - self.xy_step), x.altitude
         # right (+x)
-        elif action == "right" and self.position[0] + self.xy_step <= self.x_range[1]:
-            return (self.position[0] + self.xy_step, self.position[1]), self.altitude
+        elif action == "right" and x.position[0] + self.xy_step <= self.x_range[1]:
+            return (x.position[0] + self.xy_step, x.position[1]), x.altitude
         # left (-x)
-        elif action == "left" and self.position[0] - self.xy_step >= self.x_range[0]:
-            return (self.position[0] - self.xy_step, self.position[1]), self.altitude
+        elif action == "left" and x.position[0] - self.xy_step >= self.x_range[0]:
+            return (x.position[0] - self.xy_step, x.position[1]), x.altitude
         # hover
         else:
-            return self.position, self.altitude
+            return x.position, x.altitude
 
     def permitted_actions(self, x):
-        # possible_actions = {"up", "down", "front", "back", "left", "right", "hover"}
+
         permitted_actions = ["hover"]
+
         for action in self.actions:
-            if action == "up" and round(x.altitude + self.h_step, 2) <= round(
-                self.h_range[1], 2
-            ):
+            future_x = self.x_future(action, x=x)
+
+            # Altitude checks
+            if action == "up" and future_x[1] <= self.h_range[1]:
                 permitted_actions.append(action)
-            elif action == "down" and x.altitude - self.h_step >= self.h_range[0]:
+            elif action == "down" and future_x[1] >= self.h_range[0]:
                 permitted_actions.append(action)
-            elif action == "front" and x.position[0] - self.xy_step >= self.x_range[0]:
+
+            # XY position checks (now using future_x)
+            elif action == "front" and future_x[0][1] <= self.y_range[1]:  # Corrected
                 permitted_actions.append(action)
-            elif action == "back" and x.position[0] + self.xy_step <= self.x_range[1]:
+            elif action == "back" and future_x[0][1] >= self.y_range[0]:  # Corrected
                 permitted_actions.append(action)
-            elif action == "right" and x.position[1] + self.xy_step <= self.y_range[1]:
+            elif action == "right" and future_x[0][0] <= self.x_range[1]:
                 permitted_actions.append(action)
-            elif action == "left" and x.position[1] - self.xy_step >= self.y_range[0]:
+            elif action == "left" and future_x[0][0] >= self.x_range[0]:
                 permitted_actions.append(action)
+
         return permitted_actions

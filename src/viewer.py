@@ -3,6 +3,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from mpl_toolkits.mplot3d import Axes3D  # Ensure this is imported
 
+from matplotlib import cm
+from matplotlib.colors import Normalize
+
 
 def plot_terrain(filename, belief, grid, uav_pos, gt, submap, obs, fp):
     # Plot both the 3D and 2D maps in subplots
@@ -35,12 +38,25 @@ def plot_terrain(filename, belief, grid, uav_pos, gt, submap, obs, fp):
     ax1.set_title("Truth Terrain and UAV position")
     ax1.xaxis.grid(visible=True)
     # uav
+    colors_list = np.linspace(0, 1, len(uav_pos))
+
+    # pyplot
+    cmap = plt.get_cmap("viridis")
+    norm = Normalize(vmin=0, vmax=1)
 
     uav_x, uav_y, uav_z = zip(
         *[(uav.position[0], uav.position[1], uav.altitude) for uav in uav_pos]
     )
-    ax1.plot(uav_x, uav_y, uav_z, marker="o", color="r", linestyle="-")
-
+    # ax1.plot(uav_x, uav_y, uav_z, marker="o", color="r", linestyle="-")
+    # Plot the UAV path with color gradient
+    for i in range(len(uav_x) - 1):
+        ax1.plot(
+            uav_x[i : i + 2],
+            uav_y[i : i + 2],
+            uav_z[i : i + 2],
+            color=cmap(norm(colors_list[i])),
+            linewidth=2,
+        )
     z_max = 35
     if max(uav_z) > 35:
         z_max = max(uav_z)
