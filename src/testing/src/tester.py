@@ -20,7 +20,7 @@ from viewer import plot_metrics, plot_terrain
 
 desktop = "/home/bota/Desktop/active_sensing/cache"
 belief_buffer = None
-"""
+
 
 from simulator import MappingEnv, Mapper, Agent, State, Camera, Proximity
 from simulator import Planner, Viewer
@@ -50,7 +50,7 @@ params = dict(
 field_len = 50.0
 sim_env = MappingEnv(field_len=field_len, fov=np.pi / 3, **params)
 ground_truth_map_lucas = sim_env.generate_map()
-Initialize the simulator's Mapper
+# Initialize the simulator's Mapper
 sim_mapper = Mapper(
     n_cell=sim_env.n_cell,
     min_space_z=sim_env.min_space_z,
@@ -67,8 +67,6 @@ planner_luca = Planner(
     **params,
 )
 
-"""
-
 
 class grid_info:
     x = 50  # 60
@@ -84,7 +82,7 @@ correlation_types = ["equal"]
 n_steps = 100
 iters = 1
 # es = [None, 0.3, 0.1, 0.05]
-es = [0.3]
+es = [None]
 rng = np.random.default_rng(123)
 
 # Initialize the mapper's OccupancyMap

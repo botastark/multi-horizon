@@ -18,6 +18,8 @@ from binary_classifier.classifier import Predicter
 from PIL import Image, ImageFilter
 from osgeo import gdal
 
+gdal.UseExceptions()  # Enable exceptions to avoid the warning
+
 desktop = "/home/bota/Desktop/active_sensing"
 annotation_path = desktop + "/src/annotation.txt"
 dataset_path = "/media/bota/BOTA/wheat/example-run-001_20241014T1739_ortho_dsm.tif"
@@ -144,12 +146,26 @@ class Field:
         seed=123,
         model_path=model_path,
         ortomap_path=dataset_path,
+        sweep="ig",
+        a=1,
+        b=0.015,
+        h_range=[],
     ):
         self.grid_info = grid_info
         self.seed = seed
         self.rng = np.random.default_rng(seed)
-        self.a = 1
-        self.b = 0.015
+        self.a = a
+        self.b = b
+        start = h_range[0]
+        num_values = 6
+        end = h_range[-1]
+        self.altitudes = np.round(np.linspace(start, end, num=num_values), decimals=2)
+
+        if sweep == "sweep":
+            self.sweep = True
+        else:
+            self.sweep = False
+
         if isinstance(field_type, int):
             # self.field_type = f"Gaussian_r{field_type}"
             self.field_type = "Gaussian"
@@ -158,13 +174,26 @@ class Field:
 
         elif field_type == "Ortomap":
             self.field_type = field_type
+
             self.model_path = model_path
             self.ortomap_path = ortomap_path
-            self._init_ortomap()
-            self.img_sampler = img_sampler()
-            self.cache_dir = cache_dir
-            os.makedirs(self.cache_dir, exist_ok=True)
-            self.predictions_cache = self._load_cache()
+            if not self.sweep:
+                self.cache_dir = cache_dir
+                os.makedirs(self.cache_dir, exist_ok=True)
+                self._init_ortomap()
+
+                self.img_sampler = img_sampler()
+                self.predictions_cache = self._load_cache()
+
+            else:
+                self.ground_truth_map = self._read_annotations_to_matrix(
+                    annotation_path
+                )
+                self.tiles = [
+                    (row, col)
+                    for row in range(0, self.grid_info.y)
+                    for col in range(0, self.grid_info.x)
+                ]
 
     def _cache_filepath(self):
         return os.path.join(self.cache_dir, "predictions.pkl")
@@ -184,9 +213,8 @@ class Field:
             pickle.dump(self.predictions_cache, f)
 
     def _initialize_predictions(self):
-        altitudes = [20, 26.5, 33, 39.5, 46, 52.5]
 
-        for altitude in altitudes:
+        for altitude in self.altitudes:
             z = np.zeros_like(self.ground_truth_map, dtype=int)
             for ind, (r, c) in enumerate(self.tiles):
                 tile_pil_img = self._get_tile_img((r, c))
@@ -368,32 +396,36 @@ class Field:
             z1 = np.where(np.logical_and(success1, submap == 1), 1, 0)
             z = np.where(submap == 0, z0, z1)
 
-        elif self.field_type == "Ortomap" and self.predictor is not None:
+        elif self.field_type == "Ortomap":
             x = np.arange(i_min, i_max, 1)
             y = np.arange(j_min, j_max, 1)
             x, y = np.meshgrid(x, y, indexing="ij")
             z = np.zeros_like(x, dtype=int)
-            # label = np.zeros_like(x, dtype=int)
-            if self.predictions_cache is not None:
-                approx_alt = round(uav_pos.altitude, 1)
-                if not approx_alt in self.predictions_cache.keys():
-                    print(f"uav alt:{uav_pos.altitude} and approx {approx_alt}")
-                    print(f"pred cache alts: {list(self.predictions_cache.keys())}")
+            if self.sweep:
+                z = self.ground_truth_map[i_min:i_max, j_min:j_max]
+                return fp_vertices_ij, z
+            if self.predictor is not None:
+                # label = np.zeros_like(x, dtype=int)
+                if self.predictions_cache is not None:
+                    approx_alt = round(uav_pos.altitude, 2)
+                    if not approx_alt in self.predictions_cache.keys():
+                        print(f"uav alt:{uav_pos.altitude} and approx {approx_alt}")
+                        print(f"pred cache alts: {list(self.predictions_cache.keys())}")
 
-                pred_at_alt = self.predictions_cache[approx_alt]
-                assert (
-                    pred_at_alt.shape == self.ground_truth_map.shape
-                ), f"check prediction cache shape: its {pred_at_alt.shape} and gt shape {self.ground_truth_map.shape}"
-                z = pred_at_alt[i_min:i_max, j_min:j_max]
-            else:
+                    pred_at_alt = self.predictions_cache[approx_alt]
+                    assert (
+                        pred_at_alt.shape == self.ground_truth_map.shape
+                    ), f"check prediction cache shape: its {pred_at_alt.shape} and gt shape {self.ground_truth_map.shape}"
+                    z = pred_at_alt[i_min:i_max, j_min:j_max]
+                else:
 
-                for ind, (r, c) in enumerate(zip(x.flatten(), y.flatten())):
-                    tile_pil_img = self._get_tile_img((r, c))
-                    tile_pil_img = self.img_sampler.img_at_alt(
-                        tile_pil_img, uav_pos.altitude
-                    )
-                    z.flat[ind] = int(self.predictor.predict(tile_pil_img))
-                    # label.flat[ind] = self.ground_truth_map[r, c]
+                    for ind, (r, c) in enumerate(zip(x.flatten(), y.flatten())):
+                        tile_pil_img = self._get_tile_img((r, c))
+                        tile_pil_img = self.img_sampler.img_at_alt(
+                            tile_pil_img, uav_pos.altitude
+                        )
+                        z.flat[ind] = int(self.predictor.predict(tile_pil_img))
+                        # label.flat[ind] = self.ground_truth_map[r, c]
         return fp_vertices_ij, z
 
     def get_ground_truth(self):
@@ -499,32 +531,19 @@ class Field:
         n = int(observation.shape[0] / true_matrix.shape[0])
         true_matrix_ = np.tile(true_matrix, (n, 1))
 
-        # c = confusion_matrix(true_matrix_.flatten(), observation.flatten())
-        # c_norm = c / c.astype(np.float64).sum(axis=1, keepdims=True)
-        # c_norm = np.round(c_norm, decimals=2).transpose()
-        # c_norm = np.nan_to_num(c_norm) + 1e-3
-        # c_norm = np.clip(c_norm, 1e-3, 1)
         c = confusion_matrix(
             true_matrix_.ravel(), observation.ravel(), normalize="true"
         ).T
         c = np.clip(np.nan_to_num(np.round(c, 2) + 1e-3), 1e-3, 1)
 
         s0, s1 = c[1, 0], c[0, 1]
-
-        # s0 = c_norm[1][0]
-        # s1 = c_norm[0][1]
-        # return np.array([[TN, FN], [FP, TP]]), (s0, s1)
-        # return c_norm, (s0, s1)
         return c, (s0, s1)
 
-    def init_s0_s1(self, h_range, e=0.3, sensor=True):
-        start = h_range[0]
-        num_values = 6
-        end = h_range[-1]
-        altitudes = np.round(np.linspace(start, end, num=num_values), decimals=2)
+    def init_s0_s1(self, e=0.3, sensor=True):
+
         conf_dict = {}
-        Ns = self._get_N(altitudes)
-        for altitude in altitudes:
+        Ns = self._get_N(self.altitudes)
+        for altitude in self.altitudes:
             conf_dict[altitude] = self._get_confusion_matrix(
                 altitude, Ns[altitude][e], sensor=sensor
             )[1]
