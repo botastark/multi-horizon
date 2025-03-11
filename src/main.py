@@ -17,21 +17,18 @@ from tqdm import tqdm
 from viewer import plot_metrics, plot_terrain, plot_terrain_2d
 
 desktop = "/home/bota/Desktop/active_sensing/"
-# desktop = "/home/bota/Desktop/active_sensing/results_orthomap/results_random"
-# desktop = "/home/bota/Desktop/active_sensing/results_gaussian_corner"
 belief_buffer = None
 
-# field_type = "Ortomap"
-field_type = "Gaussian"
+field_type = "Ortomap"  # "Gaussian"
 start = "corner"  # random corner or random border
-action_select_strategy = "sweep"
-correlation_types = ["biased"]
-n_steps = 100
+action_select_strategy = "ig"  # ig
+correlation_types = ["equal", "biased", "adaptive"]
+n_steps = 10
 iters = 1
-es = [None]
+es = [0.3, 0.1, 0.05]
 if action_select_strategy == "sweep":
-    n_steps = 1
-    iters = 1
+    n_steps = 100
+    iters = 20
     es = [None]
 desktop += f"results_{field_type.lower()}_{start}_trial"
 
@@ -63,8 +60,7 @@ else:
         shape = (int(y / length), int(x / length))
         center = True
 
-
-use_sensor_model = False
+    use_sensor_model = True
 
 
 seed = 123
@@ -104,16 +100,11 @@ for correlation_type in tqdm(correlation_types, desc="pairwise", position=0):
             belief_map = np.full((grid_info.shape[0], grid_info.shape[1], 2), 0.5)
             assert ground_truth_map.shape == belief_map[:, :, 0].shape
 
-            # min_alt = camera1.get_hstep()
-
             if sampled_sigma_error_margin is not None:
                 conf_dict = map.init_s0_s1(
-                    # camera1.get_hrange(),
                     e=sampled_sigma_error_margin,
                     sensor=use_sensor_model,
                 )
-                # print(conf_dict)
-                # print(f"h_range: {camera1.get_hrange()}")
             else:
                 conf_dict = None
             occupancy_map = OML(
@@ -195,7 +186,6 @@ for correlation_type in tqdm(correlation_types, desc="pairwise", position=0):
                 leave=False,
             ):
                 # print(f"\n=== mapping {[step]} ===")
-                # current_pos = camera1.get_x()
                 sigmas = None
 
                 if conf_dict is not None:
@@ -265,11 +255,9 @@ for correlation_type in tqdm(correlation_types, desc="pairwise", position=0):
                     obd_field,
                     fp_vertices_ij,
                 )
-                plot_terrain_2d(
-                    f"{desktop}/steps/step_{step}.png",
-                    grid_info,
-                    uav_positions[0:-1],
-                    ground_truth_map,
-                    obd_field,
-                )
-                # exit()
+
+                # plot_terrain_2d(
+                #     f"{desktop}/steps/step_{step}.png",
+                #     grid_info,
+                #     ground_truth_map,
+                # )
