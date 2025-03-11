@@ -91,9 +91,6 @@ src/model/*.p
 cache
 
 # ignore temp result folders
-equal_ig/
-equal_ig*/
-adaptive*/
-biased*/
 
-results
+
+results_*
