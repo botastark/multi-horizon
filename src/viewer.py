@@ -7,99 +7,7 @@ from matplotlib import cm
 from matplotlib.colors import Normalize
 
 
-def plot_terrain_3d_only(filename, grid, uav_pos, gt, obs):
-    # Larger fonts for a paper
-    plt.rcParams.update(
-        {
-            "font.size": 17,
-            "axes.labelsize": 17,
-            "xtick.labelsize": 14,
-            "ytick.labelsize": 14,
-        }
-    )
-
-    fig = plt.figure(figsize=(11, 14), dpi=300)
-    # fig = plt.figure(dpi=200)
-    ax = fig.add_subplot(projection="3d")
-
-    # Unpack observation boundaries
-    [ox_min, ox_max], [oy_min, oy_max] = obs
-    o_x = [ox_min, ox_max, ox_max, ox_min, ox_min]
-    o_y = [oy_min, oy_min, oy_max, oy_max, oy_min]
-    o_z = np.zeros_like(o_x) + 0.01  # slightly above Z=0
-
-    # Determine x/y ranges
-    if grid.center:
-        x_range = [-grid.x / 2, grid.x / 2]
-        y_range = [-grid.y / 2, grid.y / 2]
-    else:
-        x_range = [0, grid.x]
-        y_range = [0, grid.y]
-
-    ax.set_xlim(x_range)
-    ax.set_ylim(y_range)
-
-    # Axis labels, no title
-    ax.set_xlabel("X (m)", labelpad=4)
-    ax.set_ylabel("Y (m)", labelpad=4)
-    ax.set_zlabel("h (m)", labelpad=4)
-
-    # Adjust the camera angle & aspect ratio
-    # ax.view_init(elev=45, azim=-60)  # nice angle from above
-    # ax.set_box_aspect((1, 1, 0.3))  # flatten Z for a wide terrain
-
-    # Prepare UAV path color gradient (viridis)
-    cmap = plt.get_cmap("viridis")
-    norm = Normalize(vmin=0, vmax=1)
-    colors_list = np.linspace(0, 1, len(uav_pos))
-
-    # Plot UAV path
-    uav_x, uav_y, uav_z = zip(
-        *[(uav.position[0], uav.position[1], uav.altitude) for uav in uav_pos]
-    )
-    for i in range(len(uav_x) - 1):
-        ax.plot(
-            uav_x[i : i + 2],
-            uav_y[i : i + 2],
-            uav_z[i : i + 2],
-            color=cmap(norm(colors_list[i])),
-            linewidth=3,
-        )
-
-    # Adjust Z-limits if UAV altitude is higher than 35
-    z_max = max(32.5, max(uav_z))
-    ax.set_zlim([0, z_max])
-
-    # Plot ground-truth terrain as a surface at Z=0
-    step = grid.length
-    x_vals = np.arange(x_range[0], x_range[1], step)
-    y_vals = np.arange(y_range[0], y_range[1], step)
-    X, Y = np.meshgrid(x_vals, y_vals, indexing="ij")
-
-    # Example: binary terrain => silver (0), firebrick (1)
-    facecolors = np.where(gt == 0, "silver", "firebrick")
-    ax.plot_surface(
-        X.T,
-        -Y.T,
-        np.zeros_like(X.T),
-        facecolors=facecolors,
-        alpha=0.6,  # slightly more opaque
-        edgecolor="none",  # no wireframe
-        # antialiased=True,
-    )
-
-    # Observation boundary in red
-    ax.plot(o_x, o_y, o_z, color="red", lw=3)
-
-    # Make sure labels/ticks aren’t cut off
-    plt.tight_layout()
-
-    # Save the figure
-    plt.savefig(filename, bbox_inches="tight")
-    plt.close(fig)
-
-
-def plot_terrain_2d(filename, grid, uav_pos, gt, obs):
+def plot_terrain_2d(filename, grid, gt):
     # Larger fonts for a paper
     plt.rcParams.update(
         {
@@ -110,8 +18,6 @@ def plot_terrain_2d(filename, grid, uav_pos, gt, obs):
         }
     )
 
-    # fig = plt.figure(figsize=(11, 14), dpi=300)
-    # fig = plt.figure(dpi=200)
     fig, ax = plt.subplots(figsize=(9, 9), dpi=300)
 
     # Determine x/y ranges
