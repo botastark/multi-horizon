@@ -25,16 +25,12 @@ class planning:
         if mexgen == False:
             ig = self.H(var) - self._expected_entropy(var, x_future)
         else:
-            # sampled_observation = self.sample_future_observation(5, var, x_future.altitude)
             sampled_observation = self.sample_binary_observations(
                 var, x_future.altitude
             )
-            # expected_entropy = self.calculate_entropy(var, mean_future_observation)
             expected_entropy = self.compute_future_entropy(var, sampled_observation)
-            # print(f"{np.sum(self.H(var))} vs {expected_entropy}")
 
             ig = np.sum(self.H(var)) - expected_entropy
-            # - self._expected_entropy(var, x_future, mexgen=True)
 
         return ig
 
@@ -196,6 +192,7 @@ class planning:
         # print(f"Last action: {self.last_action}")
         # print(f"Determined sweep direction: {self.sweep_direction}")
         # print(f"Visited x: {[v.position for v in visited_x]}")
+        self.sweep_direction = "LeftRight"
         if self.sweep_direction == "LeftRight":
             # give propriority to left or right (if one of them is present in sweep_actions, only one can be present at a time)
             if "left" in sweep_actions:

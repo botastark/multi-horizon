@@ -50,10 +50,10 @@ class camera:
             min_range = min(
                 self.x_range[1] - self.x_range[0], self.y_range[1] - self.y_range[0]
             )
-            self.xy_step = round(min_range / 2 / 8, 2)
+            self.xy_step = min_range / 2 / 8
 
         if h_step is None:
-            self.h_step = round(self.xy_step / np.tan(np.deg2rad(self.fov * 0.5)), 2)
+            self.h_step = self.xy_step / np.tan(np.deg2rad(self.fov * 0.5))
         else:
             self.h_step = h_step
         if self.altitude == 0 or self.altitude is None:
@@ -62,8 +62,8 @@ class camera:
         self.a = a
         self.b = b
         self.actions = {"up", "down", "front", "back", "left", "right", "hover"}
-        # print(f"H range: {self.h_range}")
-        # print(f"xy_step {self.xy_step}, h_step {self.h_step}")
+        print(f"H range: {self.h_range}")
+        print(f"xy_step {self.xy_step}, h_step {self.h_step}")
 
     def reset(self):
         self.position = (0.0, 0.0)
@@ -169,26 +169,19 @@ class camera:
     def x_future(self, action, x=None):
         if x is None:
             x = self.get_x()
-        # possible_actions = {"up", "down", "front", "back", "left", "right", "hover"}
-        if action == "up" and round(x.altitude + self.h_step, 1) <= round(
-            self.h_range[1], 1
-        ):
+
+        if action == "up" and (x.altitude + self.h_step) <= self.h_range[1]:
             return (x.position, x.altitude + self.h_step)
-        elif action == "down" and x.altitude - self.h_step >= self.h_range[0]:
+        elif action == "down" and (x.altitude - self.h_step) >= self.h_range[0]:
             return (x.position, x.altitude - self.h_step)
-        # front (+y)
-        elif action == "front" and x.position[1] + self.xy_step <= self.y_range[1]:
+        elif action == "front" and (x.position[1] + self.xy_step) <= self.y_range[1]:
             return (x.position[0], x.position[1] + self.xy_step), x.altitude
-        # back (-y)
-        elif action == "back" and x.position[1] - self.xy_step >= self.y_range[0]:
+        elif action == "back" and (x.position[1] - self.xy_step) >= self.y_range[0]:
             return (x.position[0], x.position[1] - self.xy_step), x.altitude
-        # right (+x)
-        elif action == "right" and x.position[0] + self.xy_step <= self.x_range[1]:
+        elif action == "right" and (x.position[0] + self.xy_step) <= self.x_range[1]:
             return (x.position[0] + self.xy_step, x.position[1]), x.altitude
-        # left (-x)
-        elif action == "left" and x.position[0] - self.xy_step >= self.x_range[0]:
+        elif action == "left" and (x.position[0] - self.xy_step) >= self.x_range[0]:
             return (x.position[0] - self.xy_step, x.position[1]), x.altitude
-        # hover
         else:
             return x.position, x.altitude
 

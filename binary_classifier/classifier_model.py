@@ -14,7 +14,6 @@ class ModifiedClassifier(nn.Module):
         # self.backbone = models.efficientnet_b0(
         #     pretrained=True
         # )  # Use EfficientNet as feature extractor
-        # print(f"model: {self.backbone}")
         self.backbone.classifier = nn.Sequential(
             nn.Linear(self.backbone.classifier[0].in_features, 128),
             nn.ReLU(),

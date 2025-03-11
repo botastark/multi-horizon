@@ -14,23 +14,32 @@ from mapper_LBP import OccupancyMap as OML
 from planner import planning
 from uav_camera import camera
 from tqdm import tqdm
-from viewer import plot_metrics, plot_terrain
+from viewer import plot_metrics, plot_terrain, plot_terrain_2d
 
-desktop = "/home/bota/Desktop/active_sensing/results_orthomap/results_random"
+desktop = "/home/bota/Desktop/active_sensing/"
+# desktop = "/home/bota/Desktop/active_sensing/results_orthomap/results_random"
+# desktop = "/home/bota/Desktop/active_sensing/results_gaussian_corner"
 belief_buffer = None
 
-field_type = "Ortomap"
-# field_type = "Gaussian"
+# field_type = "Ortomap"
+field_type = "Gaussian"
 start = "corner"  # random corner or random border
-action_select_strategy = "ig"
-correlation_types = ["adaptive"]
+action_select_strategy = "sweep"
+correlation_types = ["biased"]
 n_steps = 100
 iters = 1
-es = [0.3]
+es = [None]
+if action_select_strategy == "sweep":
+    n_steps = 1
+    iters = 1
+    es = [None]
+desktop += f"results_{field_type.lower()}_{start}_trial"
 
 if field_type == "Ortomap":
     grf_r = "orto"
     min_alt = 19.5
+    overlap = 0.8
+    optimal_alt = min_alt
 
     class grid_info:
         x = 60
@@ -40,11 +49,12 @@ if field_type == "Ortomap":
         center = True
 
     use_sensor_model = False
-
 else:
     grf_r = 4
     field_type = grf_r
     min_alt = None
+    overlap = None
+    optimal_alt = 21.5
 
     class grid_info:
         x = 50
@@ -54,14 +64,21 @@ else:
         center = True
 
 
-# use_sensor_model = False
+use_sensor_model = False
 
 
 seed = 123
 rng = np.random.default_rng(seed)
 
 
-camera1 = camera(grid_info, 60, rng=rng, camera_altitude=min_alt)
+camera1 = camera(
+    grid_info,
+    60,
+    rng=rng,
+    camera_altitude=min_alt,
+    f_overlap=overlap,
+    s_overlap=overlap,
+)
 map = Field(
     grid_info, field_type, sweep=action_select_strategy, h_range=camera1.get_hrange()
 )
@@ -81,6 +98,7 @@ for correlation_type in tqdm(correlation_types, desc="pairwise", position=0):
                 desktop
                 + f"/txt/{correlation_type}_{action_select_strategy}_e{sampled_sigma_error_margin}_r{grf_r}"
             )
+            print(f"folder:{folder}")
             map.reset()
             ground_truth_map = map.get_ground_truth()
             belief_map = np.full((grid_info.shape[0], grid_info.shape[1], 2), 0.5)
@@ -107,7 +125,7 @@ for correlation_type in tqdm(correlation_types, desc="pairwise", position=0):
                 camera1,
                 action_select_strategy,
                 conf_dict=conf_dict,
-                optimal_alt=min_alt,
+                optimal_alt=optimal_alt,
             )
             if start == "border":
                 start_pos = random.choice(
@@ -131,15 +149,15 @@ for correlation_type in tqdm(correlation_types, desc="pairwise", position=0):
                     ]
                 )
             elif start == "corner":
-                start_pos = random.choice(
-                    [
-                        (-grid_info.x / 2, -grid_info.y / 2),
-                        (-grid_info.x / 2, grid_info.y / 2),
-                        (grid_info.x / 2, -grid_info.y / 2),
-                        (grid_info.x / 2, grid_info.y / 2),
-                    ]
-                )
-                # start_pos = (-grid_info.x / 2, -grid_info.y / 2)
+                # start_pos = random.choice(
+                #    [
+                #        (-grid_info.x / 2, -grid_info.y / 2),
+                #        (-grid_info.x / 2, grid_info.y / 2),
+                #        (grid_info.x / 2, -grid_info.y / 2),
+                #        (grid_info.x / 2, grid_info.y / 2),
+                #    ]
+                # )
+                start_pos = (grid_info.x / 2, -grid_info.y / 2)
 
             uav_pos = uav_position((start_pos, camera1.get_hrange()[0]))
             uav_positions, actions_bota = [uav_pos], []
@@ -246,5 +264,12 @@ for correlation_type in tqdm(correlation_types, desc="pairwise", position=0):
                     submap,
                     obd_field,
                     fp_vertices_ij,
+                )
+                plot_terrain_2d(
+                    f"{desktop}/steps/step_{step}.png",
+                    grid_info,
+                    uav_positions[0:-1],
+                    ground_truth_map,
+                    obd_field,
                 )
                 # exit()

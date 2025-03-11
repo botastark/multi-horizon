@@ -16,21 +16,30 @@ from uav_camera import camera
 from tqdm import tqdm
 from viewer import plot_metrics, plot_terrain
 
-desktop = "/home/bota/Desktop/active_sensing/results_orthomap/results_random"
+desktop = "/home/bota/Desktop/active_sensing/"
+# desktop = "/home/bota/Desktop/active_sensing/results_orthomap/results_random"
+# desktop = "/home/bota/Desktop/active_sensing/results_gaussian_corner"
 belief_buffer = None
 
-field_type = "Ortomap"
-# field_type = "Gaussian"
+# field_type = "Ortomap"
+field_type = "Gaussian"
 start = "corner"  # random corner or random border
-action_select_strategy = "ig"
-correlation_types = ["adaptive"]
+action_select_strategy = "sweep"
+correlation_types = ["biased", "adaptive"]
 n_steps = 100
-iters = 20
-es = [0.3, 0.1, 0.05]
-# es = [None]
+iters = 1
+es = [None, 0.3, 0.1, 0.05]
+if action_select_strategy == "sweep":
+    n_steps = 300
+    iters = 1
+    es = [None]
+desktop += f"results_{field_type.lower()}_{start}"
+
 if field_type == "Ortomap":
     grf_r = "orto"
     min_alt = 19.5
+    overlap = 0.8
+    optimal_alt = min_alt
 
     class grid_info:
         x = 60
@@ -45,6 +54,8 @@ else:
     grf_r = 4
     field_type = grf_r
     min_alt = None
+    overlap = None
+    optimal_alt = 21.5
 
     class grid_info:
         x = 50
@@ -61,7 +72,14 @@ seed = 123
 rng = np.random.default_rng(seed)
 
 
-camera1 = camera(grid_info, 60, rng=rng, camera_altitude=min_alt)
+camera1 = camera(
+    grid_info,
+    60,
+    rng=rng,
+    camera_altitude=min_alt,
+    f_overlap=overlap,
+    s_overlap=overlap,
+)
 map = Field(
     grid_info, field_type, sweep=action_select_strategy, h_range=camera1.get_hrange()
 )
@@ -107,7 +125,7 @@ for correlation_type in tqdm(correlation_types, desc="pairwise", position=0):
                 camera1,
                 action_select_strategy,
                 conf_dict=conf_dict,
-                optimal_alt=min_alt,
+                optimal_alt=optimal_alt,
             )
             if start == "border":
                 start_pos = random.choice(
@@ -148,8 +166,8 @@ for correlation_type in tqdm(correlation_types, desc="pairwise", position=0):
             camera1.set_position(uav_pos.position)
             obs_ms = set()
             entropy, mse, height, coverage = [], [], [], []
-            # if conf_dict is not None:
-            # print(conf_dict)
+            if conf_dict is not None:
+                print(conf_dict)
 
             logger = FastLogger(
                 folder,
