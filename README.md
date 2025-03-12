@@ -81,22 +81,23 @@ python plotter.py
 ```plaintext
 active_sensing/
 ├── config.json           # Configuration file for simulation parameters
-├── plots_/               # Folder for storing generated plots and animations
-├── src/
-│   ├── main.py           # Main entry point for the simulation
+├── data/                 # Folder for datasets (e.g., orthomap.tif)
+├── plots_/               # Stores generated plots and animations
+├── src/                  # Main source code
+│   ├── main.py           # Entry point for running the simulation
 │   ├── uav_camera.py     # UAV and camera model (configuration space and observations)
-│   ├── mapper_LBP.py     # Mapper (Bayesian Update + Loopy Belief Propagation)
-│   ├── planner.py        # Planner (Information Gain based and Sweep)
-│   ├── orthomap.py       # Field (both simulated Gaussian correlated field and orthomosaic wheat field)
+│   ├── mapper_LBP.py     # Bayesian update with Loopy Belief Propagation
+│   ├── planner.py        # Path planning algorithms (Information Gain-based and Sweep)
+│   ├── orthomap.py       # Handles simulated Gaussian fields and real-world orthomaps
 │   └── ...               # Additional modules and utilities
-├── binary_classfier/     
-│   ├── models/           # Contains trained models
-│   ├── predictor.py      # Model prediction functions
-│   ├── train.ipynb       # Training
-│   └── ...               # Other useful functionalities
-├── README.md             # Project documentation (this file)
-├── plotter.py            # Collect experiments and generate final plots for each scenario
-└── requirements.txt      # List of project dependencies
+├── binary_classifier/    # Classifier model for wheat lodging detection
+│   ├── models/           # Trained deep learning models
+│   ├── predictor.py      # Model inference and prediction functions
+│   ├── train.ipynb       # Training notebook for the classifier
+│   └── ...               # Other relevant scripts
+├── README.md             # Project documentation
+├── plotter.py            # Generates final plots and comparisons
+└── requirements.txt      # List of required dependencies
 ```
 
 ## Example
