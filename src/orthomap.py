@@ -555,70 +555,63 @@ class Field:
 
         return observation_matrix
 
-    def _sampler(self, true_matrix, altitude, N, sensor=True):
-        cumulative_observation = np.empty(true_matrix.shape)
-        for i in range(N):
-            if sensor:
-                observation_matrix = self._sensor_model(true_matrix, altitude)
-            else:
-                observation_matrix = self._pred_model(true_matrix, altitude)
-
-            if i == 0:
-                cumulative_observation = observation_matrix.copy()
-                continue
-            cumulative_observation = np.vstack(
-                [cumulative_observation, observation_matrix]
+    def _sampler(self, true_matrix, altitude, N, use_sensor=True):
+        """
+        Generate N observations using either the sensor or prediction model.
+        """
+        observations = [
+            (
+                self._sensor_model(true_matrix, altitude)
+                if use_sensor
+                else self._pred_model(true_matrix, altitude)
             )
-        return cumulative_observation
+            for _ in range(N)
+        ]
+        return np.vstack(observations)
 
-    def _calc_n(self, h, e=np.array([0.5, 0.4, 0.3, 0.2, 0.1, 0.05, 0.03])):
-        p = self.a * (1 - np.exp(-self.b * h))
-        p_ = 1 - p
-        return np.round(1.96 * 1.96 * p * p_ / e / e, decimals=0)
+    def _calc_sample_size(
+        self, altitude, error_levels=np.array([0.5, 0.4, 0.3, 0.2, 0.1, 0.05, 0.03])
+    ):
+        """
+        Calculate required sample sizes for given error thresholds based on sensor noise.
+        """
+        p = self.a * (1 - np.exp(-self.b * altitude))
+        p_comp = 1 - p
+        return np.round((1.96**2) * p * p_comp / (error_levels**2), decimals=0)
 
-    def _get_N(self, altitudes):
+    def _get_sample_sizes(self, altitudes):
         errors = [0.5, 0.4, 0.3, 0.2, 0.1, 0.05, 0.03]
-        n_per_e = {}
-        for h in altitudes:
-            n_values = self._calc_n(h)
-            n_per_e[h] = {e: n for e, n in zip(errors, n_values)}
-        return n_per_e
+        sample_sizes = {}
+        for alt in altitudes:
+            n_vals = self._calc_sample_size(alt)
+            sample_sizes[alt] = {e: n for e, n in zip(errors, n_vals)}
+        return sample_sizes
 
-    def _get_confusion_matrix(self, altitude, N, sensor=True):
-        true_matrix = np.array([0, 1])
-        true_matrix = np.expand_dims(true_matrix, axis=0)
-        observation = self._sampler(true_matrix, altitude, int(N), sensor=sensor)
-        n = int(observation.shape[0] / true_matrix.shape[0])
-        true_matrix_ = np.tile(true_matrix, (n, 1))
-
-        c = confusion_matrix(
-            true_matrix_.ravel(), observation.ravel(), normalize="true"
+    def _get_confusion_matrix(self, altitude, N, use_sensor=True):
+        """
+        Compute the confusion matrix for a binary true matrix using N observations.
+        """
+        true_matrix = np.array([0, 1]).reshape(1, -1)
+        observations = self._sampler(
+            true_matrix, altitude, int(N), use_sensor=use_sensor
+        )
+        n = observations.shape[0] // true_matrix.shape[0]
+        true_repeated = np.tile(true_matrix, (n, 1))
+        conf = confusion_matrix(
+            true_repeated.ravel(), observations.ravel(), normalize="true"
         ).T
-        c = np.clip(np.nan_to_num(np.round(c, 2) + 1e-3), 1e-3, 1)
-
-        s0, s1 = c[1, 0], c[0, 1]
-        return c, (s0, s1)
+        conf = np.clip(np.nan_to_num(np.round(conf, 2) + 1e-3), 1e-3, 1)
+        s0, s1 = conf[1, 0], conf[0, 1]
+        return conf, (s0, s1)
 
     def init_s0_s1(self, e=0.3, sensor=True):
-
+        """
+        Initialize confusion matrix parameters (s0, s1) for each altitude.
+        """
         conf_dict = {}
-        Ns = self._get_N(self.altitudes)
-        for altitude in self.altitudes:
-            conf_dict[altitude] = self._get_confusion_matrix(
-                altitude, Ns[altitude][e], sensor=sensor
+        sample_sizes = self._get_sample_sizes(self.altitudes)
+        for alt in self.altitudes:
+            conf_dict[alt] = self._get_confusion_matrix(
+                alt, sample_sizes[alt][e], use_sensor=sensor
             )[1]
         return conf_dict
-
-
-# class grid_info:
-#     x = 60  # 60
-#     y = 110  # 110 for real field
-#     length = 1  # 1
-#     shape = (int(y / length), int(x / length))
-#     center = True
-
-
-# map = Field(grid_info, "Ortomap", seed=1)
-# free, occ = map.sample_random_tiles()
-# print(f"free {free}")
-# print(f"occ {occ}")
