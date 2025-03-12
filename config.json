@@ -1,10 +1,10 @@
 {
     "_comment": "Possible field types: Gaussian, Ortomap. Possible start positions: corner, border. action_strategy: ig or sweep.",
-    "field_type": "Ortomap",
-    "start_position": "corner",
+    "field_type": "Gaussian",
+    "start_position": "border",
     "action_strategy": "ig",
     "correlation_types": ["equal", "biased", "adaptive"],
-    "n_steps": 10,
+    "n_steps": 100,
     "iters": 1,
     "error_margins": [0.3, 0.1, 0.05],
     "enable_plotting": true,
