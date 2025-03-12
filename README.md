@@ -98,13 +98,30 @@ active_sensing/
 ├── plotter.py            # Generates final plots and comparisons
 └── requirements.txt      # List of required dependencies
 ```
+## Examples  
 
-## Example
-An example map generated during simulation using Gaussian field (r=4), error margin=0.3 and equal weights:
-![Gaussian Animation](plots_/ig_gaussian_equal_e0.3.gif)
+### 1. Gaussian Field Simulation  
+This animation shows a UAV exploring a **Gaussian-correlated field** using **Information Gain (IG)-based planning**. The UAV dynamically adjusts its path to maximize the information collected, prioritizing areas with higher uncertainty.
 
-An example sweep animation generated during simulation using Orthomap field and adaptive weights:
-![Sweep Animation](plots_/sweep_adaptive_orthomap.gif)
+**Settings:**
+- **Field type:** Gaussian (`r=4`)
+- **Error margin:** 0.3
+- **Correlation strategy:** Equal weights  
+
+![Gaussian Animation](plots_/ig_gaussian_equal_e0.3.gif)  
+
+---
+
+### 2. Sweep Strategy on Orthomap  
+In this animation, the UAV follows a **sweep-based** path over a **real orthomap** using **adaptive weighting**. This strategy ensures **uniform field coverage**, making it effective for large-scale mapping tasks.
+
+**Settings:**
+- **Field type:** Orthomap  
+- **Path strategy:** Sweep  
+- **Weighting:** Adaptive  
+
+![Sweep Animation](plots_/sweep_adaptive_orthomap.gif)  
+
 ## License & Usage Restrictions  
 
 This repository contains research work in progress and is **not yet publicly released** for general use. Redistribution, modification, or commercial use is **strictly prohibited** without explicit permission from the authors.  
