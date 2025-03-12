@@ -12,8 +12,16 @@
 
 This framework improves UAV-based field monitoring by enabling **efficient, data-driven decision-making** in precision agriculture.  
 
-## Requirements  
 
+### Installation  
+
+Clone the repository and install the required packages:
+
+```bash
+git clone git@github.com:botastark/active_sensing.git
+cd active_sensing
+pip install -r requirements.txt
+```
 Ensure you have the following dependencies installed:  
 
 - Python **3.7+**  
@@ -27,15 +35,6 @@ Ensure you have the following dependencies installed:
 
 All dependencies are listed in `requirements.txt`.  
 
-### Installation  
-
-Clone the repository and install the required packages:
-
-```bash
-git clone git@github.com:botastark/active_sensing.git
-cd active_sensing
-pip install -r requirements.txt
-```
 
 ## Usage
 
