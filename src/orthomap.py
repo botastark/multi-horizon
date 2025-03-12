@@ -457,10 +457,10 @@ class Field:
             x = np.arange(i_min, i_max, 1)
             y = np.arange(j_min, j_max, 1)
             x, y = np.meshgrid(x, y, indexing="ij")
-            z = np.zeros_like(x, dtype=int)
+            observations = np.zeros_like(x, dtype=int)
             if self.sweep_mode:
-                z = self.ground_truth_map[i_min:i_max, j_min:j_max]
-                return fp_vertices_ij, z
+                observations = self.ground_truth_map[i_min:i_max, j_min:j_max]
+                return fp_vertices_ij, observations
             if self.predictor is not None:
                 # label = np.zeros_like(x, dtype=int)
                 if self.predictions_cache is not None:
