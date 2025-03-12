@@ -22,7 +22,7 @@ git clone git@github.com:botastark/active_sensing.git
 cd active_sensing
 pip install -r requirements.txt
 ```
-Ensure you have the following dependencies installed:  
+<!-- Ensure you have the following dependencies installed:  
 
 - Python **3.7+**  
 - **NumPy** – Numerical computations  
@@ -33,7 +33,7 @@ Ensure you have the following dependencies installed:
 - **Matplotlib & Seaborn** – Visualization  
 - **tqdm** – Progress tracking  
 
-All dependencies are listed in `requirements.txt`.  
+All dependencies are listed in `requirements.txt`.   -->
 
 
 ## Usage
