@@ -101,3 +101,4 @@ src/utilities.py
 src/conversion.py
 src/mapper.py
 data/gpstiles.csv
+model/*
