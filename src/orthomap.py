@@ -439,7 +439,7 @@ class Field:
             success1 = random_values <= 1.0 - sigma1
             z0 = np.where(np.logical_and(success0, submap == 0), 0, 1)
             z1 = np.where(np.logical_and(success1, submap == 1), 1, 0)
-            z = np.where(submap == 0, z0, z1)
+            observations = np.where(submap == 0, z0, z1)
 
         elif self.field_type == "Ortomap":
             x = np.arange(i_min, i_max, 1)
