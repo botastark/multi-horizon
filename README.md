@@ -49,6 +49,7 @@ python src/main.py --config config.json
 
 ## Structure
 
+```plaintext
 active_sensing/
 ├── config.json           # Configuration file for simulation parameters
 ├── plots_/               # Folder for storing generated plots and animations
@@ -67,7 +68,7 @@ active_sensing/
 ├── README.md             # Project documentation (this file)
 ├── plotter.py            # Collect experiments and generate final plots for each scenario
 └── requirements.txt      # List of project dependencies
-
+```
 
 ## Example
 An example map generated during simulation using Gaussian field (r=4), error margin=0.3 and equal weights:
