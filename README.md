@@ -32,7 +32,7 @@ All dependencies are listed in `requirements.txt`.
 Clone the repository and install the required packages:
 
 ```bash
-git clone <repository-url>
+git clone git@github.com:botastark/active_sensing.git
 cd active_sensing
 pip install -r requirements.txt
 ```
@@ -70,7 +70,7 @@ python src/main.py --config config.json
 
 **Generate final plots and visualizations:**
 
-Simulation results, including processed data and visualizations, are stored in the `plots_/` directory.
+Simulation results, including processed data and visualizations, are stored in the `plots/` directory.
 ```bash
 python plotter.py
 ```
