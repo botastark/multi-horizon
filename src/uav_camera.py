@@ -1,10 +1,7 @@
 import math
 import numpy as np
 
-# from helper import id_converter, sample_event_matrix,
 from helper import uav_position
-
-# from terrain_creation import terrain
 
 
 class camera:
@@ -62,8 +59,8 @@ class camera:
         self.a = a
         self.b = b
         self.actions = {"up", "down", "front", "back", "left", "right", "hover"}
-        print(f"H range: {self.h_range}")
-        print(f"xy_step {self.xy_step}, h_step {self.h_step}")
+        # print(f"H range: {self.h_range}")
+        # print(f"xy_step {self.xy_step}, h_step {self.h_step}")
 
     def reset(self):
         self.position = (0.0, 0.0)

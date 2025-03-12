@@ -61,7 +61,9 @@ def plot_terrain_2d(filename, grid, ground_truth):
     plt.close(fig)
 
 
-def plot_terrain(save_path, belief, grid, uav_pos, ground_truth, submap, obs, fp):
+def plot_terrain(
+    save_path, belief, grid, uav_pos, ground_truth, submap, obs, fp, h_range
+):
     """
     Plot a comprehensive figure with four subplots:
     1. 3D terrain with UAV path.
@@ -99,6 +101,7 @@ def plot_terrain(save_path, belief, grid, uav_pos, ground_truth, submap, obs, fp
 
     ax1.set_xlim(x_range)
     ax1.set_ylim(y_range)
+    ax1.set_zlim([0, h_range[1]])
 
     ax1.set_xlabel("X (m)")
     ax1.set_ylabel("Y (m)")
@@ -131,7 +134,7 @@ def plot_terrain(save_path, belief, grid, uav_pos, ground_truth, submap, obs, fp
     x_vals = np.arange(x_range[0], x_range[1], grid.length)
     y_vals = np.arange(y_range[0], y_range[1], grid.length)
     X, Y = np.meshgrid(x_vals, y_vals, indexing="ij")
-    terrain_colors = np.where(ground_truth == 0, "darkgreen", "yellow")
+    terrain_colors = np.where(ground_truth == 0, "yellow", "darkgreen")
 
     ax1.plot_surface(
         X.T,
@@ -152,7 +155,8 @@ def plot_terrain(save_path, belief, grid, uav_pos, ground_truth, submap, obs, fp
     ax2.set_title("last observation z_t")
     ax2.set_xlim(x_range)
     ax2.set_ylim(y_range)
-    cmap = colors.ListedColormap(["darkgreen", "lemonchiffon"])
+    cmap = colors.ListedColormap(["lemonchiffon", "darkgreen"])
+
     bounds = [-0.5, 0.5, 1.5]
     norm = colors.BoundaryNorm(bounds, cmap.N)
 
@@ -173,7 +177,8 @@ def plot_terrain(save_path, belief, grid, uav_pos, ground_truth, submap, obs, fp
 
     belief_map = belief[:, :, 1] if belief.ndim == 3 else belief
     # Create a continuous colormap going from dark green (0) to lemonchiffon (1)
-    colors_list = ["darkgreen", "lemonchiffon"]
+    colors_list = ["lemonchiffon", "darkgreen"]
+
     green_yellow_cmap = colors.LinearSegmentedColormap.from_list(
         "GreenYellow", colors_list
     )

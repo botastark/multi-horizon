@@ -4,6 +4,7 @@ import random
 import sys
 import os
 import math
+from tqdm import tqdm
 import numpy as np
 from sklearn.metrics import confusion_matrix
 from helper import gaussian_random_field
@@ -19,26 +20,26 @@ from osgeo import gdal
 gdal.UseExceptions()  # Enable GDAL exceptions
 
 
-desktop = "/home/bota/Desktop/active_sensing"
-annotation_path = desktop + "/src/annotation.txt"
-dataset_path = "/media/bota/BOTA/wheat/example-run-001_20241014T1739_ortho_dsm.tif"
-tile_ortomappixel_path = desktop + "/data/tomatotiles.txt"
-model_path = (
-    desktop + "/binary_classifier/models/best_model_auc91_lr1_-05_bs128_wd_2.5-04.pth"
-)
-cache_dir = desktop + "/data/predictions_cache/"
+# desktop = "/home/bota/Desktop/active_sensing"
+# annotation_path = desktop + "/src/annotation.txt"
+# dataset_path = "/media/bota/BOTA/wheat/example-run-001_20241014T1739_ortho_dsm.tif"
+# tile_ortomappixel_path = desktop + "/data/tomatotiles.txt"
+# model_path = (
+#     desktop + "/binary_classifier/models/best_model_auc91_lr1_-05_bs128_wd_2.5-04.pth"
+# )
+# cache_dir = desktop + "/data/predictions_cache/"
 
 
 # Global paths and configuration
-DESKTOP_PATH = "/home/bota/Desktop/active_sensing"
-ANNOTATION_PATH = os.path.join(DESKTOP_PATH, "src/annotation.txt")
-DATASET_PATH = "/media/bota/BOTA/wheat/example-run-001_20241014T1739_ortho_dsm.tif"
-TILE_PIXEL_PATH = os.path.join(DESKTOP_PATH, "data/tomatotiles.txt")
-MODEL_PATH = os.path.join(
-    DESKTOP_PATH,
-    "binary_classifier/models/best_model_auc91_lr1_-05_bs128_wd_2.5-04.pth",
-)
-CACHE_DIR = os.path.join(DESKTOP_PATH, "data/predictions_cache/")
+# DESKTOP_PATH = "/home/bota/Desktop/active_sensing"
+# ANNOTATION_PATH = os.path.join(DESKTOP_PATH, "src/annotation.txt")
+# DATASET_PATH = "/media/bota/BOTA/wheat/example-run-001_20241014T1739_ortho_dsm.tif"
+# TILE_PIXEL_PATH = os.path.join(DESKTOP_PATH, "data/tomatotiles.txt")
+# MODEL_PATH = os.path.join(
+#     DESKTOP_PATH,
+#     "binary_classifier/models/best_model_auc91_lr1_-05_bs128_wd_2.5-04.pth",
+# )
+# CACHE_DIR = os.path.join(DESKTOP_PATH, "data/predictions_cache/")
 
 
 class ImageSampler:
@@ -88,47 +89,47 @@ class ImageSampler:
         blurred = image.filter(ImageFilter.GaussianBlur(radius=blur_radius))
         return blurred.resize(target_size, Image.LANCZOS)
 
-    def simulate_higher_altitude(
-        self,
-        image,
-        target_altitude,
-        original_altitude=20,
-        base_blur_radius=2,
-        base_noise_std=20,
-        base_contrast_factor=0.8,
-        base_brightness_factor=1.1,
-    ):
-        """
-        Simulate the effect of capturing an image from a higher altitude.
-        Applies downsampling, blur, noise, and contrast/brightness adjustments.
-        """
-        altitude_ratio = target_altitude / original_altitude
-        width, height = image.size
-        downsample_factor = max(1, int(round(altitude_ratio)))
-        new_size = (width // downsample_factor, height // downsample_factor)
-        downsampled = image.resize(new_size, Image.BILINEAR)
+    # def simulate_higher_altitude(
+    #     self,
+    #     image,
+    #     target_altitude,
+    #     original_altitude=20,
+    #     base_blur_radius=2,
+    #     base_noise_std=20,
+    #     base_contrast_factor=0.8,
+    #     base_brightness_factor=1.1,
+    # ):
+    #     """
+    #     Simulate the effect of capturing an image from a higher altitude.
+    #     Applies downsampling, blur, noise, and contrast/brightness adjustments.
+    #     """
+    #     altitude_ratio = target_altitude / original_altitude
+    #     width, height = image.size
+    #     downsample_factor = max(1, int(round(altitude_ratio)))
+    #     new_size = (width // downsample_factor, height // downsample_factor)
+    #     downsampled = image.resize(new_size, Image.BILINEAR)
 
-        # Apply altitude-scaled Gaussian blur
-        blur_radius = base_blur_radius * altitude_ratio
-        blurred = downsampled.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+    #     # Apply altitude-scaled Gaussian blur
+    #     blur_radius = base_blur_radius * altitude_ratio
+    #     blurred = downsampled.filter(ImageFilter.GaussianBlur(radius=blur_radius))
 
-        # Add noise scaled with altitude ratio
-        noise_std = base_noise_std * altitude_ratio
-        noisy_arr = np.array(blurred).astype(np.float32)
-        noise = np.random.normal(0, noise_std, noisy_arr.shape).astype(np.float32)
-        noisy_arr = np.clip(noisy_arr + noise, 0, 255).astype(np.uint8)
-        noisy_image = Image.fromarray(noisy_arr)
+    #     # Add noise scaled with altitude ratio
+    #     noise_std = base_noise_std * altitude_ratio
+    #     noisy_arr = np.array(blurred).astype(np.float32)
+    #     noise = np.random.normal(0, noise_std, noisy_arr.shape).astype(np.float32)
+    #     noisy_arr = np.clip(noisy_arr + noise, 0, 255).astype(np.uint8)
+    #     noisy_image = Image.fromarray(noisy_arr)
 
-        # Adjust contrast and brightness
-        contrast_factor = base_contrast_factor / altitude_ratio
-        brightness_factor = base_brightness_factor * altitude_ratio
-        adjusted = Image.eval(
-            noisy_image,
-            lambda x: np.clip(
-                contrast_factor * (x - 128) + 128 * brightness_factor, 0, 255
-            ),
-        )
-        return adjusted.resize((width, height), Image.BILINEAR)
+    #     # Adjust contrast and brightness
+    #     contrast_factor = base_contrast_factor / altitude_ratio
+    #     brightness_factor = base_brightness_factor * altitude_ratio
+    #     adjusted = Image.eval(
+    #         noisy_image,
+    #         lambda x: np.clip(
+    #             contrast_factor * (x - 128) + 128 * brightness_factor, 0, 255
+    #         ),
+    #     )
+    #     return adjusted.resize((width, height), Image.BILINEAR)
 
     def get_image_at_altitude(self, image, altitude):
         """
@@ -151,10 +152,12 @@ class Field:
         self,
         grid_info,
         field_type,
-        cache_dir=CACHE_DIR,
+        cache_dir="",
         seed=123,
-        model_path=MODEL_PATH,
-        ortomap_path=DATASET_PATH,
+        model_path="",
+        ortomap_path="",
+        annotation_path="",
+        tile_pixel_path="",
         sweep="ig",
         a=1,
         b=0.015,
@@ -201,8 +204,10 @@ class Field:
 
             self.model_path = model_path
             self.ortomap_path = ortomap_path
+            self.annotation_path = annotation_path
             if not self.sweep_mode:
                 self.cache_dir = cache_dir
+                self.tile_pixel_path = tile_pixel_path
                 os.makedirs(self.cache_dir, exist_ok=True)
                 self._init_ortomap()
 
@@ -211,7 +216,7 @@ class Field:
 
             else:
                 self.ground_truth_map = self._read_annotations_to_matrix(
-                    ANNOTATION_PATH
+                    self.annotation_path
                 )
                 self.tiles = [
                     (row, col)
@@ -223,8 +228,10 @@ class Field:
         return os.path.join(self.cache_dir, "predictions.pkl")
 
     def _load_cache(self):
+
         filepath = self._cache_filepath()
         if os.path.exists(filepath):
+            print("loading cache for predictions")
             with open(filepath, "rb") as f:
                 return pickle.load(f)
         self.predictions_cache = {}
@@ -235,15 +242,21 @@ class Field:
     def _save_cache(self):
         with open(self._cache_filepath(), "wb") as f:
             pickle.dump(self.predictions_cache, f)
+        print("saved cache for predictions")
 
     def _initialize_predictions(self):
         """
         Generate classifier predictions for each altitude and cache the results.
         """
-        for alt in self.altitudes:
+        for alt in tqdm(self.altitudes, desc="Processing altitudes"):
             pred_map = np.zeros_like(self.ground_truth_map, dtype=int)
-            for idx, (row, col) in enumerate(self.tiles):
-                tile_img = self.get_tile_img((row, col))
+            # Iterate over each tile with a nested progress bar
+            for idx, (row, col) in enumerate(
+                tqdm(
+                    self.tiles, desc=f"Processing tiles for altitude {alt}", leave=False
+                )
+            ):
+                tile_img = self._get_tile_img((row, col))
                 tile_img = self.img_sampler.get_image_at_altitude(tile_img, alt)
                 pred_map.flat[idx] = int(self.predictor.predict(tile_img))
             self.predictions_cache[alt] = pred_map
@@ -277,9 +290,8 @@ class Field:
         b3 = band3.ReadAsArray()
         self.img = np.dstack((b1, b2, b3))
 
-        self.tile_pixel_loc = self._parse_tile_file(TILE_PIXEL_PATH)
-        self.ground_truth_map = self._read_annotations_to_matrix(ANNOTATION_PATH)
-        # self.tiles = [(row, col) for row in range(3, 113) for col in range(13, 73)]
+        self.tile_pixel_loc = self._parse_tile_file(self.tile_pixel_path)
+        self.ground_truth_map = self._read_annotations_to_matrix(self.annotation_path)
         self.tiles = [(row, col) for row in range(0, 110) for col in range(0, 60)]
 
     def _parse_tile_file(self, file_path):
@@ -455,15 +467,16 @@ class Field:
                     approx_alt = round(uav_pos.altitude, 2)
                     if not approx_alt in self.predictions_cache.keys():
                         print(
-                            f"UAV altitude: {uav_pos.altitude} (approx {approx_alt}) not in prediction cache."
+                            f"\nUAV altitude: {uav_pos.altitude} (approx {approx_alt}) not in prediction cache."
                         )
                         print(
-                            f"Available altitudes: {list(self.predictions_cache.keys())}"
+                            f"\nAvailable altitudes: {list(self.predictions_cache.keys())}"
                         )
                         closest_alt = min(
                             self.predictions_cache.keys(),
                             key=lambda k: abs(k - approx_alt),
                         )
+                        print(f"\nUsing closest altitude from cache: {closest_alt}")
                         pred_at_alt = self.predictions_cache[closest_alt]
                     else:
                         pred_at_alt = self.predictions_cache[approx_alt]
@@ -477,7 +490,7 @@ class Field:
 
                     for ind, (r, c) in enumerate(zip(x.flatten(), y.flatten())):
                         tile_pil_img = self._get_tile_img((r, c))
-                        tile_pil_img = self.img_sampler.img_at_alt(
+                        tile_pil_img = self.img_sampler.get_image_at_altitude(
                             tile_pil_img, uav_pos.altitude
                         )
                         observations.flat[ind] = int(
