@@ -56,7 +56,7 @@ active_sensing/
 │   ├── main.py           # Main entry point for the simulation
 │   ├── uav_camera.py     # UAV and camera model (configuration space and observations)
 │   ├── mapper_LBP.py     # Mapper (Bayesian Update + Loopy Belief Propagation)
-│   ├── planner.py        # Planner (Informtion Gain based and Sweep)
+│   ├── planner.py        # Planner (Information Gain based and Sweep)
 │   ├── orthomap.py       # Field (both simulated Gaussian correlated field and orthomosaic wheat field)
 │   └── ...               # Additional modules and utilities
 ├── binary_classfier/     # Training and usage of classifier model
@@ -67,6 +67,7 @@ active_sensing/
 ├── README.md             # Project documentation (this file)
 ├── plotter.py            # Collect experiments and generate final plots for each scenario
 └── requirements.txt      # List of project dependencies
+
 
 ## Example
 An example map generated during simulation using Gaussian field (r=4), error margin=0.3 and equal weights:
