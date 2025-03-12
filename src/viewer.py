@@ -7,8 +7,15 @@ from matplotlib import cm
 from matplotlib.colors import Normalize
 
 
-def plot_terrain_2d(filename, grid, gt):
-    # Larger fonts for a paper
+def plot_terrain_2d(filename, grid, ground_truth):
+    """
+    Plot a 2D visualization of the terrain (ground truth) and save to file.
+
+    Args:
+        save_path (str): File path to save the generated figure.
+        grid (object): Grid configuration with attributes 'center', 'x', 'y', and 'length'.
+        ground_truth (np.ndarray): 2D binary map representing the ground truth.
+    """
     plt.rcParams.update(
         {
             "font.size": 22,
@@ -30,55 +37,58 @@ def plot_terrain_2d(filename, grid, gt):
 
     ax.set_xlim(x_range)
     ax.set_ylim(y_range)
-
-    # Axis labels, no title
     ax.set_xlabel("X (m)", labelpad=4)
     ax.set_ylabel("Y (m)", labelpad=4)
 
-    # Plot ground-truth terrain as a surface at Z=0
-    step = grid.length
-    x_vals = np.arange(x_range[0], x_range[1], step)
-    y_vals = np.arange(y_range[0], y_range[1], step)
-    X, Y = np.meshgrid(x_vals, y_vals, indexing="ij")
+    # Create a discrete colormap for ground truth
     cmap = colors.ListedColormap(["lemonchiffon", "darkgreen"])
-
     ax.imshow(
-        gt.T,
+        ground_truth.T,
         cmap=cmap,
         origin="lower",
         extent=[x_range[0], x_range[1], y_range[0], y_range[1]],
     )
-    ax.set_xticks(np.linspace(x_range[0], x_range[1], 5))
-    ax.set_yticks(np.linspace(y_range[0], y_range[1], 5))
-    ax.set_xticklabels(
-        [f"{tick:.1f}" for tick in np.linspace(x_range[0], x_range[1], 5)]
-    )
-    ax.set_yticklabels(
-        [f"{tick:.1f}" for tick in np.linspace(y_range[0], y_range[1], 5)]
-    )
+    # Set custom tick labels
+    ticks_x = np.linspace(x_range[0], x_range[1], 5)
+    ticks_y = np.linspace(y_range[0], y_range[1], 5)
+    ax.set_xticks(ticks_x)
+    ax.set_yticks(ticks_y)
+    ax.set_xticklabels([f"{tick:.1f}" for tick in ticks_x])
+    ax.set_yticklabels([f"{tick:.1f}" for tick in ticks_y])
 
-    # Make sure labels/ticks aren’t cut off
     plt.tight_layout()
-
-    # Save the figure
     plt.savefig(filename, bbox_inches="tight")
     plt.close(fig)
 
 
-def plot_terrain(filename, belief, grid, uav_pos, gt, submap, obs, fp):
-    # Plot both the 3D and 2D maps in subplots
+def plot_terrain(save_path, belief, grid, uav_pos, ground_truth, submap, obs, fp):
+    """
+    Plot a comprehensive figure with four subplots:
+    1. 3D terrain with UAV path.
+    2. 2D last observation overlay.
+    3. Belief map.
+    4. Ground truth in grid (i,j) coordinates.
+
+    Args:
+        save_path (str): Path to save the figure.
+        belief (np.ndarray): Belief map (either 2D or 3D with probability channel at index 1).
+        grid (object): Grid configuration with attributes 'center', 'x', 'y', and 'length'.
+        uav_positions (list): List of UAV state objects with attributes 'position' and 'altitude'.
+        ground_truth (np.ndarray): Ground truth binary map.
+        submap (np.ndarray): Latest observation submap.
+        obs (list): [[x_min, x_max], [y_min, y_max]] bounds of the observation.
+        fp (dict): Dictionary with footprint vertices in grid coordinates (keys: 'ul', 'bl', 'br', 'ur').
+    """
+    # Create figure with 4 subplots
     fig, axes = plt.subplots(nrows=1, ncols=4, figsize=(15, 6))
     for ax in axes:
         ax.set_axis_off()
-    [
-        [ox_min, ox_max],
-        [oy_min, oy_max],
-    ] = obs
-
+    # Unpack observation bounds and create polygon coordinates
+    [ox_min, ox_max], [oy_min, oy_max] = obs
     o_x = [ox_min, ox_max, ox_max, ox_min, ox_min]
     o_y = [oy_min, oy_min, oy_max, oy_max, oy_min]
 
-    # ---- Plot 1: uav position and ground truth 3D ----
+    # ---- Subplot 1: 3D Terrain with UAV Path ----
     ax1 = fig.add_subplot(141, projection="3d")
     if grid.center:
         x_range = [-grid.x / 2, grid.x / 2]
@@ -95,133 +105,121 @@ def plot_terrain(filename, belief, grid, uav_pos, gt, submap, obs, fp):
     ax1.set_zlabel("Altitude (m)")
     ax1.set_title("Truth Terrain and UAV position")
     ax1.xaxis.grid(visible=True)
-    # uav
-    colors_list = np.linspace(0, 1, len(uav_pos))
 
-    # pyplot
-    cmap = plt.get_cmap("viridis")
-    norm = Normalize(vmin=0, vmax=1)
+    # Prepare UAV path data and plot with a color gradient
 
     uav_x, uav_y, uav_z = zip(
         *[(uav.position[0], uav.position[1], uav.altitude) for uav in uav_pos]
     )
-    # ax1.plot(uav_x, uav_y, uav_z, marker="o", color="r", linestyle="-")
-    # Plot the UAV path with color gradient
+
+    cmap_uav = plt.get_cmap("cool")
+    norm = Normalize(vmin=0, vmax=1)
+    colors_list = np.linspace(0, 1, len(uav_pos))
+
     for i in range(len(uav_x) - 1):
         ax1.plot(
             uav_x[i : i + 2],
             uav_y[i : i + 2],
             uav_z[i : i + 2],
-            color=cmap(norm(colors_list[i])),
+            color=cmap_uav(norm(colors_list[i])),
             linewidth=2,
         )
-    z_max = 35
-    if max(uav_z) > 35:
-        z_max = max(uav_z)
+    z_max = max(35, max(uav_z))
     ax1.set_zlim([0, z_max])
 
-    # Truth terrain map
-    x = np.arange(x_range[0], x_range[1], grid.length)
-    y = np.arange(y_range[0], y_range[1], grid.length)
-    x, y = np.meshgrid(x, y, indexing="ij")
+    # Plot the ground truth terrain as a flat surface at z=0
+    x_vals = np.arange(x_range[0], x_range[1], grid.length)
+    y_vals = np.arange(y_range[0], y_range[1], grid.length)
+    X, Y = np.meshgrid(x_vals, y_vals, indexing="ij")
+    terrain_colors = np.where(ground_truth == 0, "darkgreen", "yellow")
+
     ax1.plot_surface(
-        x.T,
-        -y.T,
-        np.zeros_like(x.T),
-        facecolors=np.where(gt == 0, "green", "yellow"),
-        alpha=0.6,
+        X.T,
+        -Y.T,
+        np.zeros_like(X.T),
+        facecolors=terrain_colors,
+        alpha=0.3,
         edgecolor="none",
     )
+    # Plot observation polygon slightly above terrain
     o_z = np.zeros_like(o_x) + 0.01  # Slightly above z=0
-
-    # Plot the observation lines in 3D
     ax1.plot(o_x, o_y, o_z, color="red", lw=1)
 
-    # ---- Plot 2: 2D last observation z_t ----
+    # ---- Subplot 2: 2D Last Observation ----
     ax2 = fig.add_subplot(142)
     ax2.set_xlabel("X-axis")
     ax2.set_ylabel("Y-axis")
     ax2.set_title("last observation z_t")
-    # ax2.set_aspect("equal")
     ax2.set_xlim(x_range)
     ax2.set_ylim(y_range)
-
-    cmap = colors.ListedColormap(["green", "yellow"])
+    cmap = colors.ListedColormap(["darkgreen", "lemonchiffon"])
     bounds = [-0.5, 0.5, 1.5]
     norm = colors.BoundaryNorm(bounds, cmap.N)
 
-    im0 = ax2.imshow(
-        gt,
-        cmap=cmap,
-        norm=norm,
-        extent=[x_range[0], x_range[1], y_range[0], y_range[1]],
-        origin="upper",
-    )
-    im1 = ax2.imshow(
+    ax2.imshow(
         submap,
         cmap=cmap,
         norm=norm,
         extent=[ox_min, ox_max, oy_min, oy_max],
         origin="upper",
     )
-    ax2.plot(o_x, o_y, o_z, color="red", lw=3)
+    ax2.plot(o_x, o_y, color="red", lw=0.9)
 
-    # ---- Plot 3: Belief sampled map M----
+    # ---- Subplot 3: Belief Map ----
     ax3 = fig.add_subplot(143)
     ax3.set_xlabel("j-axis")
     ax3.set_ylabel("i-axis")
     ax3.set_title("Belief sampled map M")
 
-    if belief.ndim == 3:
-        map = belief[:, :, 1]
-    else:
-        map = belief
-
-    im2 = ax3.imshow(
-        map,
-        cmap="Blues",
-        origin="upper",
-        vmin=0,
-        vmax=1,
+    belief_map = belief[:, :, 1] if belief.ndim == 3 else belief
+    # Create a continuous colormap going from dark green (0) to lemonchiffon (1)
+    colors_list = ["darkgreen", "lemonchiffon"]
+    green_yellow_cmap = colors.LinearSegmentedColormap.from_list(
+        "GreenYellow", colors_list
     )
 
+    ax3.imshow(belief_map, cmap=green_yellow_cmap, origin="upper", vmin=0, vmax=1)
+
+    # ---- Subplot 4: Ground Truth in Grid Indices ----
     ax4 = fig.add_subplot(144)
     ax4.set_xlabel("j-axis")
     ax4.set_ylabel("i-axis")
-    ax4.set_title("GT in ij")
+    ax4.set_title("Ground Truth in ij")
 
-    cmap = colors.ListedColormap(["green", "yellow"])
-    bounds = [-0.5, 0.5, 1.5]
-    norm = colors.BoundaryNorm(bounds, cmap.N)
-
-    im4 = ax4.imshow(
-        gt,
+    ax4.imshow(
+        ground_truth,
         cmap=cmap,
         norm=norm,
         origin="upper",
     )
+    ax4.set_xlim(0, ground_truth.shape[1])
+    ax4.set_ylim(ground_truth.shape[0], 0)
     I, J = 0, 1
     o_i = [fp["ul"][I], fp["bl"][I], fp["br"][I], fp["ur"][I], fp["ul"][I]]
     o_j = [fp["ul"][J], fp["bl"][J], fp["br"][J], fp["ur"][J], fp["ul"][J]]
-    ax4.plot(o_j, o_i, np.zeros_like(o_j), color="red", lw=2)
-    plt.tight_layout()
+    ax4.plot(o_j, o_i, color="red", lw=0.9)
 
-    # Show the plots
-    plt.savefig(filename)
+    plt.tight_layout()
+    plt.savefig(save_path)
     plt.close(fig)
 
 
-def plot_metrics(dir, entropy_list, mse_list, coverage_list, height_list):
+def plot_metrics(save_path, entropy_list, mse_list, coverage_list, height_list):
+    """
+    Plot metrics (entropy, MSE, coverage, height) over time and save the resulting figure.
 
-    assert len(entropy_list) == len(mse_list)
-    assert len(coverage_list) == len(mse_list)
-    assert len(coverage_list) == len(height_list)
+    Args:
+        save_dir (str): Directory or filename where the plot will be saved.
+        entropy_list (list): List of entropy values.
+        mse_list (list): List of mean squared error values.
+        coverage_list (list): List of coverage values.
+        height_list (list): List of UAV height values.
+    """
+    # Ensure all metric lists have the same length
+    assert len(entropy_list) == len(mse_list) == len(coverage_list) == len(height_list)
 
     steps = range(len(entropy_list))
-
-    # fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(8, 8))  # 3 rows, 1 column
-    # Create a 2x2 grid of subplots
-    fig, axes = plt.subplots(2, 2, figsize=(10, 8))  # 2 rows, 2 columns
+    fig, axes = plt.subplots(2, 2, figsize=(10, 8))
     (ax1, ax2), (ax3, ax4) = axes
 
     # Plot entropy in the first subplot
@@ -252,13 +250,9 @@ def plot_metrics(dir, entropy_list, mse_list, coverage_list, height_list):
     ax4.set_title("Height over Steps")
     ax4.grid(True)
 
-    # Adjust layout to avoid overlap
     plt.tight_layout()
-    # Show the plot
-    if dir[-4:] == ".png":
-        plt.savefig(dir)
+    if save_path.endswith(".png"):
+        plt.savefig(save_path)
     else:
-        plt.savefig(dir + "/final.png")
+        plt.savefig(f"{save_path}/final.png")
     plt.close(fig)
-
-    # plt.show()
