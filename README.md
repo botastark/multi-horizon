@@ -46,6 +46,7 @@ pip install -r requirements.txt
 ## Usage
 
 python src/main.py --config config.json
+
 ## Structure
 
 active_sensing/
@@ -62,7 +63,7 @@ active_sensing/
 │   ├── models/           # Contains trained models
 │   ├── predictor.py      # Model prediction functions
 │   ├── train.ipynb       # Training
-│   └── ...               
+│   └── ...               # Other useful functionalities
 ├── README.md             # Project documentation (this file)
 ├── plotter.py            # Collect experiments and generate final plots for each scenario
 └── requirements.txt      # List of project dependencies
