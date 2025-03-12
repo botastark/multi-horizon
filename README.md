@@ -106,3 +106,8 @@ An example map generated during simulation using Gaussian field (r=4), error mar
 
 An example sweep animation generated during simulation using Orthomap field and adaptive weights:
 ![Sweep Animation](plots_/sweep_adaptive_orthomap.gif)
+## License & Usage Restrictions  
+
+This repository contains research work in progress and is **not yet publicly released** for general use. Redistribution, modification, or commercial use is **strictly prohibited** without explicit permission from the authors.  
+
+If you are interested in collaborating or using this work for research purposes, please **contact the project authors** before proceeding.  
