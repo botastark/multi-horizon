@@ -1,18 +1,21 @@
-# dataset
 from PIL import Image
 from osgeo import gdal
 import numpy as np
-
-
 import torch
-import torch.nn.functional
 from torch.utils.data import Dataset
-import random
 from torchvision import transforms
 
 
 class WheatOthomapDataset(Dataset):
     def __init__(self, ortomap_path, annotation_path, tile_ortomappixel_path):
+        """
+        Initialize the WheatOthomapDataset.
+
+        Parameters:
+            ortomap_path (str): File path to the ortomap image.
+            annotation_path (str): File path to the annotation file.
+            tile_ortomappixel_path (str): File path to the tile ortomap pixel information file.
+        """
         dataset = gdal.Open(ortomap_path)
         band1 = dataset.GetRasterBand(1)  # Red channel
         band2 = dataset.GetRasterBand(2)  # Green channel
@@ -22,10 +25,13 @@ class WheatOthomapDataset(Dataset):
         b2 = band2.ReadAsArray()
         b3 = band3.ReadAsArray()
         self.img = np.dstack((b1, b2, b3))
+        # Parse the tile pixel locations from the provided file.
         self.tile_pixel_loc = self._parse_tile_file(tile_ortomappixel_path)
+        # Load the annotations and adjust labels.
         self.labels = self._read_annotations_to_matrix(annotation_path)
+        # Define a list of tile positions (row, col) based on known ranges.
         self.tiles = [(row, col) for row in range(3, 113) for col in range(13, 73)]
-
+        # Define the transformation pipeline for image preprocessing.
         self.transform = transforms.Compose(
             [
                 transforms.Resize((180, 180)),
@@ -73,6 +79,19 @@ class WheatOthomapDataset(Dataset):
         return matrix
 
     def _read_annotations_to_matrix(self, file_path):
+        """
+        Read annotations from a text file into a matrix.
+
+        The function adjusts annotation values:
+            - Changes values 10 and 2 to 1.
+        Then verifies that only valid labels (0 or 1) remain.
+
+        Returns:
+            np.ndarray: Matrix of labels.
+
+        Raises:
+            ValueError: If invalid label values are found.
+        """
         try:
             matrix = np.loadtxt(file_path, dtype=int)  # Adjust dtype if necessary
             matrix[matrix == 10] = 1  # Adjust the value to match the label
@@ -93,6 +112,15 @@ class WheatOthomapDataset(Dataset):
         return self.tiles.index(tile)
 
     def _get_image_range(self, tile):
+        """
+        Given a tile (row, col), return the x and y range slices based on tile_pixel_loc.
+
+        Parameters:
+            tile (tuple): (row, col) coordinates.
+
+        Returns:
+            tuple: (x_range, y_range) as slice objects.
+        """
         if isinstance(tile, tuple):
             r, c = tile
         else:
@@ -103,6 +131,7 @@ class WheatOthomapDataset(Dataset):
         return x_range, y_range
 
     def _get_tile_img(self, tile):
+
         x_range, y_range = self._get_image_range(tile)
         cropped_img = self.img[x_range, y_range, :]
         return Image.fromarray(cropped_img)
