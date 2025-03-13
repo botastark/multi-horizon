@@ -1,10 +1,25 @@
-cv-bridge==3.2.1
-fonttools==4.56.0
-jsonpatch @ file:///croot/jsonpatch_1714483231291/work
-jsonpointer==2.1
+# Minimal requirements for the active_sensing project
+# Optionally, you can verify versions against our system:
+# numpy==1.26.4
+# pandas==2.2.3
+# torch==2.5.1
+# torchvision==0.20.1
+# scikit-learn==1.6.0
+# Pillow==10.4.0
+# opencv-python==4.10.0.84
+# GDAL==3.10.0
+# tqdm==4.67.1
+# matplotlib==3.9.2
+# seaborn==0.13.2
 
-matplotlib==3.10.1
-numpy==2.2.3
-pandas==2.2.3
-pillow==11.1.0
-tqdm @ file:///croot/tqdm_1738943501192/work
+numpy
+pandas
+torch
+torchvision
+scikit-learn
+Pillow
+opencv-python
+# GDAL
+tqdm
+matplotlib
+seaborn
