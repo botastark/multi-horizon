@@ -22,18 +22,6 @@ git clone git@github.com:botastark/active_sensing.git
 cd active_sensing
 pip install -r requirements.txt
 ```
-<!-- Ensure you have the following dependencies installed:  
-
-- Python **3.7+**  
-- **NumPy** – Numerical computations  
-- **PyTorch & Torchvision** – Deep learning framework  
-- **Pillow** – Image processing  
-- **OpenCV** – Computer vision processing  
-- **GDAL** – Geospatial data processing  
-- **Matplotlib & Seaborn** – Visualization  
-- **tqdm** – Progress tracking  
-
-All dependencies are listed in `requirements.txt`.   -->
 
 
 ## Usage
@@ -108,7 +96,7 @@ This animation shows a UAV exploring a **Gaussian-correlated field** using **Inf
 - **Error margin:** 0.3
 - **Correlation strategy:** Equal weights  
 
-![Gaussian Animation](plots_/ig_gaussian_equal_e0.3.gif)  
+![Gaussian Animation](plots/ig_gaussian_equal_e0.3.gif)  
 
 ---
 
@@ -120,7 +108,7 @@ In this animation, the UAV follows a **sweep-based** path over a **real orthomap
 - **Path strategy:** Sweep  
 - **Weighting:** Adaptive  
 
-![Sweep Animation](plots_/sweep_adaptive_orthomap.gif)  
+![Sweep Animation](plots/sweep_adaptive_orthomap.gif)  
 
 ## License & Usage Restrictions  
 

@@ -14,7 +14,7 @@ from helper import (
 from orthomap import Field
 from mapper_LBP import OccupancyMap as OM
 from planner import planning
-from uav_camera import camera
+from uav_camera import Camera
 from viewer import plot_metrics, plot_terrain, plot_terrain_2d
 
 
@@ -148,7 +148,7 @@ def main():
     seed = 123
     rng = np.random.default_rng(seed)
 
-    camera1 = camera(
+    camera1 = Camera(
         grid_info,
         60,
         rng=rng,
@@ -237,15 +237,15 @@ def main():
                         ]
                     )
                 elif start_position == "corner":
-                    # start_pos = random.choice(
-                    #    [
-                    #        (-grid_info.x / 2, -grid_info.y / 2),
-                    #        (-grid_info.x / 2, grid_info.y / 2),
-                    #        (grid_info.x / 2, -grid_info.y / 2),
-                    #        (grid_info.x / 2, grid_info.y / 2),
-                    #    ]
-                    # )
-                    start_pos = (grid_info.x / 2, -grid_info.y / 2)
+                    start_pos = random.choice(
+                        [
+                            (-grid_info.x / 2, -grid_info.y / 2),
+                            (-grid_info.x / 2, grid_info.y / 2),
+                            (grid_info.x / 2, -grid_info.y / 2),
+                            (grid_info.x / 2, grid_info.y / 2),
+                        ]
+                    )
+                    # start_pos = (grid_info.x / 2, -grid_info.y / 2)
                 # Initialize UAV position and list for tracking path and actions
                 uav_pos = uav_position((start_pos, camera1.get_hrange()[0]))
                 uav_positions, actions = [uav_pos], []
