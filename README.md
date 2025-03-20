@@ -2,7 +2,7 @@
 
 ## Overview  
 
-**IGBIPP Towards Field Deployment** is a Python framework for **multi-UAV active sensing** in **precision agriculture**, specifically for **wheat lodging detection**. It extends prior **informative path planning (IPP)** research by integrating a **deep learning classifier** and a **realistic sensor model**, moving towards real-world deployment.  
+**IGBIPP Towards Field Deployment** is a Python framework for **UAV active sensing** in **precision agriculture**, specifically for **wheat lodging detection**. It extends prior **informative path planning (IPP)** research by integrating a **deep learning classifier** and a **realistic sensor model**, moving towards real-world deployment.  
 
 ### Key Features  
 - **Adaptive UAV Path Planning:** Optimizes flight paths using **Expected Information Gain (IG)**, adjusting altitude dynamically.  
