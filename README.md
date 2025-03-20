@@ -98,6 +98,7 @@ This animation shows a UAV exploring a **Gaussian-correlated field** using **Inf
 - **Error margin:** 0.3
 - **Correlation strategy:** Equal weights  
 
+![Gaussian Animation](plots/ig_gaussian_equal_e0.3.gif)  
 
 ---
 
