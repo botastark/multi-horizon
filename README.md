@@ -45,6 +45,7 @@ The simulation is controlled by a configuration file (`config.json`). Below are 
 ### Preparing the Orthomap (for Real-World Data)
 If using `"field_type": "Ortomap"`, the required orthomap dataset (1.4GB) must be placed in the `data/` directory. The download link will be provided later.
 
+
 ---
 ## Running the Simulation  
 
@@ -96,7 +97,7 @@ This animation shows a UAV exploring a **Gaussian-correlated field** using **Inf
 - **Error margin:** 0.3
 - **Correlation strategy:** Equal weights  
 
-![Gaussian Animation](plots/ig_gaussian_equal_e0.3.gif)  
+![Orthomap](plots/ortomap_highres.png)  
 
 ---
 
