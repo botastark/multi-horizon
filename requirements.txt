@@ -1,5 +1,4 @@
-# Minimal requirements for the active_sensing project
-# Optionally, you can verify versions against our system:
+# Minimal requirements for the active_sensing project (developed on the following versions):
 # numpy==1.26.4
 # pandas==2.2.3
 # torch==2.5.1
