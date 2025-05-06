@@ -302,8 +302,8 @@ def main():
                     )
                     # Update occupancy map with new observation and propagate messages
                     occupancy_map.update_belief_OG(fp_vertices_ij, submap, uav_pos)
-                    occupancy_map.propagate_messages_(
-                        fp_vertices_ij, submap, uav_pos, max_iterations=1
+                    occupancy_map.propagate_messages(
+                        fp_vertices_ij, submap, max_iterations=1
                     )
 
                     # Update the belief map from the occupancy map's belief
