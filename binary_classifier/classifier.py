@@ -40,6 +40,7 @@ class Predicter(nn.Module):
                 torch.load(
                     model_weights_path,
                     weights_only=True,
+                    map_location=torch.device("cpu"),
                 )
             )
         # Set device to CPU (update if GPU support is desired)
