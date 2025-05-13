@@ -18,7 +18,7 @@ This framework improves UAV-based field monitoring by enabling **efficient, data
 Clone the repository and install the required packages:
 
 ```bash
-git clone git@github.com:botastark/active_sensing.git
+git clone git@github.com:AGR-o-RAMA/active_sensing.git
 cd active_sensing
 pip install -r requirements.txt
 ```
