@@ -159,6 +159,19 @@ class Camera:
         """
         return uav_position((self.position, self.altitude))
 
+    def ij_to_xy(self, i, j):
+        """
+        Convert grid indices (i, j) to real-world (x, y) coordinates.
+        """
+        if self.grid.center:
+            center_i, center_j = (dim // 2 for dim in self.grid.shape)
+            x = (j - center_j) * self.grid.length
+            y = -(i - center_i) * self.grid.length
+        else:
+            x = j * self.grid.length
+            y = (self.grid.shape[0] - i) * self.grid.length
+        return (x, y)
+
     def convert_xy_ij(self, x, y, centered):
         """
         Convert real-world (x, y) coordinates to grid indices (i, j).

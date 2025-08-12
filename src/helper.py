@@ -1,6 +1,85 @@
 # pairwise_factor_weights: equal, biased, adaptive
 import numpy as np
 from sklearn.metrics import confusion_matrix
+import os
+from datetime import datetime
+
+
+def H(var):
+    """ "Compute binary entropy of a random variable (or belief map)."""
+
+    assert not np.any(np.isnan(var)), f"NaN detected in var: {var}"
+    var = np.clip(var, 0.0, 1.0)  # Clamps values to the range [0, 1]
+
+    v1 = var
+    v2 = 1.0 - var
+
+    if isinstance(var, np.ndarray):
+        v1 = np.where(v1 == 0.0, 1.0, v1)
+        v2 = np.where(v2 == 0.0, 1.0, v2)
+    else:
+        if v1 == 0.0:
+            v1 = 1.0
+        if v2 == 0.0:
+            v2 = 1.0
+
+    l1 = np.log2(v1)
+    l2 = np.log2(v2)
+
+    assert np.all(np.less_equal(l1, 0.0))
+    assert np.all(np.less_equal(l2, 0.0))
+
+    entropy = -(v1 * l1 + v2 * l2)
+
+    assert np.all(np.greater_equal(entropy, 0.0))
+
+    return entropy
+
+
+def expected_posterior(var, sigma0, sigma1):
+    """
+    Compute the expected posterior distribution of a binary random variable.
+    """
+
+    # probability of the evidence
+    # p(z = 0) = p(z = 0|m = 0)p(m = 0) + p(z = 0|m = 1)p(m = 1)
+    sigma0 = np.clip(sigma0, 0.0, 1.0)
+    sigma1 = np.clip(sigma1, 0.0, 1.0)
+    a = (1.0 - sigma0) * (1.0 - var) + (sigma1 * var)  # p(z=0)
+    # p(z = 1) = 1 - p(z = 0)
+    b = 1.0 - a + 1e-6  # p(z=1) with stability epsilon
+
+    assert np.all(np.greater_equal(var, 0.0)), f"{var[np.isnan(var)]}"
+    assert np.all(np.less_equal(var, 1.0)), f"{var[np.isnan(var)]}"
+
+    # posterior distribution probabilities
+    # p(m = 1|z = 0) = (p(z = 0|m = 1)p(m = 1))/p(z = 0)
+    p10 = (sigma1 * var) / a  # p(m=1|z=0)
+    # p(m = 1|z = 1) = (p(z = 1|m = 1)p(m = 1))/p(z = 1)
+    p11 = ((1.0 - sigma1) * var) / b  # p(m=1|z=1)
+
+    assert np.all(np.greater_equal(np.round(p10, decimals=2), 0.0)) and np.all(
+        np.less_equal(np.round(p10, decimals=2), 1.0)
+    ), f"{p10}"
+    assert np.all(np.greater_equal(p11, 0.0)) and np.all(
+        np.less_equal(p11, 1.0)
+    ), f"{sigma1}-{var[np.greater(p11, 1.0)]}-{b[np.greater(p11, 1.0)]}"
+    return a, b, p10, p11
+
+
+def cH(var, sigma0, sigma1):
+    """
+    Compute the conditional entropy for a binary random variable using sensor model likelihoods.
+    """
+    a, b, p10, p11 = expected_posterior(var, sigma0, sigma1)
+
+    # conditional entropy: average of the entropy of the posterior distribution probabilities
+    # H(m|z) = p(z = 0)H(p(m = 1|z = 0)) + p(z = 1)H(p(m = 1|z = 1))
+    cH = a * H(p10) + b * H(p11)
+
+    assert np.all(np.greater_equal(cH, 0.0))
+
+    return cH
 
 
 def collect_sample_set(grid):
@@ -176,6 +255,7 @@ class FastLogger:
         self.step = 0
         self.r = r
         self.e = e
+
         self.filename = (
             dir
             + "/"
@@ -190,6 +270,7 @@ class FastLogger:
             + str(self.n)
             + ".txt"
         )
+
         os.makedirs(dir, exist_ok=True)
 
         with open(self.filename, "w") as f:
@@ -353,3 +434,35 @@ def sample_binary_observations(belief_map, altitude, num_samples=5):
 
     # Return the averaged observation map
     return np.mean(sampled_observations, axis=-1)
+
+
+def create_run_folder(base_path):
+    # Get today's date in YYYYMMDD format
+    date_str = datetime.now().strftime("%Y%m%d")
+
+    # Ensure base path exists
+    os.makedirs(base_path, exist_ok=True)
+
+    # Get all folders in base_path starting with today's date
+    existing = [
+        f
+        for f in os.listdir(base_path)
+        if os.path.isdir(os.path.join(base_path, f)) and f.startswith(date_str + "_")
+    ]
+
+    # Extract run numbers
+    run_numbers = []
+    for name in existing:
+        try:
+            run_number = int(name.split("_")[1])
+            run_numbers.append(run_number)
+        except (IndexError, ValueError):
+            continue
+
+    next_run = max(run_numbers) + 1 if run_numbers else 1
+
+    run_folder_name = f"{date_str}_{next_run}"
+    run_folder_path = os.path.join(base_path, run_folder_name)
+    os.makedirs(run_folder_path)
+
+    return run_folder_path

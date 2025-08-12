@@ -14,8 +14,16 @@ from helper import (
 from orthomap import Field
 from mapper_LBP import OccupancyMap as OM
 from planner import planning
+
 from uav_camera import Camera
+
+# from new_camera import Camera  # Updated import for new camera model
 from viewer import plot_metrics, plot_terrain, plot_terrain_2d
+
+from helper import create_run_folder
+import matplotlib
+
+matplotlib.use("Agg")
 
 
 # -----------------------------------------------------------------------------
@@ -91,10 +99,13 @@ def main():
         MODEL_PATH,
         CACHE_DIR,
     ) = load_global_paths(config)
+    # dir = create_run_folder(os.path.join(PROJECT_PATH, "results"))
+    dir = os.path.join(PROJECT_PATH, "trials")
     results_folder = os.path.join(
-        PROJECT_PATH,
-        f"results_{config['field_type'].lower()}_{config['start_position']}",
+        dir,
+        f"{config['field_type'].lower()}_{config['start_position']}",
     )
+
     ENABLE_STEPWISE_PLOTTING = config["enable_plotting"]
     ENABLE_LOGGING = config["enable_logging"]
 
@@ -104,10 +115,12 @@ def main():
     correlation_types = config["correlation_types"]
     n_steps = config["n_steps"]
     iters = config["iters"]
-    error_margins = config["error_margins"]
+    if isinstance(iters, int):
+        iters = [0, iters]
+    error_margins = [None if e == "None" else e for e in config["error_margins"]]
     if action_strategy == "sweep":
         error_margins = [None]
-        iters = 1
+        iters = [0, 1]
 
     # -----------------------------------------------------------------------------
     # Setup Grid and Field Parameters Based on Field Type
@@ -148,6 +161,49 @@ def main():
     seed = 123
     rng = np.random.default_rng(seed)
 
+    #     Pairs (N, M, h, dx) with dx close to 2.5 origin true:
+    # N=9, M=29, h=64.952, dx=2.5000
+    # N=10, M=30, h=60.622, dx=2.5000
+    # N=11, M=31, h=56.292, dx=2.5000
+    # N=12, M=32, h=51.962, dx=2.5000
+    # N=13, M=33, h=47.631, dx=2.5000
+    # N=14, M=34, h=43.301, dx=2.5000
+    # N=15, M=35, h=38.971, dx=2.5000
+    # N=16, M=36, h=34.641, dx=2.5000
+    # N=17, M=37, h=30.311, dx=2.5000
+    # N=18, M=38, h=25.981, dx=2.5000
+    # N=19, M=39, h=21.651, dx=2.5000
+
+    #     Pairs (N, M, h, dx) with dx close to 2.5 origin False:
+    # N=1, M=21, h=49.796, dx=2.5000
+    # N=2, M=22, h=47.631, dx=2.5000
+    # N=3, M=23, h=45.466, dx=2.5000
+    # N=4, M=24, h=43.301, dx=2.5000
+    # N=5, M=25, h=41.136, dx=2.5000
+    # N=6, M=26, h=38.971, dx=2.5000
+    # N=7, M=27, h=36.806, dx=2.5000
+    # N=8, M=28, h=34.641, dx=2.5000
+    # N=9, M=29, h=32.476, dx=2.5000
+    # N=10, M=30, h=30.311, dx=2.5000
+    # N=11, M=31, h=28.146, dx=2.5000
+    # N=12, M=32, h=25.981, dx=2.5000
+    # N=13, M=33, h=23.816, dx=2.5000
+    # N=14, M=34, h=21.651, dx=2.5000
+
+    # xy_step = 2.5
+    # # h_range = [21.651, 30.311, 38.971, 47.631, 56.292, 64.952]
+    # h_range = [21.651, 25.981, 30.311, 34.641, 38.971, 43.301]
+    # min_alt = min(h_range)  # Minimum altitude for the camera
+    # fov = 60  # Field of view angle in degrees
+    # camera1 = Camera(
+    #     grid=grid_info,
+    #     fov_angle=fov,
+    #     xy_step=xy_step,
+    #     h_range=h_range,
+    #     rng=rng,
+    #     camera_altitude=min_alt,
+    # )
+    #    # Uncomment the following line to use the original Camera class
     camera1 = Camera(
         grid_info,
         60,
@@ -177,16 +233,16 @@ def main():
             error_margins, desc=f"Error Margins (pairwise = {corr_type})", position=1
         ):
             for iter in tqdm(
-                range(0, iters),
+                range(iters[0], iters[-1]),
                 desc=f"Iters (e={e_margin})",
                 position=2,
                 leave=False,
             ):
-
-                log_folder = (
-                    results_folder
-                    + f"/txt/{corr_type}_{action_strategy}_e{e_margin}_r{grf_r}"
-                )
+                log_folder = os.path.join(results_folder, "txt")
+                # log_folder = (
+                #     results_folder
+                #     # + f"/txt/{corr_type}_{action_strategy}_e{e_margin}_r{grf_r}"
+                # )
 
                 map.reset()
                 ground_truth_map = map.get_ground_truth()
@@ -216,26 +272,54 @@ def main():
                 # Select initial UAV starting position
 
                 if start_position == "border":
-                    start_pos = random.choice(
-                        [
-                            (
-                                -grid_info.x / 2,
-                                random.uniform(-grid_info.y / 2, grid_info.y / 2),
-                            ),  # Left border
-                            (
-                                grid_info.x / 2,
-                                random.uniform(-grid_info.y / 2, grid_info.y / 2),
-                            ),  # Right border
-                            (
-                                random.uniform(-grid_info.x / 2, grid_info.x / 2),
-                                grid_info.y / 2,
-                            ),  # Top border
-                            (
-                                random.uniform(-grid_info.x / 2, grid_info.x / 2),
-                                -grid_info.y / 2,
-                            ),  # Bottom border
-                        ]
-                    )
+                    w = 2 * min_alt * np.tan(np.deg2rad(fov * 0.5))
+                    # real_border = [
+                    #     (
+                    #         -grid_info.x / 2,
+                    #         random.uniform(-grid_info.y / 2, grid_info.y / 2),
+                    #     ),  # Left border
+                    #     (
+                    #         grid_info.x / 2,
+                    #         random.uniform(-grid_info.y / 2, grid_info.y / 2),
+                    #     ),  # Right border
+                    #     (
+                    #         random.uniform(-grid_info.x / 2, grid_info.x / 2),
+                    #         grid_info.y / 2,
+                    #     ),  # Top border
+                    #     (
+                    #         random.uniform(-grid_info.x / 2, grid_info.x / 2),
+                    #         -grid_info.y / 2,
+                    #     ),  # Bottom border
+                    # ]
+                    borders = [
+                        (
+                            -grid_info.x / 2 + w / 2,
+                            random.uniform(
+                                -grid_info.y / 2 + w / 2, grid_info.y / 2 - w / 2
+                            ),
+                        ),  # Left border (x fixed, y random within inset vertical range)
+                        (
+                            grid_info.x / 2 - w / 2,
+                            random.uniform(
+                                -grid_info.y / 2 + w / 2, grid_info.y / 2 - w / 2
+                            ),
+                        ),  # Right border (x fixed, y random within inset vertical range)
+                        (
+                            random.uniform(
+                                -grid_info.x / 2 + w / 2, grid_info.x / 2 - w / 2
+                            ),
+                            grid_info.y / 2 - w / 2,
+                        ),  # Top border (y fixed, x random within inset horizontal range)
+                        (
+                            random.uniform(
+                                -grid_info.x / 2 + w / 2, grid_info.x / 2 - w / 2
+                            ),
+                            -grid_info.y / 2 + w / 2,
+                        ),  # Bottom border (y fixed, x random within inset horizontal range)
+                    ]
+
+                    start_pos = random.choice(borders)
+
                 elif start_position == "corner":
                     start_pos = random.choice(
                         [
