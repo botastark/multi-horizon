@@ -1,13 +1,13 @@
 {
-    "_comment": "Possible field types: Gaussian, Ortomap. Possible start positions: corner, border. action_strategy: ig or sweep.",
-    "field_type": "Ortomap",
+    "_comment": "Possible field types: Gaussian, Ortomap. Possible start positions: corner, border. action_strategy: ig or sweep (ig_lookahead, entropy_guided_combined).",
+    "field_type": "Gaussian",
     "start_position": "corner",
-    "action_strategy": "ig",
-    "correlation_types": ["equal", "biased", "adaptive"],
+    "action_strategy": "mcts",
+    "correlation_types": ["equal"],
     "n_steps": 100,
-    "iters": 1,
-    "error_margins": [0.3, 0.1, 0.05],
+    "iters": [0,1],
+    "error_margins": ["None"],
     "enable_plotting": true,
     "enable_logging": true,
-    "project_path": "/home/bota/Desktop/active_sensing/"
+    "project_path": "/home/bota/Desktop/active_sensing_extended_planner/"
 }

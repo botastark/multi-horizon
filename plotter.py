@@ -367,6 +367,7 @@ def main(directory, show, radius):
     print(f"unique rad: {all_stats['GaussianRadius'].unique()}")
     print(f"unique pairwise: {all_stats['Pairwise'].unique()}")
     # Plot the aggregated statistics and save to the plots folder under the base directory
+    save_dir = None
     if save_dir is None:
         script_dir = os.path.dirname(os.path.realpath(__file__))
         save_dir = os.path.join(script_dir, "plots")
