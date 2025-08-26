@@ -1,0 +1,346 @@
+{
+  "_comment": "MCTS Experimental Configuration - Comprehensive Parameter Testing",
+  "_description": "This file contains all experimental phases for testing MCTS effectiveness",
+  
+  "base_config": {
+    "action_strategy": "mcts",
+    "field_type": "Gaussian",
+    "start_position": "center",
+    "n_steps": 100,
+    "iters": 20,
+    "enable_plotting": false,
+    "enable_logging": true,
+    "project_path": "/home/bota/Desktop/active_sensing_extended_planner"
+  },
+
+  "mcts_experimental_phases": {
+    
+    "phase_1_computational_budget": {
+      "_description": "Test performance vs computational cost trade-offs",
+      "experiments": [
+        {
+          "name": "ultra_fast",
+          "planning_depth": 3,
+          "num_iterations": 10,
+          "timeout": 2.0,
+          "ucb1_c": 1.4,
+          "parallel": 4,
+          "discount_factor": 1.0
+        },
+        {
+          "name": "fast",
+          "planning_depth": 3,
+          "num_iterations": 25,
+          "timeout": 5.0,
+          "ucb1_c": 1.4,
+          "parallel": 4,
+          "discount_factor": 1.0
+        },
+        {
+          "name": "balanced",
+          "planning_depth": 5,
+          "num_iterations": 50,
+          "timeout": 10.0,
+          "ucb1_c": 1.4,
+          "parallel": 8,
+          "discount_factor": 1.0
+        },
+        {
+          "name": "thorough",
+          "planning_depth": 8,
+          "num_iterations": 100,
+          "timeout": 20.0,
+          "ucb1_c": 1.4,
+          "parallel": 8,
+          "discount_factor": 1.0
+        },
+        {
+          "name": "exhaustive",
+          "planning_depth": 10,
+          "num_iterations": 200,
+          "timeout": 30.0,
+          "ucb1_c": 1.4,
+          "parallel": 8,
+          "discount_factor": 1.0
+        }
+      ]
+    },
+
+    "phase_2_exploration_exploitation": {
+      "_description": "Test UCB1 exploration vs exploitation balance",
+      "experiments": [
+        {
+          "name": "pure_greedy",
+          "planning_depth": 5,
+          "num_iterations": 50,
+          "timeout": 10.0,
+          "ucb1_c": 0.1,
+          "parallel": 8,
+          "discount_factor": 1.0
+        },
+        {
+          "name": "low_exploration",
+          "planning_depth": 5,
+          "num_iterations": 50,
+          "timeout": 10.0,
+          "ucb1_c": 0.7,
+          "parallel": 8,
+          "discount_factor": 1.0
+        },
+        {
+          "name": "standard_exploration",
+          "planning_depth": 5,
+          "num_iterations": 50,
+          "timeout": 10.0,
+          "ucb1_c": 1.4,
+          "parallel": 8,
+          "discount_factor": 1.0
+        },
+        {
+          "name": "high_exploration",
+          "planning_depth": 5,
+          "num_iterations": 50,
+          "timeout": 10.0,
+          "ucb1_c": 2.5,
+          "parallel": 8,
+          "discount_factor": 1.0
+        },
+        {
+          "name": "very_high_exploration",
+          "planning_depth": 5,
+          "num_iterations": 50,
+          "timeout": 10.0,
+          "ucb1_c": 5.0,
+          "parallel": 8,
+          "discount_factor": 1.0
+        }
+      ]
+    },
+
+    "phase_3_time_horizon": {
+      "_description": "Test discount factor and planning depth effects",
+      "experiments": [
+        {
+          "name": "myopic_shallow",
+          "planning_depth": 3,
+          "num_iterations": 50,
+          "timeout": 10.0,
+          "ucb1_c": 1.4,
+          "parallel": 8,
+          "discount_factor": 0.5
+        },
+        {
+          "name": "short_term",
+          "planning_depth": 5,
+          "num_iterations": 50,
+          "timeout": 10.0,
+          "ucb1_c": 1.4,
+          "parallel": 8,
+          "discount_factor": 0.8
+        },
+        {
+          "name": "medium_term",
+          "planning_depth": 8,
+          "num_iterations": 75,
+          "timeout": 15.0,
+          "ucb1_c": 1.4,
+          "parallel": 8,
+          "discount_factor": 0.95
+        },
+        {
+          "name": "long_term",
+          "planning_depth": 10,
+          "num_iterations": 100,
+          "timeout": 20.0,
+          "ucb1_c": 1.4,
+          "parallel": 8,
+          "discount_factor": 1.0
+        },
+        {
+          "name": "very_long_term",
+          "planning_depth": 15,
+          "num_iterations": 150,
+          "timeout": 30.0,
+          "ucb1_c": 1.4,
+          "parallel": 8,
+          "discount_factor": 1.0
+        }
+      ]
+    },
+
+    "phase_4_parallel_efficiency": {
+      "_description": "Test computational speedup with parallel processing",
+      "experiments": [
+        {
+          "name": "sequential",
+          "planning_depth": 5,
+          "num_iterations": 100,
+          "timeout": 20.0,
+          "ucb1_c": 1.4,
+          "parallel": 1,
+          "discount_factor": 1.0
+        },
+        {
+          "name": "dual_core",
+          "planning_depth": 5,
+          "num_iterations": 100,
+          "timeout": 20.0,
+          "ucb1_c": 1.4,
+          "parallel": 2,
+          "discount_factor": 1.0
+        },
+        {
+          "name": "quad_core",
+          "planning_depth": 5,
+          "num_iterations": 100,
+          "timeout": 20.0,
+          "ucb1_c": 1.4,
+          "parallel": 4,
+          "discount_factor": 1.0
+        },
+        {
+          "name": "octa_core",
+          "planning_depth": 5,
+          "num_iterations": 100,
+          "timeout": 20.0,
+          "ucb1_c": 1.4,
+          "parallel": 8,
+          "discount_factor": 1.0
+        },
+        {
+          "name": "high_parallel",
+          "planning_depth": 5,
+          "num_iterations": 100,
+          "timeout": 20.0,
+          "ucb1_c": 1.4,
+          "parallel": 16,
+          "discount_factor": 1.0
+        }
+      ]
+    },
+
+    "phase_5_parameter_interactions": {
+      "_description": "Test beneficial parameter combinations",
+      "experiments": [
+        {
+          "name": "fast_greedy",
+          "planning_depth": 3,
+          "num_iterations": 25,
+          "timeout": 5.0,
+          "ucb1_c": 0.7,
+          "parallel": 4,
+          "discount_factor": 0.8
+        },
+        {
+          "name": "deep_patient",
+          "planning_depth": 10,
+          "num_iterations": 100,
+          "timeout": 25.0,
+          "ucb1_c": 1.4,
+          "parallel": 8,
+          "discount_factor": 1.0
+        },
+        {
+          "name": "explore_shallow",
+          "planning_depth": 3,
+          "num_iterations": 50,
+          "timeout": 8.0,
+          "ucb1_c": 2.5,
+          "parallel": 8,
+          "discount_factor": 0.9
+        },
+        {
+          "name": "exploit_deep",
+          "planning_depth": 8,
+          "num_iterations": 75,
+          "timeout": 15.0,
+          "ucb1_c": 0.5,
+          "parallel": 8,
+          "discount_factor": 1.0
+        },
+        {
+          "name": "balanced_all",
+          "planning_depth": 5,
+          "num_iterations": 50,
+          "timeout": 10.0,
+          "ucb1_c": 1.4,
+          "parallel": 8,
+          "discount_factor": 0.95
+        }
+      ]
+    },
+
+    "phase_6_baseline_comparison": {
+      "_description": "Compare MCTS against other strategies",
+      "experiments": [
+        {
+          "name": "mcts_baseline",
+          "planning_depth": 3,
+          "num_iterations": 50,
+          "timeout": 10.0,
+          "ucb1_c": 1.4,
+          "parallel": 8,
+          "discount_factor": 1.0
+        }
+      ],
+      "comparison_strategies": ["sweep", "ig_based", "entropy_guided", "entropy_guided_combined"]
+    },
+
+    "phase_7_robustness_testing": {
+      "_description": "Test MCTS under different conditions",
+      "experiments": [
+        {
+          "name": "small_budget",
+          "planning_depth": 3,
+          "num_iterations": 10,
+          "timeout": 3.0,
+          "ucb1_c": 1.4,
+          "parallel": 4,
+          "discount_factor": 1.0
+        },
+        {
+          "name": "large_budget",
+          "planning_depth": 12,
+          "num_iterations": 300,
+          "timeout": 60.0,
+          "ucb1_c": 1.4,
+          "parallel": 8,
+          "discount_factor": 1.0
+        },
+        {
+          "name": "adaptive_exploration",
+          "planning_depth": 6,
+          "num_iterations": 75,
+          "timeout": 15.0,
+          "ucb1_c": 1.8,
+          "parallel": 8,
+          "discount_factor": 0.98
+        }
+      ]
+    }
+  },
+
+  "experiment_settings": {
+    "field_types": ["Gaussian"],
+    "start_positions": ["corner", "edge"],
+    "repetitions": 20,
+    "metrics_to_track": [
+      "total_information_gain",
+      "entropy_reduction",
+      "coverage_percentage",
+      "planning_time_per_step",
+      "total_experiment_time",
+      "mse_improvement",
+      "nodes_expanded",
+      "tree_depth_reached"
+    ]
+  },
+
+  "output_settings": {
+    "results_folder": "mcts_experiments",
+    "save_individual_runs": true,
+    "save_aggregated_results": true,
+    "plot_comparisons": true,
+    "save_timing_data": true
+  }
+}

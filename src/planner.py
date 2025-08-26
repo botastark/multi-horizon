@@ -6,7 +6,16 @@ from mcts import MCTSPlanner
 
 
 class planning:
-    def __init__(self, grid_info, uav, strategy, conf_dict=None, optimal_alt=21.6):
+
+    def __init__(
+        self,
+        grid_info,
+        uav,
+        strategy,
+        conf_dict=None,
+        optimal_alt=21.6,
+        mcts_params=None,
+    ):
         # Initialize belief map (each cell has a default probability of 0.5) and set UAV planning parameters
         self.M = np.full((grid_info.shape[0], grid_info.shape[1], 2), 0.5)
         self.uav = uav
@@ -15,6 +24,17 @@ class planning:
         self.conf_dict = conf_dict
         self.optimal_altitude = optimal_alt
         self.sweep_direction = None
+        # MCTS parameters with defaults
+        if mcts_params is None:
+            mcts_params = {}
+        self.mcts_params = {
+            "planning_depth": mcts_params.get("planning_depth", 5),
+            "num_iterations": mcts_params.get("num_iterations", 10),
+            "timeout": mcts_params.get("timeout", 10.0),
+            "ucb1_c": mcts_params.get("ucb1_c", 1.4),
+            "parallel": mcts_params.get("parallel", 8),
+            "discount_factor": mcts_params.get("discount_factor", 1.0),
+        }
 
     def reset(self, conf_dict=None):
         """Reset UAV and planning state, and reinitialize the belief map."""
@@ -296,234 +316,67 @@ class planning:
         self.last_action = next_action
         return next_action, info_score
 
-    def mcts_based(self, planning_depth=10):
+    def mcts_based(
+        self,
+        **kwargs
+        # planning_depth=5,
+        # num_iterations=10,
+        # timeout=10.0,
+        # ucb1_c=1.4,
+        # parallel=8,
+        # discount_factor=1.0,
+    ):
+        """
+        MCTS-based action selection with configurable parameters for experiments.
+
+        Args:
+            planning_depth (int): Maximum depth for MCTS tree search
+            num_iterations (int): Number of MCTS iterations to perform
+            timeout (float): Maximum time in seconds for MCTS search
+            ucb1_c (float): UCB1 exploration constant
+            parallel (int): Number of parallel processes/threads
+            discount_factor (float): Discount factor for future rewards (gamma)
+
+        Returns:
+            tuple: (selected_action, action_scores)
+        """
         uav_pos = self.uav.get_x()
+        # Merge stored parameters with any provided overrides
+        params = {**self.mcts_params, **kwargs}
 
         state = {"uav_pos": uav_pos, "belief": self.M.copy()}
-        # print(
-        #     f"Initial state: position=({state['uav_pos'].position},{uav_pos.altitude}), belief shape={state['belief'].shape}"
-        # )
         mcts_planner = MCTSPlanner(
             state,
             self.uav,
             conf_dict=self.conf_dict,
-            discount_factor=1,
-            max_depth=planning_depth,
-            parallel=8,
+            # discount_factor=discount_factor,
+            # max_depth=planning_depth,
+            # parallel=parallel,
+            # ucb1_c=ucb1_c,
+            discount_factor=params["discount_factor"],
+            max_depth=params["planning_depth"],
+            parallel=params["parallel"],
+            ucb1_c=params["ucb1_c"],
         )
-        num_iterations = 2000
+        # action, score = mcts_planner.search(
+        #     num_iterations=num_iterations, return_action_scores=True, timeout=timeout
+        # )
         action, score = mcts_planner.search(
-            num_iterations=num_iterations, return_action_scores=True, timeout=10.0
+            num_iterations=params["num_iterations"],
+            return_action_scores=True,
+            timeout=params["timeout"],
         )
         return action, score
 
-        # current_state = MCTSState(
-        #     uav_position=self.uav.get_x(),
-        #     belief_map_summary=self.compress_belief_map(self.M),
-        #     steps_remaining=planning_depth,
-        # )
+    # def compress_belief_map(self, belief_map=None):
+    #     # Compress 60x110 to manageable size for MCTS nodes
+    #     # Option 1: Grid summary (e.g., 12x22 regions)
+    #     if belief_map is None:
+    #         belief_map = self.M
 
-        # # All actions treated uniformly
-        # mcts = MCTS(current_state, permitted_actions)
-        # return mcts.search()
-
-    def compress_belief_map(self, belief_map=None):
-        # Compress 60x110 to manageable size for MCTS nodes
-        # Option 1: Grid summary (e.g., 12x22 regions)
-        if belief_map is None:
-            belief_map = self.M
-
-        compressed = np.zeros((12, 22))
-        for i in range(12):
-            for j in range(22):
-                region = belief_map[i * 5 : (i + 1) * 5, j * 5 : (j + 1) * 5, 1]
-                compressed[i, j] = np.mean(H(region))  # entropy per region
-        return compressed
-
-
-# class MCTSState:
-#     def __init__(self, uav_pos, belief_summary, steps_remaining):
-#         self.uav_pos = uav_pos  # uav_pos: uav_position object representing UAV location and altitude
-#         self.belief_summary = belief_summary  # Compressed belief state
-#         self.steps_remaining = steps_remaining
-
-#     def get_successor_state(self, action, uav):
-#         new_position = uav_position(uav.x_future(action))  # Move
-
-#         # Both cases: take new observation and update belief
-#         return MCTSState(
-#             uav_position=new_position,
-#             belief_map_summary=new_belief_summary,
-#             steps_remaining=self.steps_remaining - 1,
-#         )
-
-#     def is_terminal(self):
-#         return self.steps_remaining <= 0
-
-#     def __hash__(self):
-#         """Make state hashable for use in dictionaries."""
-#         return hash(
-#             (self.uav_pos, tuple(self.belief_summary.flatten()), self.remaining_steps)
-#         )
-
-#     def __eq__(self, other):
-#         """Check equality of states."""
-#         if not isinstance(other, MCTSState):
-#             return False
-#         return (
-#             self.uav_pos == other.uav_pos
-#             and np.array_equal(self.belief_summary, other.belief_summary)
-#             and self.remaining_steps == other.remaining_steps
-#         )
-
-
-# class MCTSNode:
-#     def __init__(self, state, parent=None, action=None):
-#         self.state = state
-#         self.parent = parent
-#         self.action = action  # Action that led to this state
-#         self.children = {}  # action -> MCTSNode
-#         self.visits = 0
-#         self.total_reward = 0.0
-#         self.untried_actions = None  # Will be set during expansion
-
-#     def is_fully_expanded(self):
-#         return len(self.untried_actions) == 0
-
-#     def is_terminal(self):
-#         return self.state.is_terminal()
-
-#     def is_leaf(self):
-#         """Check if this is a leaf node (no children)."""
-#         return len(self.children) == 0
-
-#     def ucb1_score(self, exploration_constant=1.4):
-#         if self.visits == 0:
-#             return float("inf")
-
-#         exploitation = self.total_reward / self.visits
-#         exploration = exploration_constant * math.sqrt(
-#             math.log(self.parent.visits) / self.visits
-#         )
-#         return exploitation + exploration
-
-#     def add_child(self, action, state):
-#         """Add a new child node."""
-#         child = MCTSNode(state, parent=self, action=action)
-#         self.children[action] = child
-#         return child
-
-#     def select_child(self):
-#         """Select child with highest UCB1 score."""
-#         return max(self.children.values(), key=lambda child: child.ucb1_score())
-
-#     def expand(self, action, child_state):
-#         """Add a new child node for the given action."""
-#         child = MCTSNode(child_state, parent=self, action=action)
-#         self.children[action] = child
-#         self.untried_actions.remove(action)
-#         return child
-
-#     def update(self, reward):
-#         """Update node statistics with reward from simulation."""
-#         self.visits += 1
-#         self.total_reward += reward
-
-#     def backpropagate(self, reward):
-#         """Backpropagate reward up the tree."""
-#         self.update(reward)
-#         if self.parent is not None:
-#             self.parent.backpropagate(reward)
-
-
-# class MCTS:
-#     def __init__(
-#         self, root_state, permitted_actions, planner, exploration_constant=1.4
-#     ):
-#         self.root = MCTSNode(root_state)
-#         self.root.untried_actions = permitted_actions.copy()
-
-#         self.exploration_constant = exploration_constant
-
-#     def search(self, iterations=1000):
-#         """Run MCTS search and return the best action."""
-#         for _ in range(iterations):
-#             # Selection and Expansion
-#             node = self._select_and_expand()
-
-#             # Simulation
-#             reward = self._simulate(node)
-
-#             # Backpropagation
-#             node.backpropagate(reward)
-
-#         # Return action with highest visit count (most explored)
-#         if not self.root.children:
-#             # If no children were expanded, return a random action
-#             return random.choice(self.root.untried_actions), {}
-
-#         best_action = max(
-#             self.root.children.keys(), key=lambda a: self.root.children[a].visits
-#         )
-
-#         # Return action scores for compatibility
-#         action_scores = {
-#             action: child.total_reward / max(child.visits, 1)
-#             for action, child in self.root.children.items()
-#         }
-
-#         return best_action, action_scores
-
-#     def _select_and_expand(self):
-#         """Selection phase: traverse tree using UCB1, then expand if needed."""
-#         node = self.root
-
-#         # Selection: traverse down the tree
-#         while not node.is_terminal() and node.is_fully_expanded():
-#             node = node.select_child()
-
-#         # Expansion: add a new child if possible
-#         if not node.is_terminal() and not node.is_fully_expanded():
-#             action = random.choice(node.untried_actions)
-#             # Get successor state
-#             child_state = node.state.get_successor_state(
-#                 action, self.planner.uav, self.planner
-#             )
-#             # Get permitted actions for the child state
-#             child_permitted_actions = self.planner.uav.permitted_actions(
-#                 child_state.position
-#             )
-#             node = node.expand(action, child_state)
-#             node.untried_actions = child_permitted_actions.copy()
-
-#         return node
-
-#     def _simulate(self, node):
-#         """Simulation phase: run random rollout from current node."""
-#         current_state = node.state
-#         total_reward = 0.0
-#         discount = 1.0
-
-#         # Run simulation until terminal state or max depth
-#         while not current_state.is_terminal():
-#             # Get permitted actions for current state
-#             permitted_actions = self.planner.uav.permitted_actions(
-#                 current_state.position
-#             )
-#             if not permitted_actions:
-#                 break
-
-#             # Choose random action
-#             action = random.choice(permitted_actions)
-
-#             # Calculate immediate reward
-#             reward = self.planner.mcts_reward(current_state, action)
-#             total_reward += discount * reward
-
-#             # Get next state
-#             current_state = current_state.get_successor_state(
-#                 action, self.planner.uav, self.planner
-#             )
-#             discount *= 0.9  # Discount factor for future rewards
-
-#         return total_reward
+    #     compressed = np.zeros((12, 22))
+    #     for i in range(12):
+    #         for j in range(22):
+    #             region = belief_map[i * 5 : (i + 1) * 5, j * 5 : (j + 1) * 5, 1]
+    #             compressed[i, j] = np.mean(H(region))  # entropy per region
+    #     return compressed
