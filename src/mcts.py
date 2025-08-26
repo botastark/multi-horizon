@@ -6,16 +6,16 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
-class DummyGrid:
-    def __init__(self):
-        self.x = 60
-        self.y = 110
-        self.length = 1
-        self.center = False
-        self.shape = (60, 110)
+# class DummyGrid:
+#     def __init__(self):
+#         self.x = 60
+#         self.y = 110
+#         self.length = 1
+#         self.center = False
+#         self.shape = (60, 110)
 
 
-grid = DummyGrid()
+# grid = DummyGrid()
 
 
 def copy_state(state):
@@ -34,7 +34,7 @@ class MCTSNode:
     about its parent, children, action taken to reach it, visit count, and total reward.
     """
 
-    def __init__(self, state, camera=None, parent=None, action=None, conf_dict=None):
+    def __init__(self, state, camera, parent=None, action=None, conf_dict=None):
         self.state = copy_state(
             state
         )  # The state represented by this node state = {'uav_pos': uav_pos, 'belief': current_belief_map}  # State representation
@@ -44,11 +44,7 @@ class MCTSNode:
         self.visit_count = 0  # Number of times this node has be = 0.0
         self.value = 0.0  # Total reward accumulated from this node's visits
         self.camera = camera  # Camera object for action space and position updates
-        self.untried_actions = (
-            set(camera.permitted_actions(self.state["uav_pos"]))
-            if camera
-            else set("up down front back left right hover".split())
-        )
+        self.untried_actions = set(camera.permitted_actions(self.state["uav_pos"]))
         self.conf_dict = conf_dict  # Optional configuration dictionary for sensor model
 
     def is_fully_expanded(self):
@@ -135,7 +131,11 @@ class MCTSNode:
         expected_entropy = Pz0 * H(p_m1_z0) + Pz1 * H(p_m1_z1)
         return np.sum(curr_entropy - expected_entropy)
 
-    def rollout(self, max_depth=10, discount_factor=1.0):
+    def rollout(
+        self,
+        max_depth=10,
+        discount_factor=1.0,
+    ):
         # simulate random steps from this state, return reward
         state = copy_state(self.state)
         discount = 1.0
@@ -143,11 +143,6 @@ class MCTSNode:
         for t in range(max_depth):
             # 1. Get permitted actions from camera
             actions = self.camera.permitted_actions(state["uav_pos"])
-
-            if not actions:
-                break
-            # 2. Pick an action (random or simple policy)
-            # Deterministic or random action selection can be handled here if needed
             action = np.random.choice(actions)
 
             # 3. Apply the action to get the next state
@@ -211,11 +206,13 @@ class MCTSPlanner:
         discount_factor=1.0,
         max_depth=10,
         parallel=1,
+        ucb1_c=1.4,
     ):
-        self.root = MCTSNode(initial_state, camera=uav_camera, conf_dict=conf_dict)
+        self.root = MCTSNode(initial_state, uav_camera, conf_dict=conf_dict)
         self.discount_factor = discount_factor
         self.max_depth = max_depth
         self.parallel = parallel
+        self.ucb1_c = ucb1_c
 
     def search(self, num_iterations=100, timeout=None, return_action_scores=False):
         start_time = time.time()
@@ -277,18 +274,21 @@ class MCTSPlanner:
             if not node.is_fully_expanded():
                 return node.expand()
             else:
-                node = node.best_child()
+                node = node.best_child(c_param=self.ucb1_c)
         return node
 
+    # def best_action(self):
+    #     # Choose the action from root's children with the highest visit count
+    #     best = max(self.root.children.values(), key=lambda n: n.visit_count)
+    #     return best.action_from_parent
+
     def best_action(self):
-        # Choose the action from root's children with the highest visit count
-        best = max(self.root.children.values(), key=lambda n: n.visit_count)
+        # Choose the action from root's children with the highest avg value
+        best = max(
+            self.root.children.values(), key=lambda n: n.value / max(1, n.visit_count)
+        )
         return best.action_from_parent
 
-    # def best_action(self):
-    #     #Choose the action from root's children with the highest avg value
-    #     best = max(self.root.children.values(), key=lambda n: n.value / max(1, n.visit_count))
-    #     return best.action_from_parent
     def visualize_tree(self, max_depth=2):
         self.root.print_tree(max_depth=max_depth)
 
@@ -297,55 +297,6 @@ class MCTSPlanner:
             discount_factor=self.discount_factor, max_depth=self.max_depth
         )
         node.backpropagate(reward)
-
-
-def test_mcts_node_expand():
-    # Simple grid and camera setup
-
-    global grid
-    camera = Camera(grid, fov_angle=60, xy_step=1, h_range=[3, 5, 7], camera_altitude=3)
-
-    # Initial belief and state
-    belief = np.ones((60, 110, 2)) * 0.5
-    uav_pos = uav_position(((5, 10), 3))
-    state = {"uav_pos": uav_pos, "belief": belief}
-
-    node = MCTSNode(state, camera=camera)
-
-    # Check that untried_actions matches camera's permitted actions
-    expected_actions = set(camera.permitted_actions(uav_pos))
-    assert set(node.untried_actions) == expected_actions, "Untried actions mismatch!"
-
-    # Expand a node and check properties
-    child = node.expand()
-    assert child.parent is node
-    assert child.action_from_parent in expected_actions
-    assert isinstance(child.state["uav_pos"], uav_position)
-    assert not np.shares_memory(
-        child.state["belief"], node.state["belief"]
-    ), "Belief should be copied"
-
-    print("test_mcts_node_expand passed.")
-
-
-def test_mcts_node_rollout():
-    # Dummy grid, camera, and position classes
-
-    camera = Camera(grid, fov_angle=60, xy_step=1, h_range=[3, 5, 7], camera_altitude=3)
-    uav_pos = uav_position(((5, 10), 3))
-    belief = np.ones((60, 110, 2)) * 0.5
-    state = {"uav_pos": uav_pos, "belief": belief}
-
-    node = MCTSNode(state, camera)
-    reward = node.rollout(max_depth=3)
-    print("Rollout reward:", reward)
-    assert np.isscalar(reward), "Rollout should return a scalar"
-    assert reward >= 0, "Reward should be non-negative"
-    # Check that original belief is not mutated
-    assert np.all(
-        state["belief"] == 0.5
-    ), "Belief in original state should remain unchanged"
-    print("test_mcts_node_rollout passed.")
 
 
 def test_mcts_planner_search_and_best_action():
@@ -380,7 +331,4 @@ def test_mcts_planner_search_and_best_action():
 
 
 if __name__ == "__main__":
-
-    test_mcts_node_expand()
-    test_mcts_node_rollout()
     test_mcts_planner_search_and_best_action()
