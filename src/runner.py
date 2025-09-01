@@ -194,7 +194,13 @@ class MCTSExperimentRunner:
         return map_field, camera1, grid_info, optimal_alt, use_sensor_model
 
     def run_single_experiment(
-        self, exp_name, mcts_params, field_type, start_position, n_steps=100
+        self,
+        exp_name,
+        strategy,
+        field_type,
+        start_position,
+        n_steps=100,
+        mcts_params=None,
     ):
         """Run a single experiment following main.py pattern."""
 
@@ -234,7 +240,8 @@ class MCTSExperimentRunner:
             planner = planning(
                 grid_info,
                 camera1,
-                "mcts",
+                strategy,
+                # "mcts",
                 conf_dict=conf_dict,
                 optimal_alt=optimal_alt,
                 mcts_params=mcts_params,
@@ -273,7 +280,7 @@ class MCTSExperimentRunner:
             # Main mapping and planning loop with enhanced progress bar
             steps_pbar = tqdm(
                 range(n_steps),
-                desc=f"🎯 {exp_name[:30]}",
+                desc=f"{strategy.upper()}: {exp_name[:25]}",
                 leave=False,
                 position=1,
                 ncols=80,
@@ -293,7 +300,7 @@ class MCTSExperimentRunner:
                 fp_vertices_ij, submap = map_field.get_observations(uav_pos, sigmas)
 
                 # Get observed field range (from main.py)
-                observed_field_range = camera1.get_range(index_form=False)
+                # observed_field_range = camera1.get_range(index_form=False)
 
                 # Update occupancy map with new observation and propagate messages (from main.py)
                 occupancy_map.update_belief_OG(fp_vertices_ij, submap, uav_pos)
@@ -319,7 +326,6 @@ class MCTSExperimentRunner:
                 next_action, info_gain_action = planner.select_action(
                     belief_map, uav_positions
                 )
-
                 # Update UAV position based on the next action (from main.py)
                 uav_pos = uav_position(camera1.x_future(next_action))
                 actions.append(next_action)
@@ -331,9 +337,7 @@ class MCTSExperimentRunner:
 
                 # Track step metrics
                 if isinstance(info_gain_action, dict):
-                    step_ig = sum(
-                        info_gain_action.values()
-                    )  # Use sum() instead of np.sum()
+                    step_ig = info_gain_action[next_action]
                 else:
                     step_ig = (
                         float(info_gain_action) if info_gain_action is not None else 0.0
@@ -430,15 +434,14 @@ class MCTSExperimentRunner:
 
                         # Update progress bar description with current experiment
                         phase_pbar.set_postfix_str(f"Running: {full_exp_name}")
-
                         result = self.run_single_experiment(
-                            f"{exp_name}_{field_type}_{start_pos}_rep{rep}",
-                            mcts_params,
+                            full_exp_name,
+                            strategy,
                             field_type,
                             start_pos,
                             self.config["base_config"]["n_steps"],
+                            mcts_params=mcts_params,
                         )
-
                         # Save immediately
                         self.save_single_result(phase_name, exp_name, result)
                         self.save_to_csv(phase_name, exp_name, result)
@@ -523,9 +526,9 @@ class MCTSExperimentRunner:
                     )
 
                     if phase_name == "phase_6_baseline_comparison":
-                        self.results[phase_name] = self.run_baseline_comparison(
-                            phase_config
-                        )
+                        results_ = self.run_baseline_comparison(phase_config)
+
+                        self.results[phase_name] = results_
                     else:
                         self.results[phase_name] = self.run_phase(
                             phase_name, phase_config
@@ -628,24 +631,30 @@ class MCTSExperimentRunner:
                         baseline_pbar.set_postfix_str(f"Running: {full_exp_name}")
 
                         if strategy == "mcts":
-                            result = self.run_single_experiment(
-                                full_exp_name,
-                                {k: v for k, v in mcts_params.items() if k != "name"},
-                                field_type,
-                                start_pos,
-                                self.config["base_config"]["n_steps"],
-                            )
+                            mcts_params = {
+                                k: v for k, v in mcts_params.items() if k != "name"
+                            }
                         else:
-                            # Run other strategies by modifying the planner
-                            result = self.run_single_experiment_baseline(
-                                full_exp_name,
-                                strategy,
-                                field_type,
-                                start_pos,
-                                self.config["base_config"]["n_steps"],
-                            )
+                            mcts_params = None
+
+                        result = self.run_single_experiment(
+                            full_exp_name,
+                            strategy,
+                            field_type,
+                            start_pos,
+                            self.config["base_config"]["n_steps"],
+                            mcts_params=mcts_params,
+                        )
 
                         result["strategy"] = strategy
+                        # Save immediately after each run
+                        self.save_single_result(
+                            "phase_6_baseline_comparison", strategy, result
+                        )
+                        self.save_to_csv(
+                            "phase_6_baseline_comparison", strategy, result
+                        )
+
                         strategy_results.append(result)
                         baseline_pbar.update(1)
 
@@ -658,161 +667,6 @@ class MCTSExperimentRunner:
 
         baseline_pbar.close()
         return comparison_results
-
-    def run_single_experiment_baseline(
-        self, exp_name, strategy, field_type, start_position, n_steps=50
-    ):
-        """Run baseline experiment with non-MCTS strategy."""
-        # Similar to run_single_experiment but use different strategy
-        # This is a simplified version - you can expand as needed
-
-        map_field, camera1, grid_info, optimal_alt, use_sensor_model = (
-            self.setup_environment(field_type, start_position)
-        )
-        map_field.reset()
-        ground_truth_map = map_field.get_ground_truth()
-        belief_map = np.full((grid_info.shape[0], grid_info.shape[1], 2), 0.5)
-        # Setup confidence dictionary
-        error_margin = 0.1
-        if error_margin is not None:
-            conf_dict = map_field.init_s0_s1(
-                e=error_margin,
-                sensor=use_sensor_model,
-            )
-        else:
-            conf_dict = None
-
-        # Initialize occupancy map
-        correlation_type = "equal"
-        occupancy_map = OM(
-            grid_size=grid_info.shape,
-            conf_dict=conf_dict,
-            correlation_type=correlation_type,
-        )
-
-        # Initialize planner with baseline strategy
-        planner = planning(
-            grid_info,
-            camera1,
-            strategy,  # Use the baseline strategy
-            conf_dict=None,
-            optimal_alt=optimal_alt,
-        )
-        # Initialize UAV position
-        start_pos = (0, 0)  # Default to center for baselines
-        uav_pos = uav_position((start_pos, camera1.get_hrange()[0]))
-        uav_positions = [uav_pos]
-
-        # Update camera settings
-        camera1.set_altitude(uav_pos.altitude)
-        camera1.set_position(uav_pos.position)
-
-        # Initialize tracking variables
-        observed_ids = set()
-        entropy, mse, coverage = [], [], []
-        step_times = []
-        step_igs = []
-
-        start_time = time.time()
-
-        # Main mapping and planning loop with progress bar
-        baseline_steps_pbar = tqdm(
-            range(n_steps),
-            desc=f"🔄 {strategy.upper()}: {exp_name[:25]}",
-            leave=False,
-            position=1,
-            ncols=80,
-            miniters=1,
-        )
-
-        for step in baseline_steps_pbar:
-            step_start = time.time()
-
-            # Get sigmas for current altitude
-            sigmas = None
-            if conf_dict is not None:
-                s0, s1 = conf_dict[np.round(uav_pos.altitude, decimals=2)]
-                sigmas = [s0, s1]
-
-            # Get field observations
-            fp_vertices_ij, submap = map_field.get_observations(uav_pos, sigmas)
-
-            # Update occupancy map
-            occupancy_map.update_belief_OG(fp_vertices_ij, submap, uav_pos)
-            occupancy_map.propagate_messages(fp_vertices_ij, submap, max_iterations=1)
-
-            # Update belief map
-            belief_map[:, :, 1] = occupancy_map.get_belief().copy()
-            belief_map[:, :, 0] = 1 - belief_map[:, :, 1]
-
-            # Update observed cell IDs and compute metrics
-            observed_ids.update(observed_m_ids(uav=camera1, uav_pos=uav_pos))
-            entropy_val, mse_val, coverage_val = compute_metrics(
-                ground_truth_map, belief_map, observed_ids, grid_info
-            )
-            entropy.append(entropy_val)
-            mse.append(mse_val)
-            coverage.append(coverage_val)
-
-            # Planning: select next action using baseline strategy
-            next_action, info_gain_action = planner.select_action(
-                belief_map, uav_positions
-            )
-
-            # Update UAV position
-            uav_pos = uav_position(camera1.x_future(next_action))
-            uav_positions.append(uav_pos)
-
-            # Update camera
-            camera1.set_altitude(uav_pos.altitude)
-            camera1.set_position(uav_pos.position)
-
-            # Track step metrics
-            if isinstance(info_gain_action, dict):
-                step_ig = sum(info_gain_action.values())
-            else:
-                step_ig = (
-                    float(info_gain_action) if info_gain_action is not None else 0.0
-                )
-
-            step_igs.append(step_ig)
-            step_times.append(time.time() - step_start)
-
-            # Update progress bar
-            if step % 5 == 0:
-                current_entropy = entropy_val
-                current_coverage = coverage_val * 100
-                current_ig = sum(step_igs)
-                baseline_steps_pbar.set_postfix_str(
-                    f"E: {current_entropy:.2f}, C: {current_coverage:.1f}%, IG: {current_ig:.2f}"
-                )
-
-        baseline_steps_pbar.close()
-        total_time = time.time() - start_time
-
-        # Calculate final results
-        total_ig = sum(step_igs)
-        final_entropy = entropy[-1] if entropy else 0
-        entropy_reduction = entropy[0] - entropy[-1] if len(entropy) > 1 else 0
-        coverage_percentage = coverage[-1] if coverage else 0
-        avg_planning_time = np.mean(step_times) if step_times else 0
-
-        result = {
-            "experiment_name": exp_name,
-            "parameters": {},
-            "field_type": field_type,
-            "start_position": start_position,
-            "n_steps": n_steps,
-            "total_information_gain": total_ig,
-            "final_entropy": final_entropy,
-            "entropy_reduction": entropy_reduction,
-            "coverage_percentage": coverage_percentage * 100,
-            "final_mse": mse[-1] if mse else 0,
-            "total_time": total_time,
-            "avg_planning_time_per_step": avg_planning_time,
-        }
-
-        return result
 
     def save_results(self):
         """Save experimental results to files."""
