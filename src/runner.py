@@ -179,10 +179,18 @@ class MCTSExperimentRunner:
         )
 
         # Initialize field/map (from main.py)
+        if (
+            field_type == "Ortomap"
+            and getattr(self, "current_strategy", None) == "sweep"
+        ):
+            sweep = "sweep"
+        else:
+            sweep = ""
+
         map_field = Field(
             grid_info,
             field_type_for_field if field_type != "Ortomap" else "Ortomap",
-            sweep="mcts",  # action_strategy
+            sweep=sweep,
             h_range=camera1.get_hrange(),
             annotation_path=self.ANNOTATION_PATH,
             ortomap_path=self.ORTHOMAP_PATH,
@@ -402,6 +410,7 @@ class MCTSExperimentRunner:
         phase_results = {}
 
         experiments = phase_config["experiments"]
+        strategy = phase_config.get("strategy", "mcts")
         field_types = self.config["experiment_settings"]["field_types"]
         start_positions = self.config["experiment_settings"]["start_positions"]
         repetitions = self.config["experiment_settings"]["repetitions"]
@@ -413,7 +422,7 @@ class MCTSExperimentRunner:
         # Create main progress bar for the phase
         phase_pbar = tqdm(
             total=total_experiments,
-            desc=f"🔬 {phase_name.replace('_', ' ').title()}",
+            desc=f" {phase_name.replace('_', ' ').title()}",
             ncols=100,
             position=0,
             leave=True,
