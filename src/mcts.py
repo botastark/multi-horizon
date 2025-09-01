@@ -4,6 +4,13 @@ from helper import uav_position, H, expected_posterior
 from new_camera import Camera
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
+import psutil, os
+
+
+def log_mem(prefix=""):
+    rss = psutil.Process(os.getpid()).memory_info().rss / 1e6
+    print(f"[{prefix}] Memory RSS: {rss:.1f} MB")
 
 
 # class DummyGrid:
@@ -22,7 +29,7 @@ def copy_state(state):
     # Deepcopy for dicts, but use .copy() for the NumPy array for efficiency
     new_state = {
         "uav_pos": copy.deepcopy(state["uav_pos"]),
-        "belief": state["belief"].copy(),  # or np.copy(state['belief'])
+        "belief": state["belief"].copy(),
     }
     return new_state
 
@@ -46,6 +53,7 @@ class MCTSNode:
         self.camera = camera  # Camera object for action space and position updates
         self.untried_actions = set(camera.permitted_actions(self.state["uav_pos"]))
         self.conf_dict = conf_dict  # Optional configuration dictionary for sensor model
+        self.lock = threading.Lock()  # For thread-safe updates
 
     def is_fully_expanded(self):
         # all possible actions have been tried
@@ -72,13 +80,14 @@ class MCTSNode:
     def is_terminal(self):
         return False
 
-    def apply_action(self, state, action):
-        next_state = copy_state(state)
-
+    def apply_action(self, state, action, copy_belief=True):
+        if copy_belief:
+            next_state = copy_state(state)  # used in EXPANSION
+        else:
+            next_state = state  # used in ROLLOUT
         next_state["uav_pos"] = uav_position(
             self.camera.x_future(action, x=state["uav_pos"])
         )
-
         return next_state
 
     def sensor_model(self, x_future):
@@ -95,7 +104,7 @@ class MCTSNode:
     def expand(self):
         # add child for untried action
         action = self.untried_actions.pop()
-        new_state = self.apply_action(self.state, action)
+        new_state = self.apply_action(self.state, action, copy_belief=True)
         child = MCTSNode(
             new_state,
             camera=self.camera,
@@ -119,7 +128,7 @@ class MCTSNode:
     ):
         """Update belief over the observed area using expected posterior."""
         expected_post = Pz1 * p_m1_z1 + Pz0 * p_m1_z0
-        belief = belief.copy()
+        # belief = belief.copy()
         belief[obsd_m_i_min:obsd_m_i_max, obsd_m_j_min:obsd_m_j_max, 1] = expected_post
         belief[obsd_m_i_min:obsd_m_i_max, obsd_m_j_min:obsd_m_j_max, 0] = (
             1 - expected_post
@@ -136,17 +145,21 @@ class MCTSNode:
         max_depth=10,
         discount_factor=1.0,
     ):
+        # TODO currently assumes expected posterior, could be changed to sampled observation
         # simulate random steps from this state, return reward
+        # log_mem("rollout start")
         state = copy_state(self.state)
         discount = 1.0
         total_reward = 0
         for t in range(max_depth):
             # 1. Get permitted actions from camera
             actions = self.camera.permitted_actions(state["uav_pos"])
+
+            # 2. Select an action randomly TODO could be smarter
             action = np.random.choice(actions)
 
             # 3. Apply the action to get the next state
-            state = self.apply_action(state, action)
+            state = self.apply_action(state, action, copy_belief=False)
             s0, s1 = self.sensor_model(state["uav_pos"])
 
             [[imin, imax], [jmin, jmax]] = self.camera.get_range(
@@ -157,18 +170,17 @@ class MCTSNode:
 
             obs_submap = state["belief"][imin:imax, jmin:jmax, 1]
             # 4. Simulate observation and
-
             a, b, p10, p11 = expected_posterior(obs_submap, s0, s1)
-            # 5. Compute immediate reward (e.g., info gain)
 
+            # 5. Compute immediate reward (e.g., info gain)
             reward = self.compute_reward(obs_submap, a, b, p10, p11)
             total_reward += discount * reward
+
             # 6. Update belief based on observation
             state["belief"] = self.belief_update(
                 state["belief"], imin, imax, jmin, jmax, a, b, p10, p11
             )
             discount *= discount_factor
-
         return total_reward
 
     def backpropagate(self, reward):
@@ -178,6 +190,19 @@ class MCTSNode:
             node.visit_count += 1
             node.value += reward
             node = node.parent
+
+    @staticmethod
+    def apply_virtual_loss(path, vloss=1.0):
+        # No locks needed if only main thread calls this
+        for n in path:
+            n.visit_count += 1
+            n.value -= vloss
+
+    @staticmethod
+    def backprop_with_reward(path, reward, vloss=1.0):
+        # Cancel the virtual loss, keep the visit that was already counted
+        for n in path:
+            n.value += vloss + reward
 
     def print_tree(self, max_depth=2, indent="", action_from_parent=None):
         """Recursively print the tree up to max_depth."""
@@ -214,17 +239,20 @@ class MCTSPlanner:
         self.parallel = parallel
         self.ucb1_c = ucb1_c
 
+    def _simulate_only(self, node):
+        # Worker thread function: NO TREE TOUCHING
+        return node.rollout(
+            discount_factor=self.discount_factor, max_depth=self.max_depth
+        )
+
     def search(self, num_iterations=100, timeout=None, return_action_scores=False):
         start_time = time.time()
         if self.parallel == 1:
             # Serial execution (default)
             for _ in range(num_iterations):
                 if timeout is not None and (time.time() - start_time) >= timeout:
-                    print(
-                        f"Timeout reached after {(time.time() - start_time):.2f} seconds."
-                    )
                     break
-                node = self.tree_policy()
+                node, path = self.tree_policy()
                 reward = node.rollout(
                     discount_factor=self.discount_factor, max_depth=self.max_depth
                 )
@@ -232,21 +260,34 @@ class MCTSPlanner:
         else:
             # Parallel execution
             with ThreadPoolExecutor(max_workers=self.parallel) as executor:
-                futures = []
+                futures = {}
                 for _ in range(num_iterations):
                     if timeout is not None and (time.time() - start_time) >= timeout:
-                        print(
-                            f"Timeout reached after {(time.time() - start_time):.2f} seconds."
-                        )
                         break
-                    node = self.tree_policy()
-                    # Schedule the rollout and backpropagation
-                    futures.append(
-                        executor.submit(self._rollout_and_backpropagate, node)
-                    )
-                # Wait for all futures to complete
-                for f in as_completed(futures):
-                    pass  # Results already handled in _rollout_and_backpropagate
+                    node, path = self.tree_policy()
+                    MCTSNode.apply_virtual_loss(path, vloss=1.0)
+                    # Schedule the rollout
+                    fut = executor.submit(self._simulate_only, node)
+                    futures[fut] = path
+                    # futures.append(
+                    #     executor.submit(
+                    #         node.rollout, self.max_depth, self.discount_factor
+                    #     )
+                    # )
+                    # paths.append(node)
+
+                for fut in as_completed(futures):
+                    try:
+                        reward = fut.result()
+                    except Exception as e:
+                        import traceback
+
+                        print("⚠️ Exception in rollout:", e)
+                        traceback.print_exc()
+                        continue
+                    path = futures[fut]
+                    # node.backpropagate(reward)
+                    MCTSNode.backprop_with_reward(path, reward, vloss=1.0)
 
         # def search(self, num_iterations=100, return_action_scores=False, timeout=None):
         #     start_time = time.time()
@@ -270,12 +311,17 @@ class MCTSPlanner:
 
     def tree_policy(self):
         node = self.root
+        path = [node]
         while not node.is_terminal():  # You can define is_terminal if needed
             if not node.is_fully_expanded():
-                return node.expand()
+                # return node.expand()
+                child = node.expand()
+                path.append(child)
+                return child, path
             else:
                 node = node.best_child(c_param=self.ucb1_c)
-        return node
+                path.append(node)
+        return node, path
 
     # def best_action(self):
     #     # Choose the action from root's children with the highest visit count
@@ -292,14 +338,22 @@ class MCTSPlanner:
     def visualize_tree(self, max_depth=2):
         self.root.print_tree(max_depth=max_depth)
 
-    def _rollout_and_backpropagate(self, node):
-        reward = node.rollout(
-            discount_factor=self.discount_factor, max_depth=self.max_depth
-        )
-        node.backpropagate(reward)
+    # def _rollout_and_backpropagate(self, node):
+    #     reward = node.rollout(
+    #         discount_factor=self.discount_factor, max_depth=self.max_depth
+    #     )
+    # node.backpropagate(reward)
 
 
 def test_mcts_planner_search_and_best_action():
+    class DummyGrid:
+        def __init__(self):
+            self.x = 60
+            self.y = 110
+            self.length = 1
+            self.center = False
+            self.shape = (60, 110)
+
     grid = DummyGrid()
     camera = Camera(
         grid, fov_angle=60, xy_step=1, h_range=[3, 5, 7, 12], camera_altitude=3
