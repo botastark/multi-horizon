@@ -1,0 +1,60 @@
+{
+  "_comment": "MCTS Experimental Configuration - Comprehensive Parameter Testing",
+  "_description": "This file contains all experimental phases for testing MCTS effectiveness",
+  
+  "base_config": {
+    "action_strategy": "mcts",
+    "field_type": "Gaussian",
+    "start_position": "corner",
+    "n_steps": 100,
+    "iters": 1,
+    "enable_plotting": true,
+    "enable_logging": true,
+    "project_path": "/home/bota/Desktop/active_sensing_extended_planner"
+  },
+
+  "mcts_experimental_phases": {
+
+    "phase_6_baseline_comparison": {
+      "_description": "Compare MCTS against other strategies",
+      "experiments": [
+        {
+          "name": "mcts_baseline",
+          "planning_depth": 3,
+          "num_iterations": 10,
+          "timeout": 5.0,
+          "ucb1_c": 1.4,
+          "parallel": 4,
+          "discount_factor": 1.0
+        }
+      ],
+      "comparison_strategies": ["ig_based", "entropy_guided"]
+    }
+  },
+
+  "experiment_settings": {
+    "field_types": ["Gaussian"],
+    "start_positions": ["corner"],
+    "repetitions": 20,
+    "error_margins": ["None"],
+    "correlation_types": ["equal"],
+    "metrics_to_track": [
+      "total_information_gain",
+      "entropy_reduction",
+      "coverage_percentage",
+      "planning_time_per_step",
+      "total_experiment_time",
+      "mse_improvement",
+      "nodes_expanded",
+      "tree_depth_reached"
+    ]
+  },
+
+  "output_settings": {
+    "results_folder": "mcts_experiments_trails",
+    "save_individual_runs": true,
+    "save_aggregated_results": true,
+    "plot_comparisons": true,
+    "save_timing_data": true
+  }
+}

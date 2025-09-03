@@ -231,116 +231,217 @@ def compute_metrics(ground_truth_map, belief, ms_set, grid):
     return (entropy, mse, coverage)
 
 
+# class FastLogger:
+#     HEADER = "step\tentropy\tmse\theight\tcoverage\n"
+
+#     def __init__(
+#         self,
+#         dir,
+#         strategy="ig",
+#         pairwise="equal",
+#         n_agent=1,
+#         e=0.3,
+#         grid=None,
+#         r=None,
+#         init_x=None,
+#         conf_dict=None,
+#     ):
+
+#         self.strategy = strategy
+#         self.pairwise = pairwise
+#         self.n = n_agent
+#         self.grid = grid
+#         self.init_x = init_x
+#         self.step = 0
+#         self.r = r
+#         self.e = e
+
+#         self.filename = (
+#             dir
+#             + "/"
+#             + self.strategy
+#             + "_"
+#             + self.pairwise
+#             + "_e"
+#             + str(self.e)
+#             + "_r"
+#             + str(self.r)
+#             + "_"
+#             + str(self.n)
+#             + ".txt"
+#         )
+
+#         os.makedirs(dir, exist_ok=True)
+
+#         with open(self.filename, "w") as f:
+#             f.write(f"Strategy: {self.strategy}\n")
+#             f.write(f"Pairwise: {self.pairwise}\n")
+#             f.write(f"N agents: {self.n}\n")
+#             f.write(f"Error margin: {self.e}\n")
+#             if conf_dict is not None:
+#                 f.write("confision matrix: {")
+
+#                 for key, value in conf_dict.items():
+#                     value_str = ", ".join(map(str, value))
+#                     f.write(f"{key}: [{value_str}] ")
+#                 f.write("}\n")
+#             if isinstance(self.r, str):
+#                 f.write(f"using {self.r} \n")
+#             else:
+#                 f.write(f"Gaussian radius {self.r} \n")
+#             f.write(
+#                 f"Grid info: range: 0-{self.grid.x}-{self.grid.y}, cell_size:{self.grid.length}, map shape: {self.grid.shape}, center:{self.grid.center}\n"
+#             )
+
+#             f.write(
+#                 f"init UAV position: {self.init_x.position} - {self.init_x.altitude} \n"
+#             )
+#             # Print table header with aligned columns
+#             f.write(
+#                 f"{'Step':<6} {'Entropy':<10} {'MSE':<8} {'Height':<8} {'Coverage':<10}\n"
+#             )
+#             f.write("-" * 48)  # Divider line
+#             f.write("\n")
+
+#     def log_data(self, entropy, mse, height, coverage):
+#         with open(self.filename, "a") as f:
+#             f.write(
+#                 f"{self.step:<6} {round(entropy, 2):<10} {round(mse, 4):<8} {round(height, 1):<8} {round(coverage, 4):<10}\n"
+#             )
+
+#             f.flush()
+#         self.step += 1
+
+#     def log(self, text):
+#         with open(self.filename, "a") as f:
+#             f.write(text + "\n")
+#             f.flush()
+
+#     def collect_data(self, filename=None):
+#         filename = filename or self.filename
+#         info = {"strategy": None, "pairwise": None, "agents": None}
+#         entropy, mse, height, coverage = [], [], [], []
+
+#         try:
+#             with open(filename, "r") as f:
+#                 lines = f.readlines()
+
+#             info["strategy"] = lines[0].strip()
+#             info["pairwise"] = lines[1].strip()
+#             info["agents"] = lines[2].strip()
+
+#             for line in lines[3:]:
+#                 raw = line.split("\t")
+#                 entropy.append(float(raw[1]))
+#                 mse.append(float(raw[2]))
+#                 height.append(float(raw[3]))
+#                 coverage.append(float(raw[4]))
+
+#         except (IOError, IndexError, ValueError) as e:
+#             print(f"Error reading or parsing data: {e}")
+
+#         return info, (entropy, mse, height, coverage)
+
+import os
+import datetime as _dt
+
+
 class FastLogger:
-    HEADER = "step\tentropy\tmse\theight\tcoverage\n"
+    """
+    Minimal, pretty text logger compatible with previous usage.
+
+    New features:
+      - Optionally prints extra header sections (e.g., MCTS params) **before** the step table
+      - log_data(...) now accepts step, action, ig (info gain) and prints extra columns
+      - Backwards compatible: old calls still work
+    """
 
     def __init__(
         self,
-        dir,
-        strategy="ig",
-        pairwise="equal",
-        n_agent=1,
-        e=0.3,
+        log_folder,
+        strategy="",
+        pairwise="",
         grid=None,
-        r=None,
         init_x=None,
+        r=None,
+        n_agent=None,
+        e=None,
         conf_dict=None,
+        filename="run.log",
+        header_extras=None,
     ):
+        os.makedirs(log_folder, exist_ok=True)
+        self.path = os.path.join(log_folder, filename)
+        self._f = open(self.path, "a", buffering=1)
 
-        self.strategy = strategy
-        self.pairwise = pairwise
-        self.n = n_agent
-        self.grid = grid
-        self.init_x = init_x
-        self.step = 0
-        self.r = r
-        self.e = e
-
-        self.filename = (
-            dir
-            + "/"
-            + self.strategy
-            + "_"
-            + self.pairwise
-            + "_e"
-            + str(self.e)
-            + "_r"
-            + str(self.r)
-            + "_"
-            + str(self.n)
-            + ".txt"
-        )
-
-        os.makedirs(dir, exist_ok=True)
-
-        with open(self.filename, "w") as f:
-            f.write(f"Strategy: {self.strategy}\n")
-            f.write(f"Pairwise: {self.pairwise}\n")
-            f.write(f"N agents: {self.n}\n")
-            f.write(f"Error margin: {self.e}\n")
-            if conf_dict is not None:
-                f.write("confision matrix: {")
-
-                for key, value in conf_dict.items():
-                    value_str = ", ".join(map(str, value))
-                    f.write(f"{key}: [{value_str}] ")
-                f.write("}\n")
-            if isinstance(self.r, str):
-                f.write(f"using {self.r} \n")
-            else:
-                f.write(f"Gaussian radius {self.r} \n")
-            f.write(
-                f"Grid info: range: 0-{self.grid.x}-{self.grid.y}, cell_size:{self.grid.length}, map shape: {self.grid.shape}, center:{self.grid.center}\n"
+        # Header
+        self._w(f"[{_dt.datetime.now().isoformat(timespec='seconds')}]\n")
+        self._w(f"Strategy: {strategy}\n")
+        self._w(f"Pairwise: {pairwise}\n")
+        if n_agent is not None:
+            self._w(f"N agents: {n_agent}\n")
+        self._w(f"Error margin: {e}\n")
+        self._w(f"Gaussian radius {r} \n")
+        if grid is not None:
+            shape = getattr(grid, "shape", None)
+            center = getattr(grid, "center", None)
+            x = getattr(grid, "x", None)
+            y = getattr(grid, "y", None)
+            length = getattr(grid, "length", None)
+            self._w(
+                f"Grid info: range: 0-{x}-{y}, cell_size:{length}, map shape: {shape}, center:{center}\n"
             )
+        if init_x is not None:
+            try:
+                pos = getattr(init_x, "position", getattr(init_x, "pos", init_x))
+                alt = getattr(init_x, "altitude", getattr(init_x, "alt", None))
+                self._w(f"init UAV position: {tuple(pos)} - {alt} \n")
+            except Exception:
+                self._w(f"init UAV position: {init_x}\n")
 
-            f.write(
-                f"init UAV position: {self.init_x.position} - {self.init_x.altitude} \n"
-            )
-            # Print table header with aligned columns
-            f.write(
-                f"{'Step':<6} {'Entropy':<10} {'MSE':<8} {'Height':<8} {'Coverage':<10}\n"
-            )
-            f.write("-" * 48)  # Divider line
-            f.write("\n")
+        # Header extras (e.g. MCTS params)
+        if header_extras:
+            for title, text in header_extras:
+                self._w(f"{title}: {text}\n")
 
-    def log_data(self, entropy, mse, height, coverage):
-        with open(self.filename, "a") as f:
-            f.write(
-                f"{self.step:<6} {round(entropy, 2):<10} {round(mse, 4):<8} {round(height, 1):<8} {round(coverage, 4):<10}\n"
-            )
+        # Table header
+        self._w("Step   Entropy      MSE        Height   Coverage   Action    IG\n")
+        self._w("----------------------------------------------------------------\n")
 
-            f.flush()
-        self.step += 1
+    def _w(self, s: str):
+        self._f.write(s)
 
-    def log(self, text):
-        with open(self.filename, "a") as f:
-            f.write(text + "\n")
-            f.flush()
+    def log(self, s: str):
+        self._w(str(s) + "\n")
 
-    def collect_data(self, filename=None):
-        filename = filename or self.filename
-        info = {"strategy": None, "pairwise": None, "agents": None}
-        entropy, mse, height, coverage = [], [], [], []
-
+    def log_data(
+        self,
+        entropy,
+        mse,
+        height,
+        coverage,
+        step=None,
+        action=None,
+        ig=None,
+    ):
+        """Pretty one-line row; old signature still works."""
         try:
-            with open(filename, "r") as f:
-                lines = f.readlines()
+            step_s = f"{step:<5d}" if step is not None else "-    "
+        except Exception:
+            step_s = f"{str(step):<5}"
+        ent_s = f"{float(entropy):<11.2f}"
+        mse_s = f"{float(mse):<10.3f}"
+        h_s = f"{float(height):<8.1f}"
+        cov_s = f"{float(coverage):<9.4f}"
+        act_s = f"{str(action):<8}" if action is not None else "-       "
+        ig_s = f"{float(ig):<.4f}" if ig is not None else "-"
+        self._w(f"{step_s} {ent_s} {mse_s} {h_s} {cov_s} {act_s} {ig_s}\n")
 
-            info["strategy"] = lines[0].strip()
-            info["pairwise"] = lines[1].strip()
-            info["agents"] = lines[2].strip()
-
-            for line in lines[3:]:
-                raw = line.split("\t")
-                entropy.append(float(raw[1]))
-                mse.append(float(raw[2]))
-                height.append(float(raw[3]))
-                coverage.append(float(raw[4]))
-
-        except (IOError, IndexError, ValueError) as e:
-            print(f"Error reading or parsing data: {e}")
-
-        return info, (entropy, mse, height, coverage)
+    def close(self):
+        try:
+            self._f.close()
+        except Exception:
+            pass
 
 
 import os
@@ -466,3 +567,32 @@ def create_run_folder(base_path):
     os.makedirs(run_folder_path)
 
     return run_folder_path
+
+
+# --- helper: compact tag for parameter-based result folders ---
+def make_param_tag(mcts_params):
+    import hashlib, json as _json
+
+    if not mcts_params:
+        return "default"
+    keys = [
+        "planning_depth",
+        "num_iterations",
+        "ucb1_c",
+        "discount_factor",
+        "timeout",
+        "parallel",
+    ]
+    parts = []
+    for k in keys:
+        if k in mcts_params:
+            v = mcts_params[k]
+            if isinstance(v, float):
+                v = round(v, 3)
+            # short key like pd, ni, uc, df, to, pa
+            short = "".join([w[0] for w in k.split("_")[:2]])
+            parts.append(f"{short}{v}")
+    if parts:
+        return "mcts_" + "_".join(parts)
+    h = hashlib.md5(_json.dumps(mcts_params, sort_keys=True).encode()).hexdigest()[:8]
+    return f"mcts_{h}"

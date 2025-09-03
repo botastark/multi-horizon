@@ -20,7 +20,7 @@ from uav_camera import Camera
 # from new_camera import Camera  # Updated import for new camera model
 from viewer import plot_metrics, plot_terrain, plot_terrain_2d
 
-from helper import create_run_folder
+from helper import create_run_folder, make_param_tag
 import matplotlib
 
 matplotlib.use("Agg")
@@ -99,15 +99,16 @@ def main():
         MODEL_PATH,
         CACHE_DIR,
     ) = load_global_paths(config)
-    # dir = create_run_folder(os.path.join(PROJECT_PATH, "results"))
-    dir = os.path.join(PROJECT_PATH, "trials")
-    results_folder = os.path.join(
-        dir,
-        f"{config['field_type'].lower()}_{config['start_position']}",
-    )
+    # base_dir = create_run_folder(os.path.join(PROJECT_PATH, "results"))
+    base_dir = os.path.join(PROJECT_PATH, "trials")
+    run_base = f"{config['field_type'].lower()}_{config['start_position']}"
+    if config.get("action_strategy") == "mcts" and config.get("params_in_path", True):
+        run_base = run_base + "__" + make_param_tag(config.get("mcts_params", {}))
+    results_folder = os.path.join(base_dir, run_base)
 
     ENABLE_STEPWISE_PLOTTING = config["enable_plotting"]
     ENABLE_LOGGING = config["enable_logging"]
+    mcts_params = config.get("mcts_params", {})
 
     field_type = config["field_type"]
     start_position = config["start_position"]
@@ -115,6 +116,7 @@ def main():
     correlation_types = config["correlation_types"]
     n_steps = config["n_steps"]
     iters = config["iters"]
+
     if isinstance(iters, int):
         iters = [0, iters]
     error_margins = [None if e == "None" else e for e in config["error_margins"]]
@@ -268,57 +270,58 @@ def main():
                     action_strategy,
                     conf_dict=conf_dict,
                     optimal_alt=optimal_alt,
+                    mcts_params=mcts_params,
                 )
                 # Select initial UAV starting position
 
-                if start_position == "border":
-                    w = 2 * min_alt * np.tan(np.deg2rad(fov * 0.5))
-                    # real_border = [
-                    #     (
-                    #         -grid_info.x / 2,
-                    #         random.uniform(-grid_info.y / 2, grid_info.y / 2),
-                    #     ),  # Left border
-                    #     (
-                    #         grid_info.x / 2,
-                    #         random.uniform(-grid_info.y / 2, grid_info.y / 2),
-                    #     ),  # Right border
-                    #     (
-                    #         random.uniform(-grid_info.x / 2, grid_info.x / 2),
-                    #         grid_info.y / 2,
-                    #     ),  # Top border
-                    #     (
-                    #         random.uniform(-grid_info.x / 2, grid_info.x / 2),
-                    #         -grid_info.y / 2,
-                    #     ),  # Bottom border
-                    # ]
-                    borders = [
+                if start_position == "edge":
+                    # w = 2 * min_alt * np.tan(np.deg2rad(fov * 0.5))
+                    real_border = [
                         (
-                            -grid_info.x / 2 + w / 2,
-                            random.uniform(
-                                -grid_info.y / 2 + w / 2, grid_info.y / 2 - w / 2
-                            ),
-                        ),  # Left border (x fixed, y random within inset vertical range)
+                            -grid_info.x / 2,
+                            random.uniform(-grid_info.y / 2, grid_info.y / 2),
+                        ),  # Left border
                         (
-                            grid_info.x / 2 - w / 2,
-                            random.uniform(
-                                -grid_info.y / 2 + w / 2, grid_info.y / 2 - w / 2
-                            ),
-                        ),  # Right border (x fixed, y random within inset vertical range)
+                            grid_info.x / 2,
+                            random.uniform(-grid_info.y / 2, grid_info.y / 2),
+                        ),  # Right border
                         (
-                            random.uniform(
-                                -grid_info.x / 2 + w / 2, grid_info.x / 2 - w / 2
-                            ),
-                            grid_info.y / 2 - w / 2,
-                        ),  # Top border (y fixed, x random within inset horizontal range)
+                            random.uniform(-grid_info.x / 2, grid_info.x / 2),
+                            grid_info.y / 2,
+                        ),  # Top border
                         (
-                            random.uniform(
-                                -grid_info.x / 2 + w / 2, grid_info.x / 2 - w / 2
-                            ),
-                            -grid_info.y / 2 + w / 2,
-                        ),  # Bottom border (y fixed, x random within inset horizontal range)
+                            random.uniform(-grid_info.x / 2, grid_info.x / 2),
+                            -grid_info.y / 2,
+                        ),  # Bottom border
                     ]
+                    # borders = [
+                    #     (
+                    #         -grid_info.x / 2 + w / 2,
+                    #         random.uniform(
+                    #             -grid_info.y / 2 + w / 2, grid_info.y / 2 - w / 2
+                    #         ),
+                    #     ),  # Left border (x fixed, y random within inset vertical range)
+                    #     (
+                    #         grid_info.x / 2 - w / 2,
+                    #         random.uniform(
+                    #             -grid_info.y / 2 + w / 2, grid_info.y / 2 - w / 2
+                    #         ),
+                    #     ),  # Right border (x fixed, y random within inset vertical range)
+                    #     (
+                    #         random.uniform(
+                    #             -grid_info.x / 2 + w / 2, grid_info.x / 2 - w / 2
+                    #         ),
+                    #         grid_info.y / 2 - w / 2,
+                    #     ),  # Top border (y fixed, x random within inset horizontal range)
+                    #     (
+                    #         random.uniform(
+                    #             -grid_info.x / 2 + w / 2, grid_info.x / 2 - w / 2
+                    #         ),
+                    #         -grid_info.y / 2 + w / 2,
+                    #     ),  # Bottom border (y fixed, x random within inset horizontal range)
+                    # ]
 
-                    start_pos = random.choice(borders)
+                    start_pos = random.choice(real_border)
 
                 elif start_position == "corner":
                     start_pos = random.choice(
@@ -341,6 +344,17 @@ def main():
                 entropy, mse, height, coverage = [], [], [], []
                 if ENABLE_LOGGING:
                     # Initialize logger for this iteration
+                    # logger = FastLogger(
+                    #     log_folder,
+                    #     strategy=action_strategy,
+                    #     pairwise=corr_type,
+                    #     grid=grid_info,
+                    #     init_x=uav_pos,
+                    #     r=grf_r,
+                    #     n_agent=iter,
+                    #     e=e_margin,
+                    #     conf_dict=conf_dict,
+                    # )
                     logger = FastLogger(
                         log_folder,
                         strategy=action_strategy,
@@ -351,13 +365,31 @@ def main():
                         n_agent=iter,
                         e=e_margin,
                         conf_dict=conf_dict,
+                        header_extras=[
+                            ("mcts_params", json.dumps(mcts_params, sort_keys=True))
+                        ],
                     )
                 # Create directory for saving step-by-step results
-                os.makedirs(
-                    results_folder
-                    + f"/{corr_type}_{action_strategy}_e{e_margin}_r{grf_r}/{iter}/steps/",
-                    exist_ok=True,
-                )
+                if ENABLE_STEPWISE_PLOTTING:
+                    os.makedirs(
+                        results_folder
+                        + f"/{corr_type}_{action_strategy}_e{e_margin}_r{grf_r}/{iter}/steps/",
+                        exist_ok=True,
+                    )
+                # also store mcts params as JSON alongside results (once per (corr, e) group)
+                if action_strategy == "mcts":
+                    params_out_dir = os.path.join(
+                        results_folder,
+                        f"{corr_type}_{action_strategy}_e{e_margin}_r{grf_r}",
+                    )
+                    os.makedirs(params_out_dir, exist_ok=True)
+                    try:
+                        with open(
+                            os.path.join(params_out_dir, "mcts_params.json"), "w"
+                        ) as f:
+                            json.dump(mcts_params, f, indent=2, sort_keys=True)
+                    except Exception:
+                        pass
 
                 # -------------------------------------------------------------------------
                 # Mapping and Planning Loop (per step)
@@ -405,8 +437,20 @@ def main():
                     height.append(uav_pos.altitude)
                     if ENABLE_LOGGING and logger is not None:
                         # Log current metrics and actions
-                        logger.log_data(entropy[-1], mse[-1], height[-1], coverage[-1])
-                        logger.log("actions: " + str(actions))
+                        logger.log_data(
+                            entropy[-1],
+                            mse[-1],
+                            height[-1],
+                            coverage[-1],
+                            step=step,
+                            action=actions[-1] if len(actions) > 0 else None,
+                            ig=(
+                                info_gain_action[actions[-1]]
+                                if len(actions) > 0
+                                else None
+                            ),
+                        )
+                        # logger.log("actions: " + str(actions))
                     if ENABLE_STEPWISE_PLOTTING:
                         # Save metrics plot for current iteration
                         plot_metrics(
