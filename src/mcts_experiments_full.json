@@ -14,7 +14,7 @@
   },
 
   "mcts_experimental_phases": {
-    
+  
     "phase_1_computational_budget": {
       "_description": "Test performance vs computational cost trade-offs",
       "experiments": [
@@ -47,18 +47,18 @@
         },
         {
           "name": "thorough",
-          "planning_depth": 8,
-          "num_iterations": 100,
-          "timeout": 20.0,
+          "planning_depth": 5,
+          "num_iterations": 75,
+          "timeout": 15.0,
           "ucb1_c": 1.4,
           "parallel": 8,
           "discount_factor": 1.0
         },
         {
           "name": "exhaustive",
-          "planning_depth": 10,
-          "num_iterations": 200,
-          "timeout": 30.0,
+          "planning_depth": 8,
+          "num_iterations": 100,
+          "timeout": 20.0,
           "ucb1_c": 1.4,
           "parallel": 8,
           "discount_factor": 1.0
@@ -71,47 +71,47 @@
       "experiments": [
         {
           "name": "pure_greedy",
-          "planning_depth": 5,
+          "planning_depth": 3,
           "num_iterations": 50,
-          "timeout": 10.0,
+          "timeout": 5.0,
           "ucb1_c": 0.1,
-          "parallel": 8,
+          "parallel": 4,
           "discount_factor": 1.0
         },
         {
           "name": "low_exploration",
-          "planning_depth": 5,
-          "num_iterations": 50,
-          "timeout": 10.0,
+          "planning_depth": 3,
+          "num_iterations": 25,
+          "timeout": 5.0,
           "ucb1_c": 0.7,
-          "parallel": 8,
+          "parallel": 4,
           "discount_factor": 1.0
         },
         {
           "name": "standard_exploration",
-          "planning_depth": 5,
-          "num_iterations": 50,
-          "timeout": 10.0,
+          "planning_depth": 3,
+          "num_iterations": 25,
+          "timeout": 5.0,
           "ucb1_c": 1.4,
-          "parallel": 8,
+          "parallel": 4,
           "discount_factor": 1.0
         },
         {
           "name": "high_exploration",
-          "planning_depth": 5,
-          "num_iterations": 50,
-          "timeout": 10.0,
+          "planning_depth": 3,
+          "num_iterations": 25,
+          "timeout": 5.0,
           "ucb1_c": 2.5,
-          "parallel": 8,
+          "parallel": 4,
           "discount_factor": 1.0
         },
         {
           "name": "very_high_exploration",
-          "planning_depth": 5,
-          "num_iterations": 50,
-          "timeout": 10.0,
+          "planning_depth": 3,
+          "num_iterations": 25,
+          "timeout": 5.0,
           "ucb1_c": 5.0,
-          "parallel": 8,
+          "parallel": 4,
           "discount_factor": 1.0
         }
       ]
@@ -123,44 +123,44 @@
         {
           "name": "myopic_shallow",
           "planning_depth": 3,
-          "num_iterations": 50,
-          "timeout": 10.0,
+          "num_iterations": 25,
+          "timeout": 5.0,
           "ucb1_c": 1.4,
-          "parallel": 8,
+          "parallel": 4,
           "discount_factor": 0.5
         },
         {
           "name": "short_term",
-          "planning_depth": 5,
-          "num_iterations": 50,
-          "timeout": 10.0,
+          "planning_depth": 3,
+          "num_iterations": 25,
+          "timeout": 5.0,
           "ucb1_c": 1.4,
-          "parallel": 8,
+          "parallel": 4,
           "discount_factor": 0.8
         },
         {
           "name": "medium_term",
-          "planning_depth": 8,
-          "num_iterations": 75,
-          "timeout": 15.0,
+          "planning_depth": 3,
+          "num_iterations": 25,
+          "timeout": 5.0,
           "ucb1_c": 1.4,
-          "parallel": 8,
+          "parallel": 4,
           "discount_factor": 0.95
         },
         {
           "name": "long_term",
-          "planning_depth": 10,
-          "num_iterations": 100,
-          "timeout": 20.0,
+          "planning_depth": 5,
+          "num_iterations": 50,
+          "timeout": 10.0,
           "ucb1_c": 1.4,
           "parallel": 8,
           "discount_factor": 1.0
         },
         {
           "name": "very_long_term",
-          "planning_depth": 15,
-          "num_iterations": 150,
-          "timeout": 30.0,
+          "planning_depth": 7,
+          "num_iterations": 75,
+          "timeout": 15.0,
           "ucb1_c": 1.4,
           "parallel": 8,
           "discount_factor": 1.0
@@ -174,8 +174,8 @@
         {
           "name": "sequential",
           "planning_depth": 5,
-          "num_iterations": 100,
-          "timeout": 20.0,
+          "num_iterations": 50,
+          "timeout": 15.0,
           "ucb1_c": 1.4,
           "parallel": 1,
           "discount_factor": 1.0
@@ -183,8 +183,8 @@
         {
           "name": "dual_core",
           "planning_depth": 5,
-          "num_iterations": 100,
-          "timeout": 20.0,
+          "num_iterations": 50,
+          "timeout": 15.0,
           "ucb1_c": 1.4,
           "parallel": 2,
           "discount_factor": 1.0
@@ -192,8 +192,8 @@
         {
           "name": "quad_core",
           "planning_depth": 5,
-          "num_iterations": 100,
-          "timeout": 20.0,
+          "num_iterations": 50,
+          "timeout": 15.0,
           "ucb1_c": 1.4,
           "parallel": 4,
           "discount_factor": 1.0
@@ -201,8 +201,8 @@
         {
           "name": "octa_core",
           "planning_depth": 5,
-          "num_iterations": 100,
-          "timeout": 20.0,
+          "num_iterations": 50,
+          "timeout": 15.0,
           "ucb1_c": 1.4,
           "parallel": 8,
           "discount_factor": 1.0
@@ -210,7 +210,7 @@
         {
           "name": "high_parallel",
           "planning_depth": 5,
-          "num_iterations": 100,
+          "num_iterations": 50,
           "timeout": 20.0,
           "ucb1_c": 1.4,
           "parallel": 16,
@@ -283,7 +283,7 @@
           "discount_factor": 1.0
         }
       ],
-      "comparison_strategies": ["sweep", "ig_based", "entropy_guided", "entropy_guided_combined"]
+      "comparison_strategies": ["sweep", "ig_based", "entropy_guided"]
     },
 
     "phase_7_robustness_testing": {
@@ -324,6 +324,8 @@
     "field_types": ["Gaussian"],
     "start_positions": ["corner", "edge"],
     "repetitions": 20,
+    "error_margins": [null, 0.3, 0.1, 0.05],
+    "correlation_types": ["equal", "biased", "adaptive"],
     "metrics_to_track": [
       "total_information_gain",
       "entropy_reduction",

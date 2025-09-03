@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import random
 import numpy as np
 from datetime import datetime
 import pandas as pd
@@ -59,20 +60,18 @@ class MCTSExperimentRunner:
             "strategy",
             "field_type",
             "start_position",
+            "error_margin",
+            "correlation_type",
             "rep",
-            "total_ig",
+            "final_entropy",
             "entropy_reduction",
+            "final_mse",
             "coverage_pct",
             "avg_planning_time",
             "total_time",
             "status",
         ]
         pd.DataFrame(columns=summary_headers).to_csv(self.summary_file, index=False)
-
-        # timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        # self.results_dir = create_run_folder(
-        #     os.path.join(self.PROJECT_PATH, "results", f"mcts_experiments_{timestamp}")
-        # )
 
     def save_single_result(self, phase_name, exp_name, result):
         """Save individual experiment result immediately."""
@@ -112,16 +111,19 @@ class MCTSExperimentRunner:
             "strategy": result.get("strategy", "mcts"),
             "field_type": result["field_type"],
             "start_position": result["start_position"],
+            "error_margin": result.get("error_margin", None),
+            "correlation_type": result.get("correlation_type", None),
             "rep": (
                 result["experiment_name"].split("_rep")[-1]
                 if "_rep" in result["experiment_name"]
                 else "0"
             ),
-            "total_ig": result["total_information_gain"],
+            "final_entropy": result.get("final_entropy", 0),
             "entropy_reduction": result["entropy_reduction"],
+            "final_mse": result.get("final_mse", 0),
             "coverage_pct": result["coverage_percentage"],
             "avg_planning_time": result["avg_planning_time_per_step"],
-            "total_time": result["total_time"],
+            "total_time": result.get("total_time", 0),
             "status": "completed",
         }
 
@@ -165,8 +167,7 @@ class MCTSExperimentRunner:
             use_sensor_model = True
 
         # Initialize random seed (from main.py)
-        seed = 123
-        rng = np.random.default_rng(seed)
+        rng = np.random.default_rng()  # system RNG, continues sequence
 
         # Initialize camera (from main.py)
         camera1 = Camera(
@@ -209,6 +210,8 @@ class MCTSExperimentRunner:
         start_position,
         n_steps=100,
         mcts_params=None,
+        error_margin=None,
+        correlation_type="equal",
     ):
         """Run a single experiment following main.py pattern."""
 
@@ -227,17 +230,16 @@ class MCTSExperimentRunner:
             assert ground_truth_map.shape == belief_map[:, :, 0].shape
 
             # Setup confidence dictionary (from main.py)
-            error_margin = None  # You can make this configurable
-            if error_margin is not None:
-                conf_dict = map_field.init_s0_s1(
-                    e=error_margin,
-                    sensor=use_sensor_model,
-                )
-            else:
+            if error_margin is None or (
+                isinstance(error_margin, str) and error_margin.lower() == "none"
+            ):
                 conf_dict = None
+            else:
+                conf_dict = map_field.init_s0_s1(
+                    e=error_margin, sensor=use_sensor_model
+                )
 
             # Initialize occupancy map (from main.py)
-            correlation_type = "equal"  # You can make this configurable
             occupancy_map = OM(
                 grid_size=grid_info.shape,
                 conf_dict=conf_dict,
@@ -257,16 +259,40 @@ class MCTSExperimentRunner:
 
             # Select initial UAV starting position (from main.py)
             if start_position == "corner":
-                start_pos = (
-                    -grid_info.x / 2,
-                    -grid_info.y / 2,
-                )  # Use one corner for consistency
-            elif start_position == "center":
-                start_pos = (0, 0)
+                start_pos = random.choice(
+                    [
+                        (-grid_info.x / 2, -grid_info.y / 2),
+                        (-grid_info.x / 2, grid_info.y / 2),
+                        (grid_info.x / 2, -grid_info.y / 2),
+                        (grid_info.x / 2, grid_info.y / 2),
+                    ]
+                )
+
             elif start_position == "edge":
-                start_pos = (-grid_info.x / 4, 0)
+                start_pos = random.choice(
+                    [
+                        (
+                            -grid_info.x / 2,
+                            random.uniform(-grid_info.y / 2, grid_info.y / 2),
+                        ),  # Left border
+                        (
+                            grid_info.x / 2,
+                            random.uniform(-grid_info.y / 2, grid_info.y / 2),
+                        ),  # Right border
+                        (
+                            random.uniform(-grid_info.x / 2, grid_info.x / 2),
+                            grid_info.y / 2,
+                        ),  # Top border
+                        (
+                            random.uniform(-grid_info.x / 2, grid_info.x / 2),
+                            -grid_info.y / 2,
+                        ),  # Bottom border
+                    ]
+                )
             else:
-                start_pos = (0, 0)  # Default to center
+                raise ValueError(
+                    f"Invalid start_position: {start_position} (must be 'corner' or 'edge')"
+                )
 
             # Initialize UAV position (from main.py)
             uav_pos = uav_position((start_pos, camera1.get_hrange()[0]))
@@ -290,9 +316,9 @@ class MCTSExperimentRunner:
                 range(n_steps),
                 desc=f"{strategy.upper()}: {exp_name[:25]}",
                 leave=False,
-                position=1,
-                ncols=80,
-                miniters=1,
+                position=2,
+                dynamic_ncols=True,
+                ascii=True,
             )
 
             for step in steps_pbar:
@@ -306,9 +332,6 @@ class MCTSExperimentRunner:
 
                 # Get field observations (from main.py)
                 fp_vertices_ij, submap = map_field.get_observations(uav_pos, sigmas)
-
-                # Get observed field range (from main.py)
-                # observed_field_range = camera1.get_range(index_form=False)
 
                 # Update occupancy map with new observation and propagate messages (from main.py)
                 occupancy_map.update_belief_OG(fp_vertices_ij, submap, uav_pos)
@@ -357,28 +380,29 @@ class MCTSExperimentRunner:
             steps_pbar.close()
             total_time = time.time() - start_time
 
-            # Calculate final results
-            total_ig = sum(step_igs)
-            final_entropy = entropy[-1] if entropy else 0
-            entropy_reduction = entropy[0] - entropy[-1] if len(entropy) > 1 else 0
-            coverage_percentage = coverage[-1] if coverage else 0
-            avg_planning_time = np.mean(step_times) if step_times else 0
-
             results = {
                 "experiment_name": exp_name,
-                "parameters": mcts_params,
+                "parameters": mcts_params if strategy == "mcts" else {},
                 "field_type": field_type,
                 "start_position": start_position,
+                "error_margin": error_margin,
+                "correlation_type": correlation_type,
                 "n_steps": n_steps,
-                "total_information_gain": total_ig,
-                "final_entropy": final_entropy,
-                "entropy_reduction": entropy_reduction,
-                "coverage_percentage": coverage_percentage * 100,
+                # Trajectory
+                "uav_positions": [
+                    (pos.position, pos.altitude) for pos in uav_positions
+                ],
+                "actions": actions,
+                # Final metrics
+                "final_entropy": entropy[-1] if entropy else 0,
+                "entropy_reduction": (
+                    entropy[0] - entropy[-1] if len(entropy) > 1 else 0
+                ),
+                "coverage_percentage": coverage[-1] * 100 if coverage else 0,
                 "final_mse": mse[-1] if mse else 0,
                 "total_time": total_time,
-                "avg_planning_time_per_step": avg_planning_time,
-                "step_information_gains": step_igs,
-                "step_times": step_times,
+                "avg_planning_time_per_step": np.mean(step_times) if step_times else 0,
+                # Timelines
                 "entropy_timeline": entropy,
                 "mse_timeline": mse,
                 "coverage_timeline": coverage,
@@ -393,21 +417,28 @@ class MCTSExperimentRunner:
                 "experiment_name": exp_name,
                 "parameters": mcts_params,
                 "field_type": field_type,
+                "error_margin": error_margin,
+                "correlation_type": correlation_type,
                 "start_position": start_position,
                 "error": str(e),
                 "status": "failed",
-                "total_information_gain": 0,
                 "entropy_reduction": 0,
                 "coverage_percentage": 0,
                 "avg_planning_time_per_step": 0,
-                "total_time": 0,
             }
             return result
 
     def run_phase(self, phase_name, phase_config):
         """Run all experiments in a phase."""
         print(f"\n=== Running {phase_name} ===")
+        np.random.seed(123)
+        random.seed(123)
+
         phase_results = {}
+        error_margin = self.config["experiment_settings"]["error_margins"][
+            0
+        ]  # pick first or set manually
+        correlation_type = self.config["experiment_settings"]["correlation_types"][0]
 
         experiments = phase_config["experiments"]
         strategy = phase_config.get("strategy", "mcts")
@@ -424,7 +455,7 @@ class MCTSExperimentRunner:
             total=total_experiments,
             desc=f" {phase_name.replace('_', ' ').title()}",
             ncols=100,
-            position=0,
+            position=1,
             leave=True,
         )
 
@@ -432,7 +463,6 @@ class MCTSExperimentRunner:
         for exp in experiments:
             exp_name = exp["name"]
             mcts_params = {k: v for k, v in exp.items() if k != "name"}
-
             exp_results = []
 
             # Run across different field types and start positions
@@ -450,6 +480,8 @@ class MCTSExperimentRunner:
                             start_pos,
                             self.config["base_config"]["n_steps"],
                             mcts_params=mcts_params,
+                            error_margin=error_margin,
+                            correlation_type=correlation_type,
                         )
                         # Save immediately
                         self.save_single_result(phase_name, exp_name, result)
@@ -460,10 +492,7 @@ class MCTSExperimentRunner:
                         phase_pbar.update(1)
 
                         # Update postfix with completion status
-                        ig_val = result.get("total_information_gain", 0)
-                        phase_pbar.set_postfix_str(
-                            f"✅ {full_exp_name} (IG: {ig_val:.2f})"
-                        )
+                        phase_pbar.set_postfix_str(f"✅ {full_exp_name})")
 
             phase_results[exp_name] = exp_results
 
@@ -493,10 +522,9 @@ class MCTSExperimentRunner:
                     # Results by phase
                     for phase in df["phase"].unique():
                         phase_df = df[df["phase"] == phase]
-                        avg_ig = phase_df["total_ig"].mean()
                         avg_time = phase_df["avg_planning_time"].mean()
                         f.write(
-                            f"{phase}: {len(phase_df)} runs, Avg IG: {avg_ig:.2f}, Avg Time: {avg_time:.4f}s\n"
+                            f"{phase}: {len(phase_df)} runs, Avg Time: {avg_time:.4f}s\n"
                         )
                 else:
                     f.write("No experiments completed yet.\n")
@@ -563,53 +591,23 @@ class MCTSExperimentRunner:
 
         master_pbar.close()
 
-        # Final summary (data already saved incrementally)
-        self.generate_final_summary()
-
         print("\n🎉 All experiments completed!")
         print(f"📊 Results saved in: {self.results_dir}")
         return self.results
 
-    def generate_final_summary(self):
-        """Generate final summary from saved data."""
-        try:
-            df = pd.read_csv(self.summary_file)
-
-            summary_file = os.path.join(self.results_dir, "experiment_summary.txt")
-            with open(summary_file, "w") as f:
-                f.write("MCTS EXPERIMENTS - FINAL SUMMARY\n")
-                f.write("=" * 50 + "\n\n")
-                f.write(f"Total Experiments: {len(df)}\n")
-                f.write(
-                    f"Completed Successfully: {len(df[df['status'] == 'completed'])}\n"
-                )
-                f.write(f"Failed: {len(df[df['status'] == 'failed'])}\n\n")
-
-                # Best performing experiments
-                if len(df) > 0:
-                    best_ig = df.loc[df["total_ig"].idxmax()]
-                    f.write(
-                        f"Best Information Gain: {best_ig['experiment']} ({best_ig['total_ig']:.2f})\n"
-                    )
-
-                    fastest = df.loc[df["avg_planning_time"].idxmin()]
-                    f.write(
-                        f"Fastest Planning: {fastest['experiment']} ({fastest['avg_planning_time']:.4f}s)\n"
-                    )
-
-            print(f"📋 Final summary saved to: {summary_file}")
-
-        except Exception as e:
-            print(f"Could not generate final summary: {e}")
-
     def run_baseline_comparison(self, phase_config):
         """Run MCTS vs other strategies comparison."""
         print(f"\n=== Running Baseline Comparison ===")
+        np.random.seed(123)
+        random.seed(123)
 
         strategies = ["mcts"] + phase_config["comparison_strategies"]
         mcts_params = (
             phase_config["experiments"][0] if phase_config["experiments"] else {}
         )
+
+        error_margin = self.config["experiment_settings"]["error_margins"][0]
+        correlation_type = self.config["experiment_settings"]["correlation_types"][0]
 
         comparison_results = {}
 
@@ -653,8 +651,9 @@ class MCTSExperimentRunner:
                             start_pos,
                             self.config["base_config"]["n_steps"],
                             mcts_params=mcts_params,
+                            error_margin=error_margin,
+                            correlation_type=correlation_type,
                         )
-
                         result["strategy"] = strategy
                         # Save immediately after each run
                         self.save_single_result(
@@ -667,9 +666,10 @@ class MCTSExperimentRunner:
                         strategy_results.append(result)
                         baseline_pbar.update(1)
 
-                        ig_val = result.get("total_information_gain", 0)
+                        ent = result.get("entropy_reduction", 0)
+                        cov = result.get("coverage_percentage", 0)
                         baseline_pbar.set_postfix_str(
-                            f"✅ {full_exp_name} (IG: {ig_val:.2f})"
+                            f"✅ {full_exp_name} (ΔH: {ent:.2f}, Cov: {cov:.1f}%)"
                         )
 
             comparison_results[strategy] = strategy_results
@@ -720,38 +720,49 @@ class MCTSExperimentRunner:
                                 "strategy": result.get("strategy", strategy),
                                 "field_type": result["field_type"],
                                 "start_position": result["start_position"],
-                                "total_ig": result["total_information_gain"],
-                                "entropy_reduction": result["entropy_reduction"],
-                                "coverage_pct": result["coverage_percentage"],
-                                "avg_planning_time": result[
-                                    "avg_planning_time_per_step"
-                                ],
-                                "total_time": result["total_time"],
+                                "error_margin": result.get("error_margin", None),
+                                "correlation_type": result.get(
+                                    "correlation_type", None
+                                ),
+                                "final_entropy": result.get("final_entropy", 0),
+                                "entropy_reduction": result.get("entropy_reduction", 0),
+                                "final_mse": result.get("final_mse", 0),
+                                "mse_reduction": result.get("mse_reduction", 0),
+                                "coverage_pct": result.get("coverage_percentage", 0),
+                                "avg_planning_time": result.get(
+                                    "avg_planning_time_per_step", 0
+                                ),
+                                "total_time": result.get("total_time", 0),
+                                "status": result.get("status", "completed"),
                             }
                         )
             else:
                 for exp_name, exp_results in phase_results.items():
                     for result in exp_results:
-                        summary_data.append(
-                            {
-                                "phase": phase_name,
-                                "experiment": exp_name,
-                                "strategy": "mcts",
-                                "field_type": result["field_type"],
-                                "start_position": result["start_position"],
-                                "total_ig": result["total_information_gain"],
-                                "entropy_reduction": result["entropy_reduction"],
-                                "coverage_pct": result["coverage_percentage"],
-                                "avg_planning_time": result[
-                                    "avg_planning_time_per_step"
-                                ],
-                                "total_time": result["total_time"],
-                                **{
-                                    f"param_{k}": v
-                                    for k, v in result["parameters"].items()
-                                },
-                            }
+                        row = {
+                            "phase": phase_name,
+                            "experiment": exp_name,
+                            "strategy": "mcts",
+                            "field_type": result["field_type"],
+                            "start_position": result["start_position"],
+                            "error_margin": result.get("error_margin", None),
+                            "correlation_type": result.get("correlation_type", None),
+                            "final_entropy": result.get("final_entropy", 0),
+                            "entropy_reduction": result.get("entropy_reduction", 0),
+                            "final_mse": result.get("final_mse", 0),
+                            "mse_reduction": result.get("mse_reduction", 0),
+                            "coverage_pct": result.get("coverage_percentage", 0),
+                            "avg_planning_time": result.get(
+                                "avg_planning_time_per_step", 0
+                            ),
+                            "total_time": result.get("total_time", 0),
+                            "status": result.get("status", "completed"),
+                        }
+                        # also append parameters
+                        row.update(
+                            {f"param_{k}": v for k, v in result["parameters"].items()}
                         )
+                        summary_data.append(row)
 
         if summary_data:  # Only save if there's data
             df = pd.DataFrame(summary_data)
@@ -760,45 +771,6 @@ class MCTSExperimentRunner:
             print(f"Summary CSV saved with {len(summary_data)} rows")
         else:
             print("No data to save in summary CSV")
-
-    def generate_summary_report(self):
-        """Generate a summary report of all experiments."""
-        report_file = os.path.join(self.results_dir, "experiment_report.txt")
-
-        with open(report_file, "w") as f:
-            f.write("MCTS EXPERIMENTAL RESULTS SUMMARY\n")
-            f.write("=" * 50 + "\n\n")
-            f.write(
-                f"Experiment Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-            )
-            f.write(f"Results Directory: {self.results_dir}\n\n")
-
-            # Summary for each phase
-            for phase_name, phase_results in self.results.items():
-                f.write(f"\n{phase_name.upper().replace('_', ' ')}\n")
-                f.write("-" * 40 + "\n")
-
-                if phase_name == "phase_6_baseline_comparison":
-                    for strategy, results in phase_results.items():
-                        avg_ig = np.mean([r["total_information_gain"] for r in results])
-                        avg_time = np.mean(
-                            [r["avg_planning_time_per_step"] for r in results]
-                        )
-                        f.write(
-                            f"{strategy}: Avg IG = {avg_ig:.2f}, Avg Time = {avg_time:.4f}s\n"
-                        )
-                else:
-                    for exp_name, exp_results in phase_results.items():
-                        avg_ig = np.mean(
-                            [r["total_information_gain"] for r in exp_results]
-                        )
-                        avg_time = np.mean(
-                            [r["avg_planning_time_per_step"] for r in exp_results]
-                        )
-                        f.write(
-                            f"{exp_name}: Avg IG = {avg_ig:.2f}, Avg Time = {avg_time:.4f}s\n"
-                        )
-        print(f"Summary report generated: {report_file}")
 
 
 def main():

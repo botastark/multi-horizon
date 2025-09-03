@@ -1,0 +1,447 @@
+{
+  "base_config": "config.json",
+  "experiments": [
+
+    {
+      "name": "gaussian_edge_pd3_ni10_uc1.0_df0.95_pa1_to1.5",
+      "overrides": {
+        "field_type": "Gaussian",
+        "start_position": "edge",
+        "action_strategy": "mcts",
+        "params_in_path": true,
+        "n_steps": 100,
+        "iters": [
+          0,
+          20
+        ],
+        "mcts_params": {
+          "planning_depth": 3,
+          "num_iterations": 10,
+          "ucb1_c": 1.0,
+          "discount_factor": 0.95,
+          "timeout": 5,
+          "parallel": 1
+        }
+      }
+    },
+    {
+      "name": "gaussian_edge_pd3_ni25_uc1.0_df0.95_pa8_to1.0",
+      "overrides": {
+        "field_type": "Gaussian",
+        "start_position": "edge",
+        "action_strategy": "mcts",
+        "params_in_path": true,
+        "n_steps": 100,
+        "iters": [
+          0,
+          20
+        ],
+        "mcts_params": {
+          "planning_depth": 3,
+          "num_iterations": 25,
+          "ucb1_c": 1.0,
+          "discount_factor": 0.95,
+          "timeout": 3,
+          "parallel": 8
+        }
+      }
+    },
+    {
+      "name": "gaussian_edge_pd3_ni50_uc1.0_df0.95_pa4_to2.5",
+      "overrides": {
+        "field_type": "Gaussian",
+        "start_position": "edge",
+        "action_strategy": "mcts",
+        "params_in_path": true,
+        "n_steps": 100,
+        "iters": [
+          16,
+          20
+        ],
+        "mcts_params": {
+          "planning_depth": 3,
+          "num_iterations": 50,
+          "ucb1_c": 1.0,
+          "discount_factor": 0.95,
+          "timeout": 10,
+          "parallel": 4
+        }
+      }
+    },
+    {
+      "name": "gaussian_edge_pd5_ni25_uc1.0_df0.95_pa4_to1.5",
+      "overrides": {
+        "field_type": "Gaussian",
+        "start_position": "edge",
+        "action_strategy": "mcts",
+        "params_in_path": true,
+        "n_steps": 100,
+        "iters": [
+          0,
+          20
+        ],
+        "mcts_params": {
+          "planning_depth": 5,
+          "num_iterations": 25,
+          "ucb1_c": 1.0,
+          "discount_factor": 0.95,
+          "timeout": 5,
+          "parallel": 4
+        }
+      }
+    },
+    {
+      "name": "gaussian_edge_pd10_ni25_uc1.0_df0.95_pa4_to2.5",
+      "overrides": {
+        "field_type": "Gaussian",
+        "start_position": "edge",
+        "action_strategy": "mcts",
+        "params_in_path": true,
+        "n_steps": 100,
+        "iters": [
+          0,
+          20
+        ],
+        "mcts_params": {
+          "planning_depth": 10,
+          "num_iterations": 25,
+          "ucb1_c": 1.0,
+          "discount_factor": 0.95,
+          "timeout": 10,
+          "parallel": 4
+        }
+      }
+    },
+    {
+      "name": "gaussian_edge_pd5_ni50_uc0.9_df0.95_pa4_to2.5",
+      "overrides": {
+        "field_type": "Gaussian",
+        "start_position": "edge",
+        "action_strategy": "mcts",
+        "params_in_path": true,
+        "n_steps": 100,
+        "iters": [
+          0,
+          20
+        ],
+        "mcts_params": {
+          "planning_depth": 5,
+          "num_iterations": 50,
+          "ucb1_c": 0.9,
+          "discount_factor": 0.95,
+          "timeout": 10,
+          "parallel": 4
+        }
+      }
+    },
+    {
+      "name": "gaussian_edge_pd5_ni75_uc0.9_df0.95_pa1_to8.0",
+      "overrides": {
+        "field_type": "Gaussian",
+        "start_position": "edge",
+        "action_strategy": "mcts",
+        "params_in_path": true,
+        "n_steps": 100,
+        "iters": [
+          0,
+          20
+        ],
+        "mcts_params": {
+          "planning_depth": 5,
+          "num_iterations": 75,
+          "ucb1_c": 0.9,
+          "discount_factor": 0.95,
+          "timeout": 15.0,
+          "parallel": 1
+        }
+      }
+    },
+    {
+      "name": "gaussian_edge_pd5_ni50_uc0.5_df0.95_pa4_to2.5",
+      "overrides": {
+        "field_type": "Gaussian",
+        "start_position": "edge",
+        "action_strategy": "mcts",
+        "params_in_path": true,
+        "n_steps": 100,
+        "iters": [
+          14,
+          20
+        ],
+        "mcts_params": {
+          "planning_depth": 5,
+          "num_iterations": 50,
+          "ucb1_c": 0.5,
+          "discount_factor": 0.95,
+          "timeout": 10,
+          "parallel": 4
+        }
+      }
+    },
+    {
+      "name": "gaussian_edge_pd5_ni50_uc1.4_df0.95_pa4_to2.5",
+      "overrides": {
+        "field_type": "Gaussian",
+        "start_position": "edge",
+        "action_strategy": "mcts",
+        "params_in_path": true,
+        "n_steps": 100,
+        "iters": [
+          0,
+          20
+        ],
+        "mcts_params": {
+          "planning_depth": 5,
+          "num_iterations": 50,
+          "ucb1_c": 1.4,
+          "discount_factor": 0.95,
+          "timeout": 10,
+          "parallel": 4
+        }
+      }
+    },
+    {
+      "name": "gaussian_edge_pd5_ni50_uc1.0_df1.0_pa4_to2.5",
+      "overrides": {
+        "field_type": "Gaussian",
+        "start_position": "edge",
+        "action_strategy": "mcts",
+        "params_in_path": true,
+        "n_steps": 100,
+        "iters": [
+          0,
+          20
+        ],
+        "mcts_params": {
+          "planning_depth": 5,
+          "num_iterations": 50,
+          "ucb1_c": 1.0,
+          "discount_factor": 1.0,
+          "timeout": 10,
+          "parallel": 4
+        }
+      }
+    },
+    
+    {
+      "name": "ortomap_edge_pd3_ni10_uc1.0_df0.95_pa1_to1.5",
+      "overrides": {
+        "field_type": "Ortomap",
+        "start_position": "edge",
+        "action_strategy": "mcts",
+        "params_in_path": true,
+        "n_steps": 100,
+        "iters": [
+          0,
+          20
+        ],
+        "mcts_params": {
+          "planning_depth": 3,
+          "num_iterations": 10,
+          "ucb1_c": 1.0,
+          "discount_factor": 0.95,
+          "timeout": 5,
+          "parallel": 1
+        }
+      }
+    },
+    {
+      "name": "ortomap_edge_pd3_ni25_uc1.0_df0.95_pa8_to1.0",
+      "overrides": {
+        "field_type": "Ortomap",
+        "start_position": "edge",
+        "action_strategy": "mcts",
+        "params_in_path": true,
+        "n_steps": 100,
+        "iters": [
+          0,
+          20
+        ],
+        "mcts_params": {
+          "planning_depth": 3,
+          "num_iterations": 25,
+          "ucb1_c": 1.0,
+          "discount_factor": 0.95,
+          "timeout": 3,
+          "parallel": 8
+        }
+      }
+    },
+    {
+      "name": "ortomap_edge_pd3_ni50_uc1.0_df0.95_pa4_to2.5",
+      "overrides": {
+        "field_type": "Ortomap",
+        "start_position": "edge",
+        "action_strategy": "mcts",
+        "params_in_path": true,
+        "n_steps": 100,
+        "iters": [
+          0,
+          20
+        ],
+        "mcts_params": {
+          "planning_depth": 3,
+          "num_iterations": 50,
+          "ucb1_c": 1.0,
+          "discount_factor": 0.95,
+          "timeout": 10,
+          "parallel": 4
+        }
+      }
+    },
+    {
+      "name": "ortomap_edge_pd5_ni25_uc1.0_df0.95_pa4_to1.5",
+      "overrides": {
+        "field_type": "Ortomap",
+        "start_position": "edge",
+        "action_strategy": "mcts",
+        "params_in_path": true,
+        "n_steps": 100,
+        "iters": [
+          0,
+          20
+        ],
+        "mcts_params": {
+          "planning_depth": 5,
+          "num_iterations": 25,
+          "ucb1_c": 1.0,
+          "discount_factor": 0.95,
+          "timeout": 5,
+          "parallel": 4
+        }
+      }
+    },
+    {
+      "name": "ortomap_edge_pd10_ni25_uc1.0_df0.95_pa4_to2.5",
+      "overrides": {
+        "field_type": "Ortomap",
+        "start_position": "edge",
+        "action_strategy": "mcts",
+        "params_in_path": true,
+        "n_steps": 100,
+        "iters": [
+          0,
+          20
+        ],
+        "mcts_params": {
+          "planning_depth": 10,
+          "num_iterations": 25,
+          "ucb1_c": 1.0,
+          "discount_factor": 0.95,
+          "timeout": 10,
+          "parallel": 4
+        }
+      }
+    },
+    {
+      "name": "ortomap_edge_pd5_ni50_uc0.9_df0.95_pa4_to2.5",
+      "overrides": {
+        "field_type": "Ortomap",
+        "start_position": "edge",
+        "action_strategy": "mcts",
+        "params_in_path": true,
+        "n_steps": 100,
+        "iters": [
+          0,
+          20
+        ],
+        "mcts_params": {
+          "planning_depth": 5,
+          "num_iterations": 50,
+          "ucb1_c": 0.9,
+          "discount_factor": 0.95,
+          "timeout": 10,
+          "parallel": 4
+        }
+      }
+    },
+    {
+      "name": "ortomap_edge_pd5_ni75_uc0.9_df0.95_pa1_to8.0",
+      "overrides": {
+        "field_type": "Ortomap",
+        "start_position": "edge",
+        "action_strategy": "mcts",
+        "params_in_path": true,
+        "n_steps": 100,
+        "iters": [
+          0,
+          20
+        ],
+        "mcts_params": {
+          "planning_depth": 5,
+          "num_iterations": 75,
+          "ucb1_c": 0.9,
+          "discount_factor": 0.95,
+          "timeout": 15.0,
+          "parallel": 1
+        }
+      }
+    },
+    {
+      "name": "ortomap_edge_pd5_ni50_uc0.5_df0.95_pa4_to2.5",
+      "overrides": {
+        "field_type": "Ortomap",
+        "start_position": "edge",
+        "action_strategy": "mcts",
+        "params_in_path": true,
+        "n_steps": 100,
+        "iters": [
+          0,
+          20
+        ],
+        "mcts_params": {
+          "planning_depth": 5,
+          "num_iterations": 50,
+          "ucb1_c": 0.5,
+          "discount_factor": 0.95,
+          "timeout": 10,
+          "parallel": 4
+        }
+      }
+    },
+    {
+      "name": "ortomap_edge_pd5_ni50_uc1.4_df0.95_pa4_to2.5",
+      "overrides": {
+        "field_type": "Ortomap",
+        "start_position": "edge",
+        "action_strategy": "mcts",
+        "params_in_path": true,
+        "n_steps": 100,
+        "iters": [
+          0,
+          20
+        ],
+        "mcts_params": {
+          "planning_depth": 5,
+          "num_iterations": 50,
+          "ucb1_c": 1.4,
+          "discount_factor": 0.95,
+          "timeout": 10,
+          "parallel": 4
+        }
+      }
+    },
+    {
+      "name": "ortomap_edge_pd5_ni50_uc1.0_df1.0_pa4_to2.5",
+      "overrides": {
+        "field_type": "Ortomap",
+        "start_position": "edge",
+        "action_strategy": "mcts",
+        "params_in_path": true,
+        "n_steps": 100,
+        "iters": [
+          0,
+          20
+        ],
+        "mcts_params": {
+          "planning_depth": 5,
+          "num_iterations": 50,
+          "ucb1_c": 1.0,
+          "discount_factor": 1.0,
+          "timeout": 10,
+          "parallel": 4
+        }
+      }
+    }
+  ]
+}

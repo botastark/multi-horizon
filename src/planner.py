@@ -225,7 +225,7 @@ class planning:
         self.last_action = next_action
         return next_action, action_ig_total
 
-    def entropy_guided(self, permitted_actions, beta=0.2):
+    def entropy_guided(self, permitted_actions, beta=0.05):
         """New strategy that steers UAV toward high-entropy regions with local IG."""
         info_score = {}
 
@@ -316,16 +316,7 @@ class planning:
         self.last_action = next_action
         return next_action, info_score
 
-    def mcts_based(
-        self,
-        **kwargs
-        # planning_depth=5,
-        # num_iterations=10,
-        # timeout=10.0,
-        # ucb1_c=1.4,
-        # parallel=8,
-        # discount_factor=1.0,
-    ):
+    def mcts_based(self, **kwargs):
         """
         MCTS-based action selection with configurable parameters for experiments.
 
@@ -349,18 +340,11 @@ class planning:
             state,
             self.uav,
             conf_dict=self.conf_dict,
-            # discount_factor=discount_factor,
-            # max_depth=planning_depth,
-            # parallel=parallel,
-            # ucb1_c=ucb1_c,
             discount_factor=params["discount_factor"],
             max_depth=params["planning_depth"],
             parallel=params["parallel"],
             ucb1_c=params["ucb1_c"],
         )
-        # action, score = mcts_planner.search(
-        #     num_iterations=num_iterations, return_action_scores=True, timeout=timeout
-        # )
         action, score = mcts_planner.search(
             num_iterations=params["num_iterations"],
             return_action_scores=True,
