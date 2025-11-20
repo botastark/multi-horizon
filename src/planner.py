@@ -4,6 +4,9 @@ import math
 from helper import uav_position, H, cH
 from mcts import MCTSPlanner
 
+# TODO: MHplanner
+from high_planner import build_clusters, make_ll_intent, HighPlanner, RobotHL
+
 
 class planning:
 
@@ -152,171 +155,16 @@ class planning:
         permitted_actions = self.uav.permitted_actions(self.uav)  # at UAV position x
         if self.strategy == "sweep":
             return self.sweep(permitted_actions, visited_x)
-        elif self.strategy == "ig_lookahead":
-            return self.ig_lookahead(permitted_actions)
-        elif self.strategy == "entropy_guided":
-            return self.entropy_guided(permitted_actions)
-        elif self.strategy == "entropy_guided_combined":
-            return self.entropy_guided_combined(permitted_actions)
         elif self.strategy == "mcts":
             return self.mcts_based()
+        elif self.strategy == "multi_horizon":
+            # Use hierarchical planning with LL MCTS + HP cluster selection
+            chosen_cid, ll_action, ll_scores = self.high_level_decision()
+            return ll_action, ll_scores
 
         return self.ig_based(permitted_actions)
 
-    def ig_lookahead(self, permitted_actions, depth=1, gamma=1):
-        """Multi-step IG planner using fixed-depth rollout (loop-based)."""
-        action_ig_total = {}
-
-        for a1 in permitted_actions:
-            cumulative_ig = 0
-            discount = 1.0
-            current_state = uav_position(self.uav.x_future(a1))
-
-            # Step 1: apply first action
-            obs_idx = self.uav.get_range(
-                position=current_state.position,
-                altitude=current_state.altitude,
-                index_form=True,
-            )
-            obs = self.M[
-                obs_idx[0][0] : obs_idx[0][1], obs_idx[1][0] : obs_idx[1][1], 1
-            ]
-
-            ig = np.sum(self.info_gain(obs, current_state))
-            cumulative_ig += discount * ig
-
-            # Step 2+: rollout deterministically
-            for _ in range(depth - 1):
-                discount *= gamma
-                permitted_next = self.uav.permitted_actions(current_state)
-                best_ig = -1
-                best_next = None
-                for a_next in permitted_next:
-
-                    next_state = uav_position(
-                        self.uav.x_future(a_next, x=current_state)
-                    )
-                    next_obs_idx = self.uav.get_range(
-                        position=next_state.position,
-                        altitude=next_state.altitude,
-                        index_form=True,
-                    )
-                    next_obs = self.M[
-                        next_obs_idx[0][0] : next_obs_idx[0][1],
-                        next_obs_idx[1][0] : next_obs_idx[1][1],
-                        1,
-                    ]
-
-                    ig = np.sum(self.info_gain(next_obs, next_state))
-                    if ig > best_ig:
-                        best_ig = ig
-                        best_next = next_state
-                if best_next is not None:
-                    cumulative_ig += discount * best_ig
-                    current_state = best_next
-                else:
-                    break  # No more moves
-
-            action_ig_total[a1] = cumulative_ig
-
-        max_ig = max(action_ig_total.values())
-        best_actions = [a for a, val in action_ig_total.items() if val == max_ig]
-        next_action = random.choice(best_actions)
-        self.last_action = next_action
-        return next_action, action_ig_total
-
-    def entropy_guided(self, permitted_actions, beta=0.05):
-        """New strategy that steers UAV toward high-entropy regions with local IG."""
-        info_score = {}
-
-        # Compute global entropy map and get target i,j
-        entropy_map = H(self.M[:, :, 1])
-        target_ij = np.unravel_index(np.argmax(entropy_map), entropy_map.shape)
-
-        # Convert target (i,j) to real-world (x,y)
-        target_pos = self.uav.ij_to_xy(*target_ij)
-
-        for action in permitted_actions:
-            # Simulate next pose
-            x_future = uav_position(self.uav.x_future(action))
-
-            # Get indices of visible patch
-            [[i_min, i_max], [j_min, j_max]] = self.uav.get_range(
-                position=x_future.position,
-                altitude=x_future.altitude,
-                index_form=True,
-            )
-
-            # Compute local IG
-            belief_patch = self.M[i_min:i_max, j_min:j_max, 1]
-            ig = np.sum(self.info_gain(belief_patch, x_future))
-
-            # Compute distance to global target
-            pos = np.array(x_future.position)
-            dist = np.linalg.norm(pos - np.array(target_pos))
-            distance_bias = -beta * dist
-
-            # Score = IG + entropy attraction
-            score = ig + distance_bias
-            info_score[action] = score
-
-        # Choose best
-        best_actions = [
-            a for a, s in info_score.items() if s == max(info_score.values())
-        ]
-        next_action = random.choice(best_actions)
-        self.last_action = next_action
-        return next_action, info_score
-
-    def entropy_guided_combined(
-        self, permitted_actions, epsilon=1e-3, local_weight=1.0, global_weight=1.0
-    ):
-        entropy_map = H(self.M[:, :, 1])
-        info_score = {}
-
-        rows, cols = entropy_map.shape
-        i_indices = np.arange(rows).reshape(-1, 1)  # (rows, 1)
-        j_indices = np.arange(cols).reshape(1, -1)  # (1, cols)
-
-        for action in permitted_actions:
-            # Simulate future pose
-            x_future = uav_position(self.uav.x_future(action))
-            x_pos = x_future.position
-
-            # Get (i, j) index of the simulated future position
-            i_fut, j_fut = self.uav.convert_xy_ij(*x_pos, self.uav.grid.center)
-
-            # Compute Manhattan distance map from x_future position
-            dist_map = np.abs(i_indices - i_fut) + np.abs(j_indices - j_fut) + epsilon
-            weighted_entropy_map = entropy_map / dist_map
-
-            # Get sensor footprint
-            [[i_min, i_max], [j_min, j_max]] = self.uav.get_range(
-                position=x_future.position,
-                altitude=x_future.altitude,
-                index_form=True,
-            )
-
-            # Local IG
-            belief_patch = self.M[i_min:i_max, j_min:j_max, 1]
-            local_ig = np.sum(self.info_gain(belief_patch, x_future))
-
-            # Global guidance: entropy-weighted closeness
-            global_guidance = np.sum(weighted_entropy_map[i_min:i_max, j_min:j_max])
-
-            # Final combined score
-            score = local_weight * local_ig + global_weight * global_guidance
-            info_score[action] = score
-
-        # Select best action
-        best_actions = [
-            a for a, s in info_score.items() if s == max(info_score.values())
-        ]
-        next_action = random.choice(best_actions)
-        self.last_action = next_action
-        return next_action, info_score
-
-    def mcts_based(self, **kwargs):
+    def mcts_based(self, action_seq=False, **kwargs):
         """
         MCTS-based action selection with configurable parameters for experiments.
 
@@ -327,10 +175,12 @@ class planning:
             ucb1_c (float): UCB1 exploration constant
             parallel (int): Number of parallel processes/threads
             discount_factor (float): Discount factor for future rewards (gamma)
+            action_seq (bool): If True, returns full action sequence instead of just best action
 
         Returns:
-            tuple: (selected_action, action_scores)
+            tuple: (selected_action, action_scores) or (action_sequence, scores) if action_seq=True
         """
+
         uav_pos = self.uav.get_x()
         # Merge stored parameters with any provided overrides
         params = {**self.mcts_params, **kwargs}
@@ -345,11 +195,18 @@ class planning:
             parallel=params["parallel"],
             ucb1_c=params["ucb1_c"],
         )
+        if action_seq:
+            action_seq = mcts_planner.extract_solution(
+                max_depth=params["planning_depth"], return_states=False
+            )
+            return action_seq
+
         action, score = mcts_planner.search(
             num_iterations=params["num_iterations"],
             return_action_scores=True,
             timeout=params["timeout"],
         )
+        # print(f"MCTS seq selected action sequence: {action_seq}")
         return action, score
 
     # def compress_belief_map(self, belief_map=None):
@@ -364,3 +221,35 @@ class planning:
     #             region = belief_map[i * 5 : (i + 1) * 5, j * 5 : (j + 1) * 5, 1]
     #             compressed[i, j] = np.mean(H(region))  # entropy per region
     #     return compressed
+    def high_level_decision(self, robot_speed=1.0, robot_budget=100, hp_iters=400):
+        """
+        Runs LL MCTS to get the exploitation plan,
+        converts it to an intent, and asks HP for the next cluster to pursue.
+        Returns (chosen_cid, ll_selected_action, ll_action_scores)
+        """
+        # 1) Run LL MCTS
+        action_seq = self.mcts_based(action_seq=True)
+        ll_action, ll_scores = self.mcts_based(action_seq=False)
+
+        # 3) Make LL intent (uses  UAV+Camera and helper funcs)
+        ll_intent = make_ll_intent(self.uav, self.M, action_seq, dt_per_step=1.0)
+
+        # 4) Build/refresh clusters from current belief
+        cid_of_cell, clusters = build_clusters(self.M, tile_h=None, tile_w=None)
+
+        # convert cluster dict to simple numeric entropies; keep as is for HP
+        # 5) Prepare HP inputs
+        robots = [
+            RobotHL(
+                xy=tuple(self.uav.get_x().position),
+                speed=robot_speed,
+                budget=robot_budget,
+            )
+        ]
+
+        # 6) Plan high-level
+        hp = HighPlanner(iterations=hp_iters)
+        chosen_cid = hp.plan(robots, clusters, cid_of_cell, ll_intent)
+        print(f"High-level selected cluster id: {chosen_cid}")
+
+        return chosen_cid, ll_action, ll_scores

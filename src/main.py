@@ -4,6 +4,8 @@ import random
 import numpy as np
 from tqdm import tqdm
 import argparse
+from mcts_diagnostics import run_mcts_diagnostics
+
 
 from helper import (
     FastLogger,
@@ -163,49 +165,6 @@ def main():
     seed = 123
     rng = np.random.default_rng(seed)
 
-    #     Pairs (N, M, h, dx) with dx close to 2.5 origin true:
-    # N=9, M=29, h=64.952, dx=2.5000
-    # N=10, M=30, h=60.622, dx=2.5000
-    # N=11, M=31, h=56.292, dx=2.5000
-    # N=12, M=32, h=51.962, dx=2.5000
-    # N=13, M=33, h=47.631, dx=2.5000
-    # N=14, M=34, h=43.301, dx=2.5000
-    # N=15, M=35, h=38.971, dx=2.5000
-    # N=16, M=36, h=34.641, dx=2.5000
-    # N=17, M=37, h=30.311, dx=2.5000
-    # N=18, M=38, h=25.981, dx=2.5000
-    # N=19, M=39, h=21.651, dx=2.5000
-
-    #     Pairs (N, M, h, dx) with dx close to 2.5 origin False:
-    # N=1, M=21, h=49.796, dx=2.5000
-    # N=2, M=22, h=47.631, dx=2.5000
-    # N=3, M=23, h=45.466, dx=2.5000
-    # N=4, M=24, h=43.301, dx=2.5000
-    # N=5, M=25, h=41.136, dx=2.5000
-    # N=6, M=26, h=38.971, dx=2.5000
-    # N=7, M=27, h=36.806, dx=2.5000
-    # N=8, M=28, h=34.641, dx=2.5000
-    # N=9, M=29, h=32.476, dx=2.5000
-    # N=10, M=30, h=30.311, dx=2.5000
-    # N=11, M=31, h=28.146, dx=2.5000
-    # N=12, M=32, h=25.981, dx=2.5000
-    # N=13, M=33, h=23.816, dx=2.5000
-    # N=14, M=34, h=21.651, dx=2.5000
-
-    # xy_step = 2.5
-    # # h_range = [21.651, 30.311, 38.971, 47.631, 56.292, 64.952]
-    # h_range = [21.651, 25.981, 30.311, 34.641, 38.971, 43.301]
-    # min_alt = min(h_range)  # Minimum altitude for the camera
-    # fov = 60  # Field of view angle in degrees
-    # camera1 = Camera(
-    #     grid=grid_info,
-    #     fov_angle=fov,
-    #     xy_step=xy_step,
-    #     h_range=h_range,
-    #     rng=rng,
-    #     camera_altitude=min_alt,
-    # )
-    #    # Uncomment the following line to use the original Camera class
     camera1 = Camera(
         grid_info,
         60,
@@ -272,6 +231,10 @@ def main():
                     optimal_alt=optimal_alt,
                     mcts_params=mcts_params,
                 )
+                # assume your MCTSPlanner is already constructed
+                # run_mcts_diagnostics(
+                #     planner, num_iterations=500, checkpoints=[0.1, 0.5, 1.0], top_k=5
+                # )
                 # Select initial UAV starting position
 
                 if start_position == "edge":
@@ -294,33 +257,6 @@ def main():
                             -grid_info.y / 2,
                         ),  # Bottom border
                     ]
-                    # borders = [
-                    #     (
-                    #         -grid_info.x / 2 + w / 2,
-                    #         random.uniform(
-                    #             -grid_info.y / 2 + w / 2, grid_info.y / 2 - w / 2
-                    #         ),
-                    #     ),  # Left border (x fixed, y random within inset vertical range)
-                    #     (
-                    #         grid_info.x / 2 - w / 2,
-                    #         random.uniform(
-                    #             -grid_info.y / 2 + w / 2, grid_info.y / 2 - w / 2
-                    #         ),
-                    #     ),  # Right border (x fixed, y random within inset vertical range)
-                    #     (
-                    #         random.uniform(
-                    #             -grid_info.x / 2 + w / 2, grid_info.x / 2 - w / 2
-                    #         ),
-                    #         grid_info.y / 2 - w / 2,
-                    #     ),  # Top border (y fixed, x random within inset horizontal range)
-                    #     (
-                    #         random.uniform(
-                    #             -grid_info.x / 2 + w / 2, grid_info.x / 2 - w / 2
-                    #         ),
-                    #         -grid_info.y / 2 + w / 2,
-                    #     ),  # Bottom border (y fixed, x random within inset horizontal range)
-                    # ]
-
                     start_pos = random.choice(real_border)
 
                 elif start_position == "corner":
@@ -464,6 +400,19 @@ def main():
                     next_action, info_gain_action = planner.select_action(
                         belief_map, uav_positions
                     )
+                    # act_seq = planner.ex
+                    print(f"Step {step}: Selected action {next_action}")
+                    print(f"Current UAV position: {uav_pos}")
+                    igs_sorted = dict(
+                        sorted(
+                            info_gain_action.items(), key=lambda kv: kv[1], reverse=True
+                        )
+                    )
+
+                    for a, ig in igs_sorted.items():
+                        print(f"{a}\t - {ig:.4f}")
+
+                    print("________________________________")
 
                     # Update UAV position based on the next action
                     uav_pos = uav_position(camera1.x_future(next_action))

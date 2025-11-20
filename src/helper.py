@@ -172,6 +172,9 @@ class uav_position:
     def __hash__(self):
         return hash((self.position, self.altitude))
 
+    def __repr__(self):
+        return f"({self.position[0]:.2f}, {self.position[1]:.2f},{self.altitude:.2f})"
+
 
 def compute_mse(ground_truth_map, estimated_map):
     if ground_truth_map.shape != estimated_map.shape:

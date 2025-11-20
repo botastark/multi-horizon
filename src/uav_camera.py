@@ -323,9 +323,11 @@ class Camera:
             return (x.position[0] + self.xy_step, x.position[1]), x.altitude
         elif action == "left" and (x.position[0] - self.xy_step) >= self.x_range[0]:
             return (x.position[0] - self.xy_step, x.position[1]), x.altitude
-        else:
-            # If action is not permitted, remain in the current state.
+        elif action == "hover":
             return x.position, x.altitude
+        else:
+            # If action is not permitted, exception is raised.
+            return None
 
     def permitted_actions(self, x):
         """
@@ -344,6 +346,8 @@ class Camera:
 
         for action in self.actions:
             future_x = self.x_future(action, x=x)
+            if future_x == None:
+                continue
 
             # Altitude checks
             if action == "up" and future_x[1] <= self.h_range[1]:

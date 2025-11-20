@@ -1,21 +1,21 @@
 {
-    "_comment": "Possible field types: Gaussian, Ortomap. Possible start positions: corner, edge. action_strategy: ig or sweep(ig_lookahead, entropy_guided_combined).",
+    "_comment": "Possible field types: Gaussian, Ortomap. Possible start positions: corner, edge. action_strategy: ig, sweep, mcts, multi_horizon.",
     "field_type": "Gaussian",
     "start_position": "edge",
-    "action_strategy": "mcts",
+    "action_strategy": "multi_horizon",
     "mcts_params": {
-        "planning_depth": 5,
-        "num_iterations": 50,
+        "planning_depth": 15,
+        "num_iterations": 100,
         "ucb1_c": 0.95,
-        "discount_factor": 0.99,
-        "timeout": 20,
-        "parallel": 4
+        "discount_factor":0.99,
+        "timeout": 2000,
+        "parallel": 1
     },
     "correlation_types": ["equal"],
     "n_steps": 100,
-    "iters": [0,1],
+    "iters": [0,20],
     "error_margins": [0.1],
     "enable_plotting": true,
     "enable_logging": true,
-    "project_path": "/home/bota/Desktop/active_sensing_extended_planner/"
+    "project_path": "/home/bota/Desktop/multi-horizon/"
 }
