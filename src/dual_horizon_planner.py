@@ -23,6 +23,19 @@ from mcts import MCTSPlanner, MCTSNode, copy_state
 # Configure logging
 logger = logging.getLogger(__name__)
 
+# -----------------------------------------------------------------------------
+# Constants for fragmentation analysis and blend weight computation
+# -----------------------------------------------------------------------------
+
+# Fragmentation score normalization: patches above this count have maximum penalty
+FRAGMENTATION_PATCH_THRESHOLD = 10
+
+# Blend weight adjustment factors for dual-horizon planning
+# These control how much each factor affects the short/long horizon balance
+COVERAGE_ADJUSTMENT_FACTOR = 0.3    # How much low coverage boosts long-horizon
+UNCERTAINTY_ADJUSTMENT_FACTOR = 0.2  # How much high uncertainty boosts short-horizon
+FRAGMENTATION_ADJUSTMENT_FACTOR = 0.3  # How much fragmentation boosts long-horizon
+
 
 # -----------------------------------------------------------------------------
 # Coverage Analysis Functions
@@ -90,13 +103,17 @@ def analyze_coverage_fragmentation(covered_mask: np.ndarray) -> Dict[str, Any]:
     total_cells = covered_mask.size
     
     # Fragmentation score: higher when there are many small patches
-    # Normalized by field size
+    # Normalized by field size. Uses FRAGMENTATION_PATCH_THRESHOLD as the
+    # normalization factor - patches above this count contribute maximum penalty.
     if total_uncovered > 0 and num_patches > 0:
         avg_patch_size = total_uncovered / num_patches
         # Penalize small patches more heavily
         size_variance = np.var(patch_sizes) if len(patch_sizes) > 1 else 0
         # Score increases with more patches and smaller average size
-        fragmentation_score = min(1.0, (num_patches / 10) * (1.0 - avg_patch_size / total_cells))
+        fragmentation_score = min(
+            1.0, 
+            (num_patches / FRAGMENTATION_PATCH_THRESHOLD) * (1.0 - avg_patch_size / total_cells)
+        )
     else:
         fragmentation_score = 0.0
     
@@ -140,8 +157,9 @@ def compute_revisit_cost(
         uncovered_patches['patch_centroids'],
         uncovered_patches['patch_sizes']
     )):
-        # Convert centroid (row, col) to position coordinates
-        # Assuming row corresponds to y, col corresponds to x
+        # Convert centroid (row, col) to position coordinates (x, y)
+        # Grid convention: centroid[0] = row index, centroid[1] = col index
+        # Position convention: position[0] = x (corresponds to col), position[1] = y (corresponds to row)
         patch_pos = np.array([centroid[1] * grid_length, centroid[0] * grid_length])
         
         # Calculate Euclidean distance
@@ -638,14 +656,14 @@ class DualHorizonPlanner:
         base_long = self.w_coverage
         
         # Adjust based on coverage progress
-        # Early mission: boost long-horizon
-        coverage_adjustment = 0.3 * (1.0 - coverage_progress)
+        # Early mission: boost long-horizon (uses COVERAGE_ADJUSTMENT_FACTOR)
+        coverage_adjustment = COVERAGE_ADJUSTMENT_FACTOR * (1.0 - coverage_progress)
         
-        # High uncertainty: boost short-horizon
-        uncertainty_adjustment = 0.2 * uncertainty_ratio
+        # High uncertainty: boost short-horizon (uses UNCERTAINTY_ADJUSTMENT_FACTOR)
+        uncertainty_adjustment = UNCERTAINTY_ADJUSTMENT_FACTOR * uncertainty_ratio
         
-        # High fragmentation: boost long-horizon
-        fragmentation_adjustment = 0.3 * fragmentation_score
+        # High fragmentation: boost long-horizon (uses FRAGMENTATION_ADJUSTMENT_FACTOR)
+        fragmentation_adjustment = FRAGMENTATION_ADJUSTMENT_FACTOR * fragmentation_score
         
         # Compute final weights
         w_short = base_short + uncertainty_adjustment - coverage_adjustment - fragmentation_adjustment

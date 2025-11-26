@@ -236,9 +236,23 @@ class MCTSNode:
         discount_factor=1.0,
         reward_function=None,
     ):
+        """
+        Simulate random steps from this state and return cumulative discounted reward.
+        
+        Args:
+            rng: Random number generator for action selection
+            max_depth: Maximum simulation depth
+            discount_factor: Discount factor for future rewards (gamma)
+            reward_function: Reward function to use. Options:
+                - None: Use plan_cfg settings (defaults to coverage if use_coverage_reward=True)
+                - 'ig': Information gain reward (expected entropy reduction)
+                - 'coverage': Basic coverage area reward (newly covered cells)
+                - 'long_horizon_coverage': Coverage with fragmentation penalties
+        
+        Returns:
+            Total discounted reward from simulation
+        """
         # TODO currently assumes expected posterior, could be changed to sampled observation
-        # simulate random steps from this state, return reward
-        # log_mem("rollout start")
         state = copy_state(self.state)
         discount = 1.0
         total_reward = 0
