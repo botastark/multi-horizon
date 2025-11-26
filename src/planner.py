@@ -4,7 +4,6 @@ import math
 from helper import uav_position, H, cH
 from mcts import MCTSPlanner
 
-# TODO: MHplanner
 from high_planner import build_clusters, make_ll_intent, HighPlanner, RobotHL
 
 
@@ -37,7 +36,27 @@ class planning:
             "ucb1_c": mcts_params.get("ucb1_c", 1.4),
             "parallel": mcts_params.get("parallel", 8),
             "discount_factor": mcts_params.get("discount_factor", 1.0),
+            "horizon_weights": mcts_params.get("horizon_weights", {}),
         }
+        
+        # Logging configuration for dual-horizon
+        self.log_dir = 'logs/dual_horizon'
+        self.experiment_name = None
+
+    def set_experiment_info(self, experiment_name: str, log_dir: str = None):
+        """Set experiment information for logging."""
+        self.experiment_name = experiment_name
+        if log_dir:
+            self.log_dir = log_dir
+    
+    def finalize_episode(self):
+        """Finalize episode and log statistics for dual-horizon planner."""
+        if self.strategy == "dual_horizon" and hasattr(self, '_dual_horizon_planner'):
+            state = {
+                'covered_mask': getattr(self, 'covered_mask', None),
+                'belief': self.M.copy()
+            }
+            self._dual_horizon_planner.finalize_episode(state)
 
     def reset(self, conf_dict=None):
         """Reset UAV and planning state, and reinitialize the belief map."""
@@ -175,7 +194,15 @@ class planning:
         Returns:
             Tuple of (selected_action, metrics_dict)
         """
-        from dual_horizon_planner import DualHorizonPlanner
+        from dual_horizon_planner import DualHorizonPlanner, setup_dual_horizon_logger
+        
+        # Initialize logger on first call
+        if not hasattr(self, '_dual_horizon_logger_initialized'):
+            log_dir = getattr(self, 'log_dir', 'logs/dual_horizon')
+            exp_name = getattr(self, 'experiment_name', None)
+            log_file = setup_dual_horizon_logger(log_dir=log_dir, experiment_name=exp_name)
+            print(f"\n[DUAL HORIZON] Logging to: {log_file}\n")
+            self._dual_horizon_logger_initialized = True
         
         # Build state dict for dual-horizon planner
         state = {
@@ -193,13 +220,16 @@ class planning:
         # Get horizon weights from mcts_params
         horizon_weights = self.mcts_params.get('horizon_weights', {})
         
-        # Create dual-horizon planner
-        planner = DualHorizonPlanner(
-            uav_camera=self.uav,
-            conf_dict=self.conf_dict,
-            mcts_params=self.mcts_params,
-            horizon_weights=horizon_weights
-        )
+        # Create or reuse dual-horizon planner
+        if not hasattr(self, '_dual_horizon_planner'):
+            self._dual_horizon_planner = DualHorizonPlanner(
+                uav_camera=self.uav,
+                conf_dict=self.conf_dict,
+                mcts_params=self.mcts_params,
+                horizon_weights=horizon_weights
+            )
+        
+        planner = self._dual_horizon_planner
         
         # Run dual-horizon planning
         action, metrics = planner.select_action(state, strategy='dual')
