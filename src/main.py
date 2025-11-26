@@ -422,6 +422,17 @@ def main():
                     camera1.set_altitude(uav_pos.altitude)
                     camera1.set_position(uav_pos.position)
                     if ENABLE_STEPWISE_PLOTTING:
+                        # Get region metadata if using dual-horizon
+                        region_metadata = None
+                        selected_region_id = None
+                        region_scores = None
+                        if action_strategy == "dual_horizon" and hasattr(planner, '_dual_horizon_planner'):
+                            if hasattr(planner._dual_horizon_planner, 'current_region_metadata'):
+                                region_metadata = planner._dual_horizon_planner.current_region_metadata
+                                selected_region_id = getattr(planner._dual_horizon_planner, 'current_selected_region', None)
+                                region_scores = getattr(planner._dual_horizon_planner, 'current_region_scores', None)
+                                print(f"[DEBUG] Passing region_metadata with {len(region_metadata)} regions, selected: {selected_region_id}")
+                        
                         # Plot and save the terrain visualization for this step
                         plot_terrain(
                             f"{results_folder}/{corr_type}_{action_strategy}_e{e_margin}_r{grf_r}/{iter}/steps/step_{step}.png",
@@ -433,6 +444,9 @@ def main():
                             observed_field_range,
                             fp_vertices_ij,
                             camera1.get_hrange(),
+                            region_metadata=region_metadata,
+                            selected_region_id=selected_region_id,
+                            region_scores=region_scores,
                         )
 
                     # plot_terrain_2d(

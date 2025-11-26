@@ -1,5 +1,6 @@
 from matplotlib import colors
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 import numpy as np
 from mpl_toolkits.mplot3d import Axes3D  # Ensure this is imported
 
@@ -62,7 +63,8 @@ def plot_terrain_2d(filename, grid, ground_truth):
 
 
 def plot_terrain(
-    save_path, belief, grid, uav_pos, ground_truth, submap, obs, fp, h_range
+    save_path, belief, grid, uav_pos, ground_truth, submap, obs, fp, h_range,
+    region_metadata=None, selected_region_id=None, region_scores=None
 ):
     """
     Plot a comprehensive figure with four subplots:
@@ -80,6 +82,8 @@ def plot_terrain(
         submap (np.ndarray): Latest observation submap.
         obs (list): [[x_min, x_max], [y_min, y_max]] bounds of the observation.
         fp (dict): Dictionary with footprint vertices in grid coordinates (keys: 'ul', 'bl', 'br', 'ur').
+        region_metadata (dict): Optional region metadata for dual-horizon visualization.
+        selected_region_id (int): Optional ID of the region selected by HLP.
     """
     # Create figure with 4 subplots
     fig, axes = plt.subplots(nrows=1, ncols=4, figsize=(15, 6))
@@ -203,6 +207,100 @@ def plot_terrain(
     o_i = [fp["ul"][I], fp["bl"][I], fp["br"][I], fp["ur"][I], fp["ul"][I]]
     o_j = [fp["ul"][J], fp["bl"][J], fp["br"][J], fp["ur"][J], fp["ul"][J]]
     ax4.plot(o_j, o_i, color="red", lw=0.9)
+    
+    # Add region visualization for dual-horizon planning
+    if region_metadata is not None:
+        print(f"[DEBUG VIEWER] Plotting {len(region_metadata)} regions on Ground Truth subplot, selected: {selected_region_id}")
+        
+        # Get top 5 regions by score (if scores available)
+        top_5_regions = set()
+        if region_scores is not None and len(region_scores) > 0:
+            sorted_regions = sorted(region_scores.items(), key=lambda x: x[1], reverse=True)
+            top_5_regions = {rid for rid, score in sorted_regions[:5]}
+            print(f"[DEBUG VIEWER] Top 5 regions: {[rid for rid, _ in sorted_regions[:5]]}")
+        
+        for region_id, metadata in region_metadata.items():
+            center = metadata['center']
+            bounds = metadata['bounds']
+            
+            # Bounds are already in grid (i,j) coordinates
+            (row_min, row_max), (col_min, col_max) = bounds
+            
+            # Rectangle dimensions in grid indices
+            rect_width = col_max - col_min
+            rect_height = row_max - row_min
+            
+            # Determine color based on selection and ranking
+            if region_id == selected_region_id:
+                edge_color = 'red'
+                line_width = 2.5
+                alpha = 0.9
+            elif region_id in top_5_regions:
+                edge_color = 'cyan'
+                line_width = 2.0
+                alpha = 0.75
+            else:
+                edge_color = 'yellow'
+                line_width = 1.5
+                alpha = 0.6
+            
+            # Draw rectangle (note: ax4 uses j for x-axis, i for y-axis)
+            rect = patches.Rectangle(
+                (col_min, row_min),  # (j, i) coordinates
+                rect_width,
+                rect_height,
+                linewidth=line_width,
+                edgecolor=edge_color,
+                facecolor='none',
+                alpha=alpha
+            )
+            ax4.add_patch(rect)
+            
+            # Draw center point (center is in (row, col) format)
+            center_j = center[1]  # col
+            center_i = center[0]  # row
+            
+            # Color based on rank
+            if region_id == selected_region_id:
+                marker_color = 'red'
+                marker_size = 10
+            elif region_id in top_5_regions:
+                marker_color = 'cyan'
+                marker_size = 8
+            else:
+                marker_color = 'yellow'
+                marker_size = 6
+            
+            ax4.plot(center_j, center_i, 'x', 
+                    color=marker_color,
+                    markersize=marker_size,
+                    markeredgewidth=2,
+                    alpha=0.9)
+            
+            # Add region ID label at center
+            if region_id == selected_region_id:
+                label_facecolor = 'red'
+                label_fontsize = 9
+                label_weight = 'bold'
+            elif region_id in top_5_regions:
+                label_facecolor = 'blue'
+                label_fontsize = 8
+                label_weight = 'bold'
+            else:
+                label_facecolor = 'gray'
+                label_fontsize = 7
+                label_weight = 'normal'
+            
+            ax4.text(center_j, center_i + rect_height * 0.1, str(region_id),
+                    color='white',
+                    fontsize=label_fontsize,
+                    ha='center', va='center',
+                    weight=label_weight,
+                    bbox=dict(boxstyle='round,pad=0.4', 
+                             facecolor=label_facecolor,
+                             alpha=0.8,
+                             edgecolor='white',
+                             linewidth=1))
 
     plt.tight_layout()
     plt.savefig(save_path)

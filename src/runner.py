@@ -256,6 +256,14 @@ class MCTSExperimentRunner:
                 optimal_alt=optimal_alt,
                 mcts_params=mcts_params,
             )
+            
+            # Set experiment info for logging (dual-horizon)
+            if strategy == "dual_horizon":
+                log_dir = self.results_folder.replace('trials', 'logs/dual_horizon')
+                planner.set_experiment_info(
+                    experiment_name=exp_name,
+                    log_dir=log_dir
+                )
 
             # Select initial UAV starting position (from main.py)
             if start_position == "corner":
@@ -379,6 +387,10 @@ class MCTSExperimentRunner:
 
             steps_pbar.close()
             total_time = time.time() - start_time
+            
+            # Finalize episode for dual-horizon planner
+            if strategy == "dual_horizon":
+                planner.finalize_episode()
 
             results = {
                 "experiment_name": exp_name,
