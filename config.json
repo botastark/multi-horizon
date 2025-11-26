@@ -1,8 +1,8 @@
 {
     "_comment": "Possible field types: Gaussian, Ortomap. Possible start positions: corner, edge. action_strategy: ig, sweep, mcts, multi_horizon, dual_horizon.",
     "field_type": "Gaussian",
-    "start_position": "edge",
-    "action_strategy": "multi_horizon",
+    "start_position": "corner",
+    "action_strategy": "dual_horizon",
     "mcts_params": {
         "planning_depth": 15,
         "num_iterations": 100,
@@ -11,20 +11,21 @@
         "timeout": 2000,
         "parallel": 1,
         "horizon_weights": {
-            "w_coverage": 1.0,
-            "w_fragmentation": 0.5,
-            "w_revisit_cost": 0.3,
-            "w_ig": 0.8,
+            "w_coverage": 0.2,
+            "w_fragmentation": 0.0,
+            "w_revisit_cost": 0.8,
+            "w_ig": 0.88,
             "short_horizon_depth": 5,
             "long_horizon_depth": 15,
-            "tile_size": [10, 10]
+            "tile_size": [100, 100],
+            "hlp_replan_frequency": 5
         }
     },
     "correlation_types": ["equal"],
-    "n_steps": 100,
-    "iters": [0, 20],
-    "error_margins": [0.1],
+    "n_steps": 50,
+    "iters": [0, 1],
+    "error_margins": ["None"],
     "enable_plotting": true,
     "enable_logging": true,
-    "project_path": "/home/bota/Desktop/multi-horizon/"
+    "project_path": "/workspaces/multi-horizon/"
 }
