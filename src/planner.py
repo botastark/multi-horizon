@@ -161,8 +161,62 @@ class planning:
             # Use hierarchical planning with LL MCTS + HP cluster selection
             chosen_cid, ll_action, ll_scores = self.high_level_decision()
             return ll_action, ll_scores
+        elif self.strategy == "dual_horizon":
+            # Use dual-horizon planner
+            return self.dual_horizon_decision()
 
         return self.ig_based(permitted_actions)
+
+    def dual_horizon_decision(self):
+        """
+        Run dual-horizon planning that combines short-horizon IG exploitation
+        with long-horizon coverage optimization to avoid fragmentation.
+        
+        Returns:
+            Tuple of (selected_action, metrics_dict)
+        """
+        from dual_horizon_planner import DualHorizonPlanner
+        
+        # Build state dict for dual-horizon planner
+        state = {
+            'uav_pos': self.uav.get_x(),
+            'belief': self.M.copy(),
+            'covered_mask': getattr(self, 'covered_mask', None)
+        }
+        
+        # Initialize covered_mask if not present
+        if state['covered_mask'] is None:
+            H_dim, W_dim = self.M.shape[:2]
+            state['covered_mask'] = np.zeros((H_dim, W_dim), dtype=bool)
+            self.covered_mask = state['covered_mask']
+        
+        # Get horizon weights from mcts_params
+        horizon_weights = self.mcts_params.get('horizon_weights', {})
+        
+        # Create dual-horizon planner
+        planner = DualHorizonPlanner(
+            uav_camera=self.uav,
+            conf_dict=self.conf_dict,
+            mcts_params=self.mcts_params,
+            horizon_weights=horizon_weights
+        )
+        
+        # Run dual-horizon planning
+        action, metrics = planner.select_action(state, strategy='dual')
+        
+        # Update covered_mask based on chosen action
+        x_future = uav_position(self.uav.x_future(action))
+        [[imin, imax], [jmin, jmax]] = self.uav.get_range(
+            position=x_future.position,
+            altitude=x_future.altitude,
+            index_form=True
+        )
+        self.covered_mask[imin:imax, jmin:jmax] = True
+        
+        # Return action and scores (combined_scores or action_scores)
+        scores = metrics.get('combined_scores', metrics.get('action_scores', {}))
+        
+        return action, scores
 
     def mcts_based(self, action_seq=False, **kwargs):
         """

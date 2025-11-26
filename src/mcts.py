@@ -183,11 +183,58 @@ class MCTSNode:
 
         return newly / max(1, H * W)
 
+    def _long_horizon_coverage_reward(self, state, imin, imax, jmin, jmax):
+        """
+        Compute coverage reward with fragmentation penalties for long-horizon planning.
+        
+        This extends the basic coverage reward by penalizing actions that create
+        fragmented uncovered regions, which would be expensive to revisit later.
+        """
+        # Get base coverage reward
+        base_reward = self._coverage_reward(state, imin, imax, jmin, jmax)
+        
+        # Get horizon weights from plan_cfg
+        horizon_weights = self.plan_cfg.get("horizon_weights", {})
+        w_fragmentation = horizon_weights.get("w_fragmentation", 0.5)
+        
+        # Quick fragmentation estimate without full connected components
+        # Check if we're creating gaps by looking at neighborhood coverage
+        H_dim, W_dim = state["belief"].shape[:2]
+        covered_mask = state.get("covered_mask")
+        
+        if covered_mask is None:
+            return base_reward
+        
+        # Simple fragmentation penalty: check for isolated uncovered cells near footprint
+        # Expand bounds slightly to check neighborhood
+        margin = 2
+        check_imin = max(0, imin - margin)
+        check_imax = min(H_dim, imax + margin)
+        check_jmin = max(0, jmin - margin)
+        check_jmax = min(W_dim, jmax + margin)
+        
+        neighborhood = covered_mask[check_imin:check_imax, check_jmin:check_jmax]
+        
+        # Penalize if we're leaving small uncovered gaps
+        uncovered_count = np.sum(~neighborhood)
+        total_count = neighborhood.size
+        
+        if total_count > 0 and uncovered_count > 0:
+            # Small uncovered regions relative to footprint are penalized
+            gap_ratio = uncovered_count / total_count
+            # Penalty is higher when gaps are small (isolated cells)
+            fragmentation_penalty = w_fragmentation * gap_ratio * 0.1
+        else:
+            fragmentation_penalty = 0.0
+        
+        return base_reward - fragmentation_penalty
+
     def rollout(
         self,
         rng,
         max_depth=10,
         discount_factor=1.0,
+        reward_function=None,
     ):
         # TODO currently assumes expected posterior, could be changed to sampled observation
         # simulate random steps from this state, return reward
@@ -195,6 +242,12 @@ class MCTSNode:
         state = copy_state(self.state)
         discount = 1.0
         total_reward = 0
+        
+        # Determine reward function to use
+        # Options: None (use plan_cfg), 'ig', 'coverage', 'long_horizon_coverage'
+        if reward_function is None:
+            reward_function = self.plan_cfg.get("reward_function", None)
+        
         for t in range(max_depth):
             # 1. Get permitted actions from camera
             actions = self._filtered_actions_for_state(state)
@@ -220,8 +273,14 @@ class MCTSNode:
             obs_submap = state["belief"][imin:imax, jmin:jmax, 1]
             a, b, p10, p11 = expected_posterior(obs_submap, s0, s1)
 
-            # 5. Compute immediate reward (e.g., coverage or info gain)
-            if self.plan_cfg.get("use_coverage_reward", True):
+            # 5. Compute immediate reward based on reward_function
+            if reward_function == 'long_horizon_coverage':
+                reward = self._long_horizon_coverage_reward(state, imin, imax, jmin, jmax)
+            elif reward_function == 'coverage':
+                reward = self._coverage_reward(state, imin, imax, jmin, jmax)
+            elif reward_function == 'ig':
+                reward = self.compute_reward(obs_submap, a, b, p10, p11)
+            elif self.plan_cfg.get("use_coverage_reward", True):
                 reward = self._coverage_reward(state, imin, imax, jmin, jmax)
             else:
                 reward = self.compute_reward(obs_submap, a, b, p10, p11)
