@@ -124,7 +124,7 @@ class MCTSNode:
         b = 0.015
         sigma = a * (1 - np.exp(-b * x_future.altitude))
 
-        if self.conf_dict is not None:
+        if self.conf_dict is not None and self.conf_dict != {}:
             s0, s1 = self.conf_dict[np.round(x_future.altitude, decimals=2)]
         else:
             s0, s1 = sigma, sigma

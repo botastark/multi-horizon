@@ -826,11 +826,13 @@ class DualHorizonPlanner:
             isolation_bonus = isolation_score * self.w_fragmentation * 2.0  # 2x multiplier for strong effect
             
             # Combined score
+            # Note: distance_penalty weight of 0.8 ensures we strongly prefer nearby regions
+            # Only switch to distant region if it's significantly more valuable
             score = (
                 base_value + 
                 coverage_bonus + 
                 isolation_bonus -
-                0.3 * distance_penalty
+                0.8 * distance_penalty
             )
             
             region_scores[region_id] = score
@@ -1043,15 +1045,11 @@ class DualHorizonPlanner:
                     region_coverage_mask = covered_mask[row_min:row_max, col_min:col_max]
                     current_coverage = float(np.mean(region_coverage_mask))
                     
-                    # Replan if target region is mostly covered
-                    if current_coverage > 0.8:
+                    # Replan if target region is well covered (90% threshold)
+                    # Higher threshold ensures we finish regions before switching
+                    if current_coverage > 1.:
                         need_hlp_replan = True
                         replan_reason = f"Target region {self.cached_target_region_id} covered ({current_coverage:.1%})"
-            
-            # Replan if not making progress (timeout after 5 steps)
-            if not need_hlp_replan and self.steps_since_hlp_replan >= 5:
-                need_hlp_replan = True
-                replan_reason = f"Timeout - {self.steps_since_hlp_replan} steps without replan"
         
         if need_hlp_replan:
             # Run HLP and cache the result

@@ -307,7 +307,7 @@ def plot_terrain(
     plt.close(fig)
 
 
-def plot_metrics(save_path, entropy_list, mse_list, coverage_list, height_list):
+def plot_metrics(save_path, entropy_list, mse_list, coverage_list, height_list, height_range=None):
     """
     Plot metrics (entropy, MSE, coverage, height) over time and save the resulting figure.
 
@@ -317,6 +317,7 @@ def plot_metrics(save_path, entropy_list, mse_list, coverage_list, height_list):
         mse_list (list): List of mean squared error values.
         coverage_list (list): List of coverage values.
         height_list (list): List of UAV height values.
+        height_range (tuple): Optional (min_height, max_height) for y-axis limits.
     """
     # Ensure all metric lists have the same length
     assert len(entropy_list) == len(mse_list) == len(coverage_list) == len(height_list)
@@ -352,6 +353,17 @@ def plot_metrics(save_path, entropy_list, mse_list, coverage_list, height_list):
     ax4.set_ylabel("Height")
     ax4.set_title("Height over Steps")
     ax4.grid(True)
+    
+    # Set height y-axis limits if provided
+    if height_range is not None:
+        min_h, max_h = height_range
+        # Add small padding (5%) for better visualization
+        padding = (max_h - min_h) * 0.05
+        ax4.set_ylim(min_h - padding, max_h + padding)
+        # Add horizontal lines for min and max limits
+        ax4.axhline(y=min_h, color='gray', linestyle='--', alpha=0.7, label=f'Min: {min_h:.1f}')
+        ax4.axhline(y=max_h, color='gray', linestyle='--', alpha=0.7, label=f'Max: {max_h:.1f}')
+        ax4.legend(loc='best', fontsize=8)
 
     plt.tight_layout()
     if save_path.endswith(".png"):
