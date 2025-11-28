@@ -32,23 +32,23 @@ By considering both short and long planning horizons simultaneously, we can:
 ┌─────────────────────────────────────────────────────────────┐
 │                   DualHorizonPlanner                        │
 ├─────────────────────────────────────────────────────────────┤
-│  ┌─────────────────┐     ┌──────────────────┐              │
-│  │ Short-Horizon   │     │ Long-Horizon     │              │
-│  │ MCTS Planner    │     │ MCTS Planner     │              │
-│  │ (IG Reward)     │     │ (Coverage Reward)│              │
-│  └────────┬────────┘     └────────┬─────────┘              │
+│  ┌─────────────────┐     ┌──────────────────┐               │
+│  │ Short-Horizon   │     │ Long-Horizon     │               │
+│  │ MCTS Planner    │     │ MCTS Planner     │               │
+│  │ (IG Reward)     │     │ (Coverage Reward)│               │
+│  └────────┬────────┘     └────────┬─────────┘               │
 │           │                       │                         │
 │           └───────────┬───────────┘                         │
 │                       │                                     │
-│              ┌────────▼────────┐                           │
-│              │ Blend Weights   │                           │
-│              │ Computation     │                           │
-│              └────────┬────────┘                           │
+│              ┌────────▼────────┐                            │
+│              │ Blend Weights   │                            │
+│              │ Computation     │                            │
+│              └────────┬────────┘                            │
 │                       │                                     │
-│              ┌────────▼────────┐                           │
-│              │ Action          │                           │
-│              │ Selection       │                           │
-│              └─────────────────┘                           │
+│              ┌────────▼────────┐                            │
+│              │ Action          │                            │
+│              │ Selection       │                            │
+│              └─────────────────┘                            │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -115,6 +115,44 @@ w_long  = base_cov - 0.2·uncertainty + 0.3·(1-coverage) + 0.3·fragmentation
 
 These are then normalized to sum to 1.0.
 
+#### Soft HLP Guidance
+
+HLP provides **soft guidance** to LLP - bonuses only, never penalties:
+
+```
+α_soft = max(0, (d_before - d_after) / d_max)
+```
+
+- Moving toward HLP target: `α_soft > 0` (bonus)
+- Moving away from HLP target: `α_soft = 0` (no penalty)
+- LLP is never blocked from exploring based on IG
+
+#### LLP Autonomy
+
+When HLP has no clear guidance (all alignment scores near 0):
+
+```
+if max(α_soft) < 0.01:
+    Q_combined = w_short × Q_IG  # Pure IG, ignore HLP
+else:
+    Q_combined = w_short × Q_IG + w_long × α_soft
+```
+
+This prevents the UAV from hovering when coverage is complete but entropy remains high.
+
+#### Entropy-Weighted Region Scoring (High Coverage)
+
+As coverage increases, HLP shifts from coverage-based to entropy-based scoring:
+
+```
+entropy_weight = 1.0 + overall_coverage  # 1.0 at 0%, 2.0 at 100%
+coverage_factor = 1.0 - overall_coverage  # Fades as coverage grows
+
+S_region = entropy_weight × entropy + coverage_bonus × coverage_factor + ...
+```
+
+This ensures HLP continues to provide useful guidance even at 100% coverage.
+
 ## Configuration Guide
 
 ### Configuration Options
@@ -123,7 +161,7 @@ Add the following to your `config.json`:
 
 ```json
 {
-    "action_strategy": "dual_horizon",
+    "action_strategy": "threaded_dual_horizon",
     "mcts_params": {
         "planning_depth": 15,
         "num_iterations": 100,
@@ -132,36 +170,49 @@ Add the following to your `config.json`:
         "timeout": 2000,
         "parallel": 1,
         "horizon_weights": {
-            "w_coverage": 1.0,
+            "w_coverage": 0.8,
             "w_fragmentation": 0.5,
-            "w_revisit_cost": 0.3,
-            "w_ig": 0.8,
+            "w_revisit_cost": 0.0,
+            "w_ig": 0.9,
             "short_horizon_depth": 5,
-            "long_horizon_depth": 15,
-            "tile_size": [10, 10]
+            "long_horizon_depth": 20,
+            "tile_size": [100, 100]
         }
     }
 }
 ```
 
+### Strategy Options
+
+- `"dual_horizon"`: Synchronous dual-horizon planning
+- `"threaded_dual_horizon"`: Asynchronous with LLP/HLP worker threads (recommended)
+
 ### Parameter Descriptions
 
 | Parameter | Description | Default | Range |
 |-----------|-------------|---------|-------|
-| `w_coverage` | Weight for coverage reward in long-horizon | 1.0 | 0.0-2.0 |
+| `w_coverage` | Weight for coverage reward in long-horizon | 0.8 | 0.0-2.0 |
 | `w_fragmentation` | Penalty weight for creating fragmented regions | 0.5 | 0.0-1.0 |
-| `w_revisit_cost` | Penalty weight for revisit cost estimation | 0.3 | 0.0-1.0 |
-| `w_ig` | Weight for information gain in short-horizon | 0.8 | 0.0-2.0 |
+| `w_revisit_cost` | Penalty weight for revisit cost estimation | 0.0 | 0.0-1.0 |
+| `w_ig` | Weight for information gain in short-horizon | 0.9 | 0.0-2.0 |
 | `short_horizon_depth` | Planning depth for short-horizon MCTS | 5 | 3-10 |
-| `long_horizon_depth` | Planning depth for long-horizon MCTS | 15 | 10-30 |
-| `tile_size` | Size of tiles for field partitioning [h, w] | [10, 10] | [5, 5]-[20, 20] |
+| `long_horizon_depth` | Planning depth for long-horizon MCTS | 20 | 10-30 |
+| `tile_size` | Size of tiles for field partitioning [h, w] | [100, 100] | [40, 40]-[150, 150] |
 
 ### Tuning Guidelines
 
 1. **For Dense Fields**: Increase `w_ig` to favor information exploitation
 2. **For Sparse Fields**: Increase `w_coverage` and `w_fragmentation` for systematic coverage
-3. **For Time-Limited Missions**: Increase `w_revisit_cost` to avoid leaving isolated patches
+3. **For Time-Limited Missions**: Increase `w_fragmentation` to avoid leaving isolated patches
 4. **For Large Fields**: Increase `long_horizon_depth` and `tile_size`
+5. **For High-Entropy Areas**: The planner automatically adapts - entropy-weighted scoring at high coverage
+
+### Key Design Principles
+
+1. **Soft HLP Guidance**: HLP suggests, never blocks. LLP can always follow IG.
+2. **LLP Autonomy**: When HLP has no clear target, LLP maximizes IG freely.
+3. **Adaptive Scoring**: Early mission focuses on coverage, late mission focuses on entropy.
+4. **Altitude Freedom**: Up/down actions are always pure IG (HLP doesn't guide altitude).
 
 ## Usage
 
@@ -220,6 +271,43 @@ The `select_action` method supports three strategies:
 - `'short'`: Pure short-horizon IG-greedy planning
 - `'long'`: Pure long-horizon coverage planning
 - `'dual'`: Combined dual-horizon planning (default)
+
+For threaded mode, use `threaded_dual_horizon` as the action_strategy in config.json.
+
+## Threaded Architecture
+
+The threaded dual-horizon planner runs LLP and HLP in separate worker threads:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         Main Thread                                     │
+│  ┌──────────┐    request_action()    ┌───────────────────────────────┐  │
+│  │ Main.py  │ ─────────────────────▶ │ ThreadedDualHorizonPlanner    │  │
+│  └──────────┘ ◀───────────────────── └───────────────────────────────┘  │
+│                  (action, metrics)                                      │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                         ┌──────────┴──────────┐
+                         │     Intent Bus      │
+                         │  (Thread-Safe Comm) │
+                         └──────────┬──────────┘
+                    ┌───────────────┴───────────────┐
+                    │                               │
+    ┌───────────────▼───────────────┐ ┌────────────▼────────────────────┐
+    │       LLP Worker Thread       │ │       HLP Worker Thread         │
+    │  - MCTS (depth=5)             │ │  - Region partitioning          │
+    │  - IG exploitation            │ │  - Coverage optimization        │
+    │  - Soft alignment blending    │ │  - Entropy-weighted scoring     │
+    │  - Real-time response         │ │  - Async guidance updates       │
+    └───────────────────────────────┘ └─────────────────────────────────┘
+```
+
+### Benefits of Threaded Mode
+
+1. **Responsiveness**: LLP always responds quickly
+2. **Parallelism**: HLP runs expensive analysis in background
+3. **Decoupling**: Each planner focuses on its specialty
+4. **Graceful degradation**: LLP works with stale/no guidance
 
 ## Results and Comparison
 
