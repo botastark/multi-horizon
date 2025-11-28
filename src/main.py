@@ -395,6 +395,7 @@ def main():
                             mse,
                             coverage,
                             height,
+                            height_range=camera1.get_hrange(),
                         )
                     # Planning: select the next action based on current belief
                     next_action, info_gain_action = planner.select_action(
@@ -422,7 +423,7 @@ def main():
                     camera1.set_altitude(uav_pos.altitude)
                     camera1.set_position(uav_pos.position)
                     if ENABLE_STEPWISE_PLOTTING:
-                        # Get region metadata if using dual-horizon
+                        # Get region metadata if using dual-horizon or threaded_dual_horizon
                         region_metadata = None
                         selected_region_id = None
                         region_scores = None
@@ -432,6 +433,12 @@ def main():
                                 selected_region_id = getattr(planner._dual_horizon_planner, 'current_selected_region', None)
                                 region_scores = getattr(planner._dual_horizon_planner, 'current_region_scores', None)
                                 print(f"[DEBUG] Passing region_metadata with {len(region_metadata)} regions, selected: {selected_region_id}")
+                        elif action_strategy == "threaded_dual_horizon" and hasattr(planner, '_threaded_dual_horizon_planner'):
+                            if hasattr(planner._threaded_dual_horizon_planner, 'current_region_metadata'):
+                                region_metadata = planner._threaded_dual_horizon_planner.current_region_metadata
+                                selected_region_id = getattr(planner._threaded_dual_horizon_planner, 'current_selected_region', None)
+                                region_scores = getattr(planner._threaded_dual_horizon_planner, 'current_region_scores', None)
+                                print(f"[DEBUG] Threaded: region_metadata with {len(region_metadata)} regions, selected: {selected_region_id}")
                         
                         # Plot and save the terrain visualization for this step
                         plot_terrain(
