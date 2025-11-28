@@ -4,7 +4,6 @@ import random
 import numpy as np
 from tqdm import tqdm
 import argparse
-from mcts_diagnostics import run_mcts_diagnostics
 
 
 from helper import (
@@ -231,10 +230,6 @@ def main():
                     optimal_alt=optimal_alt,
                     mcts_params=mcts_params,
                 )
-                # assume your MCTSPlanner is already constructed
-                # run_mcts_diagnostics(
-                #     planner, num_iterations=500, checkpoints=[0.1, 0.5, 1.0], top_k=5
-                # )
                 # Select initial UAV starting position
 
                 if start_position == "edge":
@@ -427,19 +422,52 @@ def main():
                         region_metadata = None
                         selected_region_id = None
                         region_scores = None
-                        if action_strategy == "dual_horizon" and hasattr(planner, '_dual_horizon_planner'):
-                            if hasattr(planner._dual_horizon_planner, 'current_region_metadata'):
-                                region_metadata = planner._dual_horizon_planner.current_region_metadata
-                                selected_region_id = getattr(planner._dual_horizon_planner, 'current_selected_region', None)
-                                region_scores = getattr(planner._dual_horizon_planner, 'current_region_scores', None)
-                                print(f"[DEBUG] Passing region_metadata with {len(region_metadata)} regions, selected: {selected_region_id}")
-                        elif action_strategy == "threaded_dual_horizon" and hasattr(planner, '_threaded_dual_horizon_planner'):
-                            if hasattr(planner._threaded_dual_horizon_planner, 'current_region_metadata'):
-                                region_metadata = planner._threaded_dual_horizon_planner.current_region_metadata
-                                selected_region_id = getattr(planner._threaded_dual_horizon_planner, 'current_selected_region', None)
-                                region_scores = getattr(planner._threaded_dual_horizon_planner, 'current_region_scores', None)
-                                print(f"[DEBUG] Threaded: region_metadata with {len(region_metadata)} regions, selected: {selected_region_id}")
-                        
+                        if action_strategy == "dual_horizon" and hasattr(
+                            planner, "_dual_horizon_planner"
+                        ):
+                            if hasattr(
+                                planner._dual_horizon_planner, "current_region_metadata"
+                            ):
+                                region_metadata = (
+                                    planner._dual_horizon_planner.current_region_metadata
+                                )
+                                selected_region_id = getattr(
+                                    planner._dual_horizon_planner,
+                                    "current_selected_region",
+                                    None,
+                                )
+                                region_scores = getattr(
+                                    planner._dual_horizon_planner,
+                                    "current_region_scores",
+                                    None,
+                                )
+                                print(
+                                    f"[DEBUG] Passing region_metadata with {len(region_metadata)} regions, selected: {selected_region_id}"
+                                )
+                        elif action_strategy == "threaded_dual_horizon" and hasattr(
+                            planner, "_threaded_dual_horizon_planner"
+                        ):
+                            if hasattr(
+                                planner._threaded_dual_horizon_planner,
+                                "current_region_metadata",
+                            ):
+                                region_metadata = (
+                                    planner._threaded_dual_horizon_planner.current_region_metadata
+                                )
+                                selected_region_id = getattr(
+                                    planner._threaded_dual_horizon_planner,
+                                    "current_selected_region",
+                                    None,
+                                )
+                                region_scores = getattr(
+                                    planner._threaded_dual_horizon_planner,
+                                    "current_region_scores",
+                                    None,
+                                )
+                                print(
+                                    f"[DEBUG] Threaded: region_metadata with {len(region_metadata)} regions, selected: {selected_region_id}"
+                                )
+
                         # Plot and save the terrain visualization for this step
                         plot_terrain(
                             f"{results_folder}/{corr_type}_{action_strategy}_e{e_margin}_r{grf_r}/{iter}/steps/step_{step}.png",

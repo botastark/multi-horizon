@@ -1,5 +1,5 @@
 {
-    "_comment": "Possible field types: Gaussian, Ortomap. Possible start positions: corner, edge. action_strategy: ig, sweep, mcts, multi_horizon, dual_horizon.",
+    "_comment": "Possible field types: Gaussian, Ortomap. Possible start positions: corner, edge. action_strategy: ig, sweep, mcts, dual_horizon, threaded_dual_horizon.",
     "field_type": "Gaussian",
     "start_position": "corner",
     "action_strategy": "threaded_dual_horizon",
@@ -12,12 +12,16 @@
         "parallel": 1,
         "horizon_weights": {
             "w_coverage": 0.1,
-            "w_fragmentation": 0.0,
-            "w_revisit_cost": 0.0,
+            "w_fragmentation": 0.5,
             "w_ig": 0.9,
+            "w_distance": 0.5,
             "short_horizon_depth": 5,
             "long_horizon_depth": 20,
-            "tile_size": [100, 100]
+            "tile_size": [100, 100],
+            "current_target_bonus": 0.15,
+            "coverage_delta_threshold": 0.05,
+            "position_delta_threshold": 30,
+            "hlp_replan_frequency": 10
         }
     },
     "correlation_types": ["equal"],
@@ -26,5 +30,5 @@
     "error_margins": ["None"],
     "enable_plotting": true,
     "enable_logging": true,
-    "project_path": "/workspaces/multi-horizon/"
+    "project_path": "./"
 }
