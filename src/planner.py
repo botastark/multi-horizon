@@ -4,7 +4,6 @@ import math
 from helper import uav_position, H, cH
 from mcts import MCTSPlanner
 
-# TODO: MHplanner
 from high_planner import build_clusters, make_ll_intent, HighPlanner, RobotHL
 
 
@@ -37,7 +36,42 @@ class planning:
             "ucb1_c": mcts_params.get("ucb1_c", 1.4),
             "parallel": mcts_params.get("parallel", 8),
             "discount_factor": mcts_params.get("discount_factor", 1.0),
+            "horizon_weights": mcts_params.get("horizon_weights", {}),
         }
+        
+        # Logging configuration for dual-horizon
+        self.log_dir = 'logs/dual_horizon'
+        self.experiment_name = None
+
+    def set_experiment_info(self, experiment_name: str, log_dir: str = None):
+        """Set experiment information for logging."""
+        self.experiment_name = experiment_name
+        if log_dir:
+            self.log_dir = log_dir
+    
+    def finalize_episode(self):
+        """Finalize episode and log statistics for dual-horizon planner."""
+        if self.strategy == "dual_horizon" and hasattr(self, '_dual_horizon_planner'):
+            state = {
+                'covered_mask': getattr(self, 'covered_mask', None),
+                'belief': self.M.copy()
+            }
+            self._dual_horizon_planner.finalize_episode(state)
+        
+        # Stop threaded planner workers
+        if self.strategy == "threaded_dual_horizon" and hasattr(self, '_threaded_dual_horizon_planner'):
+            self._threaded_dual_horizon_planner.stop()
+            # Print final stats
+            stats = self._threaded_dual_horizon_planner.get_statistics()
+            print(f"\n[THREADED] Final Stats:")
+            print(f"  Total steps: {stats.get('step_count', 0)}")
+            if 'llp' in stats:
+                print(f"  LLP: {stats['llp']['step_count']} steps, "
+                      f"avg planning time: {stats['llp']['avg_planning_time']*1000:.1f}ms")
+            if 'hlp' in stats:
+                print(f"  HLP: {stats['hlp']['replan_count']} replans, "
+                      f"avg planning time: {stats['hlp']['avg_planning_time']*1000:.1f}ms")
+            print(f"  Bus stats: {stats.get('bus_stats', {})}\n")
 
     def reset(self, conf_dict=None):
         """Reset UAV and planning state, and reinitialize the belief map."""
@@ -161,8 +195,148 @@ class planning:
             # Use hierarchical planning with LL MCTS + HP cluster selection
             chosen_cid, ll_action, ll_scores = self.high_level_decision()
             return ll_action, ll_scores
+        elif self.strategy == "dual_horizon":
+            # Use dual-horizon planner
+            return self.dual_horizon_decision()
+        elif self.strategy == "threaded_dual_horizon":
+            # Use threaded dual-horizon planner with async LLP/HLP
+            return self.threaded_dual_horizon_decision()
 
         return self.ig_based(permitted_actions)
+
+    def dual_horizon_decision(self):
+        """
+        Run dual-horizon planning that combines short-horizon IG exploitation
+        with long-horizon coverage optimization to avoid fragmentation.
+        
+        Returns:
+            Tuple of (selected_action, metrics_dict)
+        """
+        from dual_horizon_planner import DualHorizonPlanner, setup_dual_horizon_logger
+        
+        # Initialize logger on first call
+        if not hasattr(self, '_dual_horizon_logger_initialized'):
+            log_dir = getattr(self, 'log_dir', 'logs/dual_horizon')
+            exp_name = getattr(self, 'experiment_name', None)
+            log_file = setup_dual_horizon_logger(log_dir=log_dir, experiment_name=exp_name)
+            print(f"\n[DUAL HORIZON] Logging to: {log_file}\n")
+            self._dual_horizon_logger_initialized = True
+        
+        # Build state dict for dual-horizon planner
+        state = {
+            'uav_pos': self.uav.get_x(),
+            'belief': self.M.copy(),
+            'covered_mask': getattr(self, 'covered_mask', None)
+        }
+        
+        # Initialize covered_mask if not present
+        if state['covered_mask'] is None:
+            H_dim, W_dim = self.M.shape[:2]
+            state['covered_mask'] = np.zeros((H_dim, W_dim), dtype=bool)
+            self.covered_mask = state['covered_mask']
+        
+        # Get horizon weights from mcts_params
+        horizon_weights = self.mcts_params.get('horizon_weights', {})
+        
+        # Create or reuse dual-horizon planner
+        if not hasattr(self, '_dual_horizon_planner'):
+            self._dual_horizon_planner = DualHorizonPlanner(
+                uav_camera=self.uav,
+                conf_dict=self.conf_dict,
+                mcts_params=self.mcts_params,
+                horizon_weights=horizon_weights
+            )
+        
+        planner = self._dual_horizon_planner
+        
+        # Run dual-horizon planning
+        action, metrics = planner.select_action(state, strategy='dual')
+        
+        # Update covered_mask based on chosen action
+        x_future = uav_position(self.uav.x_future(action))
+        [[imin, imax], [jmin, jmax]] = self.uav.get_range(
+            position=x_future.position,
+            altitude=x_future.altitude,
+            index_form=True
+        )
+        self.covered_mask[imin:imax, jmin:jmax] = True
+        
+        # Return action and scores (combined_scores or action_scores)
+        scores = metrics.get('combined_scores', metrics.get('action_scores', {}))
+        
+        return action, scores
+
+    def threaded_dual_horizon_decision(self):
+        """
+        Run threaded dual-horizon planning with async LLP/HLP workers
+        communicating via an intent bus.
+        
+        This provides better responsiveness as HLP runs in the background
+        while LLP makes real-time decisions.
+        
+        Returns:
+            Tuple of (selected_action, metrics_dict)
+        """
+        from threaded_dual_horizon import ThreadedDualHorizonPlanner, setup_dual_horizon_logger
+        from dual_horizon_planner import setup_dual_horizon_logger
+        
+        # Initialize logger on first call
+        if not hasattr(self, '_threaded_dual_horizon_logger_initialized'):
+            log_dir = getattr(self, 'log_dir', 'logs/dual_horizon')
+            exp_name = f"threaded_{getattr(self, 'experiment_name', 'default')}"
+            log_file = setup_dual_horizon_logger(log_dir=log_dir, experiment_name=exp_name)
+            print(f"\n[THREADED DUAL HORIZON] Logging to: {log_file}\n")
+            self._threaded_dual_horizon_logger_initialized = True
+        
+        # Build state dict for threaded planner
+        state = {
+            'uav_pos': self.uav.get_x(),
+            'belief': self.M.copy(),
+            'covered_mask': getattr(self, 'covered_mask', None)
+        }
+        
+        # Initialize covered_mask if not present
+        if state['covered_mask'] is None:
+            H_dim, W_dim = self.M.shape[:2]
+            state['covered_mask'] = np.zeros((H_dim, W_dim), dtype=bool)
+            self.covered_mask = state['covered_mask']
+        
+        # Create or reuse threaded planner
+        if not hasattr(self, '_threaded_dual_horizon_planner'):
+            self._threaded_dual_horizon_planner = ThreadedDualHorizonPlanner(
+                uav_camera=self.uav,
+                conf_dict=self.conf_dict,
+                mcts_params=self.mcts_params,
+                initial_state=state
+            )
+            # Start the worker threads
+            self._threaded_dual_horizon_planner.start(state)
+        
+        planner = self._threaded_dual_horizon_planner
+        
+        # Run threaded planning
+        action, metrics = planner.select_action(state, strategy='dual')
+        
+        # Update covered_mask based on chosen action
+        x_future = uav_position(self.uav.x_future(action))
+        [[imin, imax], [jmin, jmax]] = self.uav.get_range(
+            position=x_future.position,
+            altitude=x_future.altitude,
+            index_form=True
+        )
+        self.covered_mask[imin:imax, jmin:jmax] = True
+        
+        # Print threading stats periodically
+        if metrics.get('llp_step_count', 0) % 10 == 0:
+            stats = planner.get_statistics()
+            print(f"\n[THREADED] Stats: LLP steps={stats.get('llp', {}).get('step_count', 0)}, "
+                  f"HLP replans={stats.get('hlp', {}).get('replan_count', 0)}, "
+                  f"Bus msgs={stats.get('bus_stats', {})}\n")
+        
+        # Return action and scores
+        scores = metrics.get('blended_scores', metrics.get('action_scores', {}))
+        
+        return action, scores
 
     def mcts_based(self, action_seq=False, **kwargs):
         """
