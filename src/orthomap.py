@@ -11,7 +11,9 @@ from helper import gaussian_random_field
 
 
 # Add project path and import the classifier
-sys.path.append(os.path.abspath("/home/bota/Desktop/active_sensing"))
+# Get the project root directory (parent of src/)
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, project_root)
 from binary_classifier.classifier import Predicter
 
 from PIL import Image, ImageFilter

@@ -1,0 +1,475 @@
+================================================================================
+DUAL-HORIZON MCTS PLANNER - MATHEMATICAL FORMULATIONS
+================================================================================
+
+This document describes all equations and relationships used in the dual-horizon
+planning system that combines short-horizon (LLP) information gain exploitation
+with long-horizon (HLP) coverage optimization.
+
+================================================================================
+1. FRAGMENTATION ANALYSIS
+================================================================================
+
+Purpose: Detect isolated uncovered regions that should be prioritized
+
+Fragmentation Score:
+    fragmentation_score = min(1.0, (n_patches / τ_frag) × (1 - s_avg / n_total))
+
+    Where:
+        n_patches       = number of isolated uncovered patches (connected components)
+        τ_frag          = 10 (FRAGMENTATION_PATCH_THRESHOLD)
+        s_avg           = total_uncovered / n_patches (average patch size)
+        total_uncovered = number of uncovered cells
+        n_total         = H_dim × W_dim (total field size)
+
+    Range: [0, 1]
+    - 0 = no fragmentation (single uncovered region)
+    - 1 = high fragmentation (many small isolated patches)
+
+Patch Detection:
+    - Uses scipy.ndimage.label() with 8-connectivity structure
+    - Inverts covered_mask to get uncovered regions
+    - Labels connected components as separate patches
+
+
+================================================================================
+2. HLP REGION SELECTION
+================================================================================
+
+Purpose: Select target region for UAV to explore next
+
+Region Score:
+    S_region = w_entropy × V_entropy + B_coverage + B_isolation - 0.3 × P_distance + B_hysteresis
+
+Components:
+
+    Entropy Value (always relevant, even at 100% coverage):
+        V_entropy = mean(H(belief[region]))
+
+        Where H(belief) = -p×log(p) - (1-p)×log(1-p)
+
+    Entropy Weight (increases as coverage grows):
+        w_entropy = 1.0 + p_overall
+
+        Where p_overall = mean(covered_mask) ∈ [0, 1]
+        - At 0% coverage: w_entropy = 1.0
+        - At 100% coverage: w_entropy = 2.0 (entropy dominates)
+
+    Coverage Bonus (fades as overall coverage increases):
+        B_coverage = (1 - coverage_region) × w_coverage × (1 - p_overall)
+
+        - At low coverage: prioritize uncovered regions
+        - At high coverage: coverage bonus fades, entropy dominates
+
+    Isolation Bonus:
+        B_isolation = σ_isolation × w_fragmentation × 2.0
+
+        Where:
+            σ_isolation = 1.0 - (patch_size / total_uncovered)
+
+        Computed only for regions containing isolated patches:
+        - Smaller patches get higher σ_isolation (higher priority)
+        - Multiplied by 2.0 for strong prioritization effect
+
+    Distance Penalty:
+        P_distance = d / d_max
+
+        Where:
+            d = √[(r_current - r_center)² + (c_current - c_center)²]
+            d_max = √(H_dim² + W_dim²)
+
+        Penalizes farther regions (normalized to [0, 1])
+
+    Hysteresis Bonus (prevents ping-pong switching):
+        B_hysteresis = 0.15   if region_id == current_target
+                     = 0.0    otherwise
+
+        Keeps UAV committed to current region unless another is significantly better
+
+Selection:
+    target_region = argmax(S_region)
+
+Behavior:
+    - Early mission: Coverage bonus dominates → target uncovered regions
+    - Late mission: Entropy dominates → target high-uncertainty regions
+    - Hysteresis prevents rapid switching between similar regions
+
+
+================================================================================
+3. LLP-HLP ALIGNMENT (SOFT GUIDANCE)
+================================================================================
+
+Purpose: Provide SOFT guidance from HLP to LLP (bonus only, never penalty)
+
+Distance Calculation (in grid index space):
+    d_before = ||pos_current - pos_target||₂
+    d_after  = ||pos_next - pos_target||₂
+
+    Where:
+        pos_current = [row_current, col_current]
+        pos_target  = [row_target, col_target]
+        pos_next    = position after taking action
+
+Raw Alignment (grid cells):
+    α_raw = (d_before - d_after) / d_max
+
+    Interpretation:
+        α_raw > 0  → moving closer to target
+        α_raw < 0  → moving away from target
+        α_raw = 0  → no horizontal displacement
+
+SOFT Alignment (clamped to non-negative):
+    α_soft = max(0, α_raw)
+
+    Range: [0, ~0.1]
+    - Positive = bonus for moving toward HLP target
+    - Zero = no penalty for moving away (LLP free to explore)
+
+    This ensures HLP is SUGGESTIVE, not RESTRICTIVE
+
+Special Case - Altitude Actions:
+    For actions ∈ {up, down}:
+        α_soft = 0.0
+    
+    LLP has full control over altitude based on IG only
+
+LLP Autonomy Check:
+    max_alignment = max(α_soft for all actions)
+    hlp_has_guidance = (max_alignment > 0.01)
+
+    If NOT hlp_has_guidance:
+        All actions use pure IG (no alignment term)
+        Prevents UAV from hovering when HLP has no clear guidance
+
+
+================================================================================
+4. BLEND WEIGHT COMPUTATION
+================================================================================
+
+Purpose: Adaptively balance short-horizon (IG) vs long-horizon (alignment)
+
+State Metrics:
+    p_coverage = mean(covered_mask)          ∈ [0, 1]
+    r_uncertainty = mean(H(belief)) / 1.0    ∈ [0, 1]
+    s_fragmentation = fragmentation_score     ∈ [0, 1]
+
+Base Weights:
+    w_short_base = 0.6
+    w_long_base  = 0.4
+
+Adjustment Factors:
+    Δ_coverage     = 0.15 × (1.0 - p_coverage)
+    Δ_uncertainty  = 0.2 × r_uncertainty
+    Δ_fragmentation = 0.3 × s_fragmentation
+
+Weight Computation:
+    w_short_raw = w_short_base + Δ_uncertainty - Δ_coverage - Δ_fragmentation
+    w_long_raw  = w_long_base - Δ_uncertainty + Δ_coverage + Δ_fragmentation
+
+Normalization:
+    w_total = w_short_raw + w_long_raw
+    w_short = w_short_raw / w_total
+    w_long  = w_long_raw / w_total
+
+    Ensures: w_short + w_long = 1.0
+
+Interpretation:
+    - Early mission (low coverage)     → boost w_long  (global strategy)
+    - High uncertainty                 → boost w_short (IG exploitation)
+    - High fragmentation               → boost w_long  (consolidate patches)
+
+
+================================================================================
+5. ACTION BLENDING
+================================================================================
+
+Purpose: Combine LLP and HLP preferences to select final action
+
+Combined Score - Altitude Actions (up, down):
+    Q_combined = w_short × Q_IG
+
+Combined Score - Horizontal Actions (front, back, left, right, hover):
+    
+    If HLP has meaningful guidance (max(α_soft) > 0.01):
+        Q_combined = w_short × Q_IG + w_long × α_soft
+
+    If HLP has NO meaningful guidance:
+        Q_combined = w_short × Q_IG
+        (LLP operates autonomously, maximizing IG)
+
+    Where:
+        Q_IG    = information gain score from LLP MCTS
+        α_soft  = soft alignment score (0 = no penalty, >0 = bonus)
+        w_short = short-horizon weight
+        w_long  = long-horizon weight
+
+Final Action Selection:
+    a_selected = argmax(Q_combined)
+                 a ∈ A
+
+    Where A = {up, down, front, back, left, right, hover}
+
+Key Properties:
+    - Alignment is always non-negative (soft guidance)
+    - LLP is never penalized for moving away from HLP target
+    - LLP can maximize IG freely when HLP has no clear suggestion
+    - Altitude control is always pure IG
+
+
+================================================================================
+6. HLP REPLANNING STRATEGY
+================================================================================
+
+Purpose: Determine when to recompute target region
+
+Replanning Triggers (OR condition):
+
+    1. First Step:
+        cached_target_region_id = None
+
+    2. Target Region Well Covered:
+        coverage_target > 0.9 (90% threshold)
+
+        Where coverage_target = mean(covered_mask[region_bounds])
+        Higher threshold ensures regions are completed before switching
+
+Between replans:
+    - Cached target region is reused
+    - Only alignment scores are recomputed
+    - Reduces computational overhead
+
+
+================================================================================
+7. REGION PARTITIONING
+================================================================================
+
+Purpose: Divide field into manageable regions for HLP
+
+Grid-Based Partitioning:
+    n_rows = ⌈H_dim / tile_size[0]⌉
+    n_cols = ⌈W_dim / tile_size[1]⌉
+    n_regions = n_rows × n_cols
+
+Region Metadata (for each region):
+    - bounds: [(row_min, row_max), (col_min, col_max)]
+    - center: (row_center, col_center)
+    - entropy: mean(H(belief[region]))
+    - coverage: mean(covered_mask[region])
+    - value: entropy × (1 - coverage)
+    - uncovered_cells: count of uncovered cells in region
+
+Default:
+    tile_size = [40, 40] grid cells
+
+
+================================================================================
+8. CONSTANTS AND PARAMETERS
+================================================================================
+
+Fragmentation Analysis:
+    FRAGMENTATION_PATCH_THRESHOLD = 10
+
+Blend Weight Adjustments:
+    UNCERTAINTY_ADJUSTMENT_FACTOR   = 0.2
+    FRAGMENTATION_ADJUSTMENT_FACTOR = 0.3
+    Coverage adjustment (hardcoded) = 0.15
+
+Base Weights:
+    base_short = 0.6
+    base_long  = 0.4
+
+HLP Replanning:
+    target_coverage_threshold = 0.9  (90%)
+    (no timeout - only coverage-based)
+
+Region Scoring:
+    distance_penalty_coefficient = 0.3
+    isolation_boost_multiplier   = 2.0
+    hysteresis_bonus            = 0.15 (for current target)
+    entropy_weight_base         = 1.0
+    entropy_weight_max          = 2.0 (at 100% coverage)
+
+LLP Autonomy:
+    alignment_threshold = 0.01 (below = no HLP guidance)
+
+Region Partitioning:
+    default_tile_size = [100, 100] (configurable via config.json)
+
+
+================================================================================
+9. COMPLETE PLANNING FLOW
+================================================================================
+
+At each step t:
+
+1. Run LLP (Short-Horizon):
+   - Execute MCTS with depth=5, IG reward
+   - Get action scores: {a: Q_IG(a) for a in A}
+   - Select: a_LLP = argmax(Q_IG)
+
+2. Check HLP Replanning:
+   - If no cached target OR target coverage > 90% → compute new target region
+   - Else → reuse cached target
+
+3. Compute Soft Alignment:
+   - For each action a:
+     * If a ∈ {up, down}: α_soft(a) = 0
+     * Else: α_soft(a) = max(0, (d_before - d_after) / d_max)
+   
+4. Check LLP Autonomy:
+   - If max(α_soft) < 0.01 → LLP ignores HLP, uses pure IG
+   - Else → blend IG with alignment
+
+5. Compute Blend Weights:
+   - Calculate state metrics (coverage, uncertainty, fragmentation)
+   - Apply adjustment factors
+   - Normalize to sum to 1.0
+
+6. Blend Scores:
+   - For each action a:
+     * If a ∈ {up, down}: Q_combined(a) = w_short × Q_IG(a)
+     * Elif no HLP guidance: Q_combined(a) = w_short × Q_IG(a)
+     * Else: Q_combined(a) = w_short × Q_IG(a) + w_long × α_soft(a)
+
+7. Select Action:
+   - a_final = argmax(Q_combined)
+   - Execute action and update state
+
+Key Behaviors by Mission Phase:
+
+    Early (0-50% coverage):
+        - HLP targets uncovered regions (coverage bonus high)
+        - LLP follows HLP with IG exploitation
+        - Systematic coverage with local optimization
+
+    Mid (50-80% coverage):
+        - HLP balances coverage and entropy
+        - LLP blends IG with alignment
+        - Filling gaps while reducing uncertainty
+
+    Late (80-100% coverage):
+        - HLP targets high-entropy regions (entropy weight high)
+        - LLP may operate autonomously if no clear HLP guidance
+        - Focus on uncertainty reduction
+
+
+================================================================================
+END OF SYNCHRONOUS EQUATIONS
+================================================================================
+
+
+================================================================================
+10. THREADED ARCHITECTURE (ASYNC LLP/HLP)
+================================================================================
+
+Purpose: Run LLP and HLP asynchronously for better responsiveness
+
+Architecture:
+    ┌─────────────────────────────────────────────────────────────────────┐
+    │                         Main Thread                                 │
+    │  ┌──────────┐    request_action()    ┌───────────────────────────┐  │
+    │  │ Main.py  │ ─────────────────────▶ │ ThreadedDualHorizonPlanner│  │
+    │  └──────────┘ ◀───────────────────── └───────────────────────────┘  │
+    │                  (action, metrics)                                  │
+    └─────────────────────────────────────────────────────────────────────┘
+                                    │
+                         ┌──────────┴──────────┐
+                         │     Intent Bus      │
+                         │  (Thread-Safe Comm) │
+                         └──────────┬──────────┘
+                    ┌───────────────┴───────────────┐
+                    │                               │
+    ┌───────────────▼───────────────┐ ┌────────────▼────────────────────┐
+    │       LLP Worker Thread       │ │       HLP Worker Thread         │
+    │  ┌─────────────────────────┐  │ │  ┌────────────────────────────┐ │
+    │  │ - MCTS (depth=5)        │  │ │  │ - Region partitioning      │ │
+    │  │ - IG exploitation       │  │ │  │ - MCTS (depth - 15)        │ │
+    │  │ - Alignment blending    │  │ │  │ - Coverage optimization    │ │
+    │  │ - Real-time response    │  │ │  │ - Async guidance updates   │ │
+    │  └─────────────────────────┘  │ │  └────────────────────────────┘ │
+    └───────────────────────────────┘ └─────────────────────────────────┘
+
+
+Intent Types:
+
+    HLP → LLP:
+        TARGET_REGION        : HLP selected a new target region
+        REGION_PRIORITY      : HLP updated region priorities  
+
+    LLP → HLP:
+        POSITION_UPDATE      : LLP reporting current position
+        COVERAGE_UPDATE      : LLP reporting coverage changes
+        ACTION_TAKEN         : LLP executed an action
+        REGION_REACHED       : LLP reached target region
+
+    Bidirectional:
+        STATE_SYNC           : Full state synchronization
+        SHUTDOWN             : Shutdown signal
+
+
+Intent Bus:
+
+    - Uses priority queues for each direction
+    - Thread-safe with locks for shared data
+    - Latest guidance/feedback available non-blocking
+    - Statistics tracking for monitoring
+
+    Key Methods:
+        send_to_hlp(intent)      : LLP sends intent to HLP
+        send_to_llp(intent)      : HLP sends intent to LLP
+        update_guidance(guidance): HLP publishes new guidance
+        get_guidance()           : LLP reads current guidance (non-blocking)
+        update_feedback(feedback): LLP publishes state feedback
+        get_feedback()           : HLP reads current feedback (non-blocking)
+
+
+HLP Guidance Structure:
+
+    HLPGuidance:
+        target_region_id        : int      (selected region)
+        target_center           : (r, c)   (center in grid indices)
+        region_scores           : Dict     (all region scores)
+        isolation_scores        : Dict     (isolation scores)
+        blend_weight_suggestion : float    (suggested w_long)
+        valid_until             : float    (expiration timestamp)
+        region_metadata         : Dict     (full region info)
+
+
+LLP Feedback Structure:
+
+    LLPFeedback:
+        current_position        : (r, c)   (grid indices)
+        current_altitude        : float    (altitude)
+        last_action             : str      (action taken)
+        coverage_progress       : float    (coverage fraction)
+        reached_target          : bool     (at target region?)
+        ig_scores               : Dict     (IG scores for actions)
+
+
+Timing Configuration:
+
+    HLP:
+        replan_interval   = 1.0 seconds   (how often to recompute)
+        guidance_validity = 5.0 seconds   (how long guidance is valid)
+
+    LLP:
+        Uses guidance if: time.now() < guidance.valid_until
+        Falls back to pure IG if no valid guidance
+
+    Intent Processing:
+        LLP checks HLP intents: timeout = 0.001s (non-blocking)
+        HLP checks LLP intents: timeout = 0.01s  (slightly longer)
+
+
+Benefits:
+
+    1. Responsiveness: LLP always responds quickly
+    2. Parallelism: HLP runs expensive analysis in background
+    3. Decoupling: Each planner focuses on its specialty
+    4. Graceful degradation: LLP works with stale/no guidance
+    5. Monitoring: Intent bus provides visibility into communication
+
+
+================================================================================
+END OF DOCUMENT
+================================================================================
