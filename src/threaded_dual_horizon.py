@@ -646,6 +646,9 @@ class HLPWorker(threading.Thread):
 
     Runs region analysis and selection asynchronously,
     sending guidance to LLP via the intent bus.
+    
+    For multi-agent scenarios, uses coordinator for decentralized
+    region allocation to prevent collisions.
     """
 
     def __init__(
@@ -654,6 +657,8 @@ class HLPWorker(threading.Thread):
         camera: Any,
         mcts_params: Dict,
         initial_state: Dict[str, Any],
+        agent_id: int = 0,
+        coordinator: Any = None,
     ):
         """
         Initialize HLP worker.
@@ -663,12 +668,16 @@ class HLPWorker(threading.Thread):
             camera: UAV camera object
             mcts_params: MCTS configuration
             initial_state: Initial planning state
+            agent_id: ID of this agent (for multi-agent coordination)
+            coordinator: MultiAgentCoordinator for decentralized region allocation
         """
-        super().__init__(name="HLP-Worker", daemon=True)
+        super().__init__(name=f"HLP-Worker-{agent_id}", daemon=True)
 
         self.intent_bus = intent_bus
         self.camera = camera
         self.mcts_params = mcts_params
+        self.agent_id = agent_id
+        self.coordinator = coordinator
 
         # State (updated via intent bus)
         self._state = copy.deepcopy(initial_state)
@@ -886,15 +895,43 @@ class HLPWorker(threading.Thread):
 
             region_scores[region_id] = score
 
-        # Select best region
+        # Select best region (decentralized via coordinator if available)
         if region_scores:
-            selected_region_id = max(region_scores, key=region_scores.get)
+            # Build region centers dict for coordinator
+            region_centers = {
+                rid: meta["center"] for rid, meta in region_metadata.items()
+            }
+            
+            # Get current UAV position in grid coordinates
+            current_row, current_col = self.camera.convert_xy_ij(
+                uav_pos.position[0], uav_pos.position[1], self.camera.grid.center
+            )
+            agent_position = (current_row, current_col)
+            
+            # Use coordinator for decentralized region allocation if available
+            if self.coordinator is not None:
+                selected_region_id = self.coordinator.request_region(
+                    agent_id=self.agent_id,
+                    region_scores=region_scores,
+                    agent_position=agent_position,
+                    region_centers=region_centers,
+                )
+                if selected_region_id is None:
+                    # Fallback to best available if coordinator returns None
+                    selected_region_id = max(region_scores, key=region_scores.get)
+                logger.info(
+                    f"HLP Agent {self.agent_id}: Coordinator assigned region {selected_region_id}"
+                )
+            else:
+                # Single-agent mode: just pick the best
+                selected_region_id = max(region_scores, key=region_scores.get)
+            
             selected_metadata = region_metadata[selected_region_id]
 
             # Update current target tracking
             if selected_region_id != self._current_target_region:
                 logger.info(
-                    f"HLP: Switching target {self._current_target_region} -> {selected_region_id}"
+                    f"HLP Agent {self.agent_id}: Switching target {self._current_target_region} -> {selected_region_id}"
                 )
                 self._current_target_region = selected_region_id
         else:
@@ -1055,6 +1092,9 @@ class ThreadedDualHorizonPlanner:
 
     Manages LLP and HLP worker threads and coordinates
     action selection via the intent bus.
+    
+    For multi-agent scenarios, uses coordinator for decentralized
+    region allocation to prevent drone collisions.
     """
 
     def __init__(
@@ -1063,6 +1103,8 @@ class ThreadedDualHorizonPlanner:
         conf_dict: Optional[Dict] = None,
         mcts_params: Optional[Dict] = None,
         initial_state: Optional[Dict[str, Any]] = None,
+        agent_id: int = 0,
+        coordinator: Any = None,
     ):
         """
         Initialize the threaded planner.
@@ -1072,10 +1114,14 @@ class ThreadedDualHorizonPlanner:
             conf_dict: Sensor confusion matrix
             mcts_params: MCTS configuration
             initial_state: Initial planning state
+            agent_id: ID of this agent (for multi-agent coordination)
+            coordinator: MultiAgentCoordinator for decentralized region allocation
         """
         self.camera = uav_camera
         self.conf_dict = conf_dict or None
         self.mcts_params = mcts_params or {}
+        self.agent_id = agent_id
+        self.coordinator = coordinator
 
         # Create intent bus
         self.intent_bus = IntentBus()
@@ -1141,6 +1187,8 @@ class ThreadedDualHorizonPlanner:
             camera=self.camera,
             mcts_params=self.mcts_params,
             initial_state=self._initial_state,
+            agent_id=self.agent_id,
+            coordinator=self.coordinator,
         )
 
         self._llp_worker.start()

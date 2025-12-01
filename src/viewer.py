@@ -63,8 +63,20 @@ def plot_terrain_2d(filename, grid, ground_truth):
 
 
 def plot_terrain(
-    save_path, belief, grid, uav_pos, ground_truth, submap, obs, fp, h_range,
-    region_metadata=None, selected_region_id=None, region_scores=None
+    save_path,
+    belief,
+    grid,
+    uav_pos,
+    ground_truth,
+    submap,
+    obs,
+    fp,
+    h_range,
+    region_metadata=None,
+    selected_region_id=None,
+    region_scores=None,
+    multi_agent=False,
+    per_agent_data=None,
 ):
     """
     Plot a comprehensive figure with four subplots:
@@ -73,29 +85,54 @@ def plot_terrain(
     3. Belief map.
     4. Ground truth in grid (i,j) coordinates.
 
+    For multi-agent mode, additional rows show per-agent observations and beliefs.
+
     Args:
         save_path (str): Path to save the figure.
         belief (np.ndarray): Belief map (either 2D or 3D with probability channel at index 1).
         grid (object): Grid configuration with attributes 'center', 'x', 'y', and 'length'.
-        uav_positions (list): List of UAV state objects with attributes 'position' and 'altitude'.
+        uav_pos (list): List of UAV state objects OR list of lists for multi-agent.
         ground_truth (np.ndarray): Ground truth binary map.
         submap (np.ndarray): Latest observation submap.
         obs (list): [[x_min, x_max], [y_min, y_max]] bounds of the observation.
         fp (dict): Dictionary with footprint vertices in grid coordinates (keys: 'ul', 'bl', 'br', 'ur').
         region_metadata (dict): Optional region metadata for dual-horizon visualization.
         selected_region_id (int): Optional ID of the region selected by HLP.
+        region_scores (dict): Optional region scores for visualization.
+        multi_agent (bool): If True, uav_pos is a list of lists (one per agent).
+        per_agent_data (list): List of dicts with per-agent observation and belief data.
     """
-    # Create figure with 4 subplots
-    fig, axes = plt.subplots(nrows=1, ncols=4, figsize=(15, 6))
-    for ax in axes:
-        ax.set_axis_off()
+    # Agent colors for multi-agent visualization
+    AGENT_COLORS = [
+        "#FF6B6B",
+        "#4ECDC4",
+        "#45B7D1",
+        "#96CEB4",
+        "#FFEAA7",
+        "#DDA0DD",
+        "#98D8C8",
+        "#F7DC6F",
+    ]
+
+    # Determine number of rows based on multi-agent mode
+    num_agents = len(per_agent_data) if per_agent_data else 0
+    num_rows = 1 + num_agents if multi_agent and num_agents > 0 else 1
+
+    # Create figure with appropriate size
+    fig_height = 6 * num_rows
+    fig = plt.figure(figsize=(16, fig_height))
+
+    # =========================================================================
+    # ROW 1: Main overview (3D terrain, fused observation, fused belief, ground truth)
+    # =========================================================================
+
     # Unpack observation bounds and create polygon coordinates
     [ox_min, ox_max], [oy_min, oy_max] = obs
     o_x = [ox_min, ox_max, ox_max, ox_min, ox_min]
     o_y = [oy_min, oy_min, oy_max, oy_max, oy_min]
 
     # ---- Subplot 1: 3D Terrain with UAV Path ----
-    ax1 = fig.add_subplot(141, projection="3d")
+    ax1 = fig.add_subplot(num_rows, 4, 1, projection="3d")
     if grid.center:
         x_range = [-grid.x / 2, grid.x / 2]
         y_range = [-grid.y / 2, grid.y / 2]
@@ -110,28 +147,90 @@ def plot_terrain(
     ax1.set_xlabel("X (m)")
     ax1.set_ylabel("Y (m)")
     ax1.set_zlabel("Altitude (m)")
-    ax1.set_title("Truth Terrain and UAV position")
+    ax1.set_title("3D Terrain & UAV Paths")
     ax1.xaxis.grid(visible=True)
 
-    # Prepare UAV path data and plot with a color gradient
+    # Handle multi-agent vs single-agent path visualization
+    if (
+        multi_agent
+        and isinstance(uav_pos, list)
+        and len(uav_pos) > 0
+        and isinstance(uav_pos[0], list)
+    ):
+        # Multi-agent: uav_pos is list of lists
+        all_z = []
+        for agent_idx, agent_positions in enumerate(uav_pos):
+            if len(agent_positions) == 0:
+                continue
 
-    uav_x, uav_y, uav_z = zip(
-        *[(uav.position[0], uav.position[1], uav.altitude) for uav in uav_pos]
-    )
+            uav_x, uav_y, uav_z = zip(
+                *[
+                    (uav.position[0], uav.position[1], uav.altitude)
+                    for uav in agent_positions
+                ]
+            )
+            all_z.extend(uav_z)
 
-    cmap_uav = plt.get_cmap("cool")
-    norm = Normalize(vmin=0, vmax=1)
-    colors_list = np.linspace(0, 1, len(uav_pos))
+            # Use distinct color per agent
+            agent_color = AGENT_COLORS[agent_idx % len(AGENT_COLORS)]
 
-    for i in range(len(uav_x) - 1):
-        ax1.plot(
-            uav_x[i : i + 2],
-            uav_y[i : i + 2],
-            uav_z[i : i + 2],
-            color=cmap_uav(norm(colors_list[i])),
-            linewidth=2,
+            for i in range(len(uav_x) - 1):
+                ax1.plot(
+                    uav_x[i : i + 2],
+                    uav_y[i : i + 2],
+                    uav_z[i : i + 2],
+                    color=agent_color,
+                    linewidth=2,
+                    alpha=0.9,
+                )
+
+            # Mark start position with a larger marker
+            if len(uav_x) > 0:
+                ax1.scatter(
+                    [uav_x[0]],
+                    [uav_y[0]],
+                    [uav_z[0]],
+                    color=agent_color,
+                    s=50,
+                    marker="o",
+                    edgecolors="white",
+                    linewidths=1,
+                )
+                # Mark current position with a different marker
+                ax1.scatter(
+                    [uav_x[-1]],
+                    [uav_y[-1]],
+                    [uav_z[-1]],
+                    color=agent_color,
+                    s=80,
+                    marker="^",
+                    edgecolors="white",
+                    linewidths=1,
+                    label=f"Agent {agent_idx}",
+                )
+
+        ax1.legend(loc="upper left", fontsize=8)
+        z_max = max(35, max(all_z)) if all_z else 35
+    else:
+        # Single-agent: original behavior
+        uav_x, uav_y, uav_z = zip(
+            *[(uav.position[0], uav.position[1], uav.altitude) for uav in uav_pos]
         )
-    z_max = max(35, max(uav_z))
+
+        cmap_uav = plt.get_cmap("cool")
+        norm = Normalize(vmin=0, vmax=1)
+        colors_list = np.linspace(0, 1, len(uav_pos))
+
+        for i in range(len(uav_x) - 1):
+            ax1.plot(
+                uav_x[i : i + 2],
+                uav_y[i : i + 2],
+                uav_z[i : i + 2],
+                color=cmap_uav(norm(colors_list[i])),
+                linewidth=2,
+            )
+        z_max = max(35, max(uav_z))
+
     ax1.set_zlim([0, z_max])
 
     # Plot the ground truth terrain as a flat surface at z=0
@@ -152,162 +251,348 @@ def plot_terrain(
     o_z = np.zeros_like(o_x) + 0.01  # Slightly above z=0
     ax1.plot(o_x, o_y, o_z, color="red", lw=1)
 
-    # ---- Subplot 2: 2D Last Observation ----
-    ax2 = fig.add_subplot(142)
+    # ---- Subplot 2: 2D Last Observation (fused/first agent) ----
+    ax2 = fig.add_subplot(num_rows, 4, 2)
     ax2.set_xlabel("X-axis")
     ax2.set_ylabel("Y-axis")
-    ax2.set_title("last observation z_t")
+    title_suffix = " (Fused)" if multi_agent else ""
+    ax2.set_title(f"Last Observation z_t{title_suffix}")
     ax2.set_xlim(x_range)
     ax2.set_ylim(y_range)
     cmap = colors.ListedColormap(["lemonchiffon", "darkgreen"])
 
     bounds = [-0.5, 0.5, 1.5]
-    norm = colors.BoundaryNorm(bounds, cmap.N)
+    norm_binary = colors.BoundaryNorm(bounds, cmap.N)
 
-    ax2.imshow(
-        submap,
-        cmap=cmap,
-        norm=norm,
-        extent=[ox_min, ox_max, oy_min, oy_max],
-        origin="upper",
-    )
+    if submap is not None and submap.size > 0:
+        ax2.imshow(
+            submap,
+            cmap=cmap,
+            norm=norm_binary,
+            extent=[ox_min, ox_max, oy_min, oy_max],
+            origin="upper",
+        )
     ax2.plot(o_x, o_y, color="red", lw=0.9)
 
-    # ---- Subplot 3: Belief Map ----
-    ax3 = fig.add_subplot(143)
+    # ---- Subplot 3: Belief Map (fused) ----
+    ax3 = fig.add_subplot(num_rows, 4, 3)
     ax3.set_xlabel("j-axis")
     ax3.set_ylabel("i-axis")
-    ax3.set_title("Belief sampled map M")
+    ax3.set_title(f"Belief Map M{title_suffix}")
 
     belief_map = belief[:, :, 1] if belief.ndim == 3 else belief
-    # Create a continuous colormap going from dark green (0) to lemonchiffon (1)
-    colors_list = ["lemonchiffon", "darkgreen"]
-
+    # Create a continuous colormap going from lemonchiffon (0) to dark green (1)
+    colors_belief = ["lemonchiffon", "darkgreen"]
     green_yellow_cmap = colors.LinearSegmentedColormap.from_list(
-        "GreenYellow", colors_list
+        "GreenYellow", colors_belief
     )
 
-    ax3.imshow(belief_map, cmap=green_yellow_cmap, origin="upper", vmin=0, vmax=1)
+    im3 = ax3.imshow(belief_map, cmap=green_yellow_cmap, origin="upper", vmin=0, vmax=1)
+    plt.colorbar(im3, ax=ax3, fraction=0.046, pad=0.04)
 
     # ---- Subplot 4: Ground Truth in Grid Indices ----
-    ax4 = fig.add_subplot(144)
+    ax4 = fig.add_subplot(num_rows, 4, 4)
     ax4.set_xlabel("j-axis")
     ax4.set_ylabel("i-axis")
-    ax4.set_title("Ground Truth in ij")
+    ax4.set_title("Ground Truth (i,j)")
 
     ax4.imshow(
         ground_truth,
         cmap=cmap,
-        norm=norm,
+        norm=norm_binary,
         origin="upper",
     )
     ax4.set_xlim(0, ground_truth.shape[1])
     ax4.set_ylim(ground_truth.shape[0], 0)
-    I, J = 0, 1
-    o_i = [fp["ul"][I], fp["bl"][I], fp["br"][I], fp["ur"][I], fp["ul"][I]]
-    o_j = [fp["ul"][J], fp["bl"][J], fp["br"][J], fp["ur"][J], fp["ul"][J]]
-    ax4.plot(o_j, o_i, color="red", lw=0.9)
-    
-    # Add region visualization for dual-horizon planning
-    if region_metadata is not None:
-        print(f"[DEBUG VIEWER] Plotting {len(region_metadata)} regions on Ground Truth subplot, selected: {selected_region_id}")
-        
-        # Get top 5 regions by score (if scores available)
-        top_5_regions = set()
-        if region_scores is not None and len(region_scores) > 0:
-            sorted_regions = sorted(region_scores.items(), key=lambda x: x[1], reverse=True)
-            top_5_regions = {rid for rid, score in sorted_regions[:5]}
-            print(f"[DEBUG VIEWER] Top 5 regions: {[rid for rid, _ in sorted_regions[:5]]}")
-        
-        for region_id, metadata in region_metadata.items():
-            center = metadata['center']
-            bounds = metadata['bounds']
-            
-            # Bounds are already in grid (i,j) coordinates
-            (row_min, row_max), (col_min, col_max) = bounds
-            
-            # Rectangle dimensions in grid indices
-            rect_width = col_max - col_min
-            rect_height = row_max - row_min
-            
-            # Determine color based on selection and ranking
-            if region_id == selected_region_id:
-                edge_color = 'red'
-                line_width = 2.5
-                alpha = 0.9
-            elif region_id in top_5_regions:
-                edge_color = 'cyan'
-                line_width = 2.0
-                alpha = 0.75
-            else:
-                edge_color = 'yellow'
-                line_width = 1.5
-                alpha = 0.6
-            
-            # Draw rectangle (note: ax4 uses j for x-axis, i for y-axis)
-            rect = patches.Rectangle(
-                (col_min, row_min),  # (j, i) coordinates
-                rect_width,
-                rect_height,
-                linewidth=line_width,
-                edgecolor=edge_color,
-                facecolor='none',
-                alpha=alpha
+
+    # Draw footprint on ground truth
+    if isinstance(fp, dict) and "ul" in fp:
+        I, J = 0, 1
+        o_i = [fp["ul"][I], fp["bl"][I], fp["br"][I], fp["ur"][I], fp["ul"][I]]
+        o_j = [fp["ul"][J], fp["bl"][J], fp["br"][J], fp["ur"][J], fp["ul"][J]]
+        ax4.plot(o_j, o_i, color="red", lw=0.9)
+
+    # Region visualization moved to per-agent rows for multi-agent mode
+    # Only show global regions in single-agent mode
+    if region_metadata is not None and not multi_agent:
+        _draw_regions_on_axis(ax4, region_metadata, selected_region_id, region_scores)
+
+    # =========================================================================
+    # ADDITIONAL ROWS: Per-agent observations and beliefs
+    # =========================================================================
+    if multi_agent and per_agent_data:
+        for agent_idx, agent_data in enumerate(per_agent_data):
+            row_offset = (agent_idx + 1) * 4  # Each row has 4 columns
+            agent_id = agent_data.get("agent_id", agent_idx)
+            agent_color = AGENT_COLORS[agent_idx % len(AGENT_COLORS)]
+
+            # ---- Agent Label (Column 1) ----
+            ax_label = fig.add_subplot(num_rows, 4, row_offset + 1)
+            ax_label.set_axis_off()
+            ax_label.text(
+                0.5,
+                0.5,
+                f"Agent {agent_id}",
+                fontsize=20,
+                fontweight="bold",
+                ha="center",
+                va="center",
+                color=agent_color,
+                transform=ax_label.transAxes,
+                bbox=dict(
+                    boxstyle="round,pad=0.5",
+                    facecolor="white",
+                    edgecolor=agent_color,
+                    linewidth=3,
+                ),
             )
-            ax4.add_patch(rect)
-            
-            # Draw center point (center is in (row, col) format)
-            center_j = center[1]  # col
-            center_i = center[0]  # row
-            
-            # Color based on rank
-            if region_id == selected_region_id:
-                marker_color = 'red'
-                marker_size = 10
-            elif region_id in top_5_regions:
-                marker_color = 'cyan'
-                marker_size = 8
+
+            # ---- Agent Observation (Column 2) ----
+            ax_obs = fig.add_subplot(num_rows, 4, row_offset + 2)
+            ax_obs.set_xlabel("X-axis")
+            ax_obs.set_ylabel("Y-axis")
+            ax_obs.set_title(
+                f"Agent {agent_id} - Observation", color=agent_color, fontweight="bold"
+            )
+            ax_obs.set_xlim(x_range)
+            ax_obs.set_ylim(y_range)
+
+            agent_submap = agent_data.get("submap")
+            agent_obs_range = agent_data.get("obs_range", obs)
+
+            if agent_submap is not None and agent_submap.size > 0:
+                [aox_min, aox_max], [aoy_min, aoy_max] = agent_obs_range
+                ax_obs.imshow(
+                    agent_submap,
+                    cmap=cmap,
+                    norm=norm_binary,
+                    extent=[aox_min, aox_max, aoy_min, aoy_max],
+                    origin="upper",
+                )
+                # Draw observation boundary
+                ao_x = [aox_min, aox_max, aox_max, aox_min, aox_min]
+                ao_y = [aoy_min, aoy_min, aoy_max, aoy_max, aoy_min]
+                ax_obs.plot(ao_x, ao_y, color=agent_color, lw=2)
             else:
-                marker_color = 'yellow'
-                marker_size = 6
-            
-            ax4.plot(center_j, center_i, 'x', 
-                    color=marker_color,
-                    markersize=marker_size,
-                    markeredgewidth=2,
-                    alpha=0.9)
-            
-            # Add region ID label at center
-            if region_id == selected_region_id:
-                label_facecolor = 'red'
-                label_fontsize = 9
-                label_weight = 'bold'
-            elif region_id in top_5_regions:
-                label_facecolor = 'blue'
-                label_fontsize = 8
-                label_weight = 'bold'
+                ax_obs.text(
+                    0.5,
+                    0.5,
+                    "No observation",
+                    ha="center",
+                    va="center",
+                    transform=ax_obs.transAxes,
+                    fontsize=12,
+                    color="gray",
+                )
+
+            # ---- Agent Belief Map (Column 3) ----
+            ax_belief = fig.add_subplot(num_rows, 4, row_offset + 3)
+            ax_belief.set_xlabel("j-axis")
+            ax_belief.set_ylabel("i-axis")
+            ax_belief.set_title(
+                f"Agent {agent_id} - Belief Map", color=agent_color, fontweight="bold"
+            )
+
+            agent_belief = agent_data.get("belief_map")
+            if agent_belief is not None and agent_belief.size > 0:
+                agent_belief_2d = (
+                    agent_belief[:, :, 1] if agent_belief.ndim == 3 else agent_belief
+                )
+                im_belief = ax_belief.imshow(
+                    agent_belief_2d,
+                    cmap=green_yellow_cmap,
+                    origin="upper",
+                    vmin=0,
+                    vmax=1,
+                )
+                plt.colorbar(im_belief, ax=ax_belief, fraction=0.046, pad=0.04)
+
+                # Draw observation footprint on belief
+                agent_fp = agent_data.get("fp_ij")
+                if isinstance(agent_fp, dict) and "ul" in agent_fp:
+                    I, J = 0, 1
+                    fp_i = [
+                        agent_fp["ul"][I],
+                        agent_fp["bl"][I],
+                        agent_fp["br"][I],
+                        agent_fp["ur"][I],
+                        agent_fp["ul"][I],
+                    ]
+                    fp_j = [
+                        agent_fp["ul"][J],
+                        agent_fp["bl"][J],
+                        agent_fp["br"][J],
+                        agent_fp["ur"][J],
+                        agent_fp["ul"][J],
+                    ]
+                    ax_belief.plot(fp_j, fp_i, color=agent_color, lw=2, linestyle="--")
             else:
-                label_facecolor = 'gray'
-                label_fontsize = 7
-                label_weight = 'normal'
-            
-            ax4.text(center_j, center_i + rect_height * 0.1, str(region_id),
-                    color='white',
-                    fontsize=label_fontsize,
-                    ha='center', va='center',
-                    weight=label_weight,
-                    bbox=dict(boxstyle='round,pad=0.4', 
-                             facecolor=label_facecolor,
-                             alpha=0.8,
-                             edgecolor='white',
-                             linewidth=1))
+                ax_belief.text(
+                    0.5,
+                    0.5,
+                    "No belief data",
+                    ha="center",
+                    va="center",
+                    transform=ax_belief.transAxes,
+                    fontsize=12,
+                    color="gray",
+                )
+
+            # ---- Agent HLP Regions (Column 4) ----
+            ax_hlp = fig.add_subplot(num_rows, 4, row_offset + 4)
+            ax_hlp.set_xlabel("j-axis")
+            ax_hlp.set_ylabel("i-axis")
+            ax_hlp.set_title(
+                f"Agent {agent_id} - HLP Regions", color=agent_color, fontweight="bold"
+            )
+
+            # Show ground truth as background
+            ax_hlp.imshow(
+                ground_truth,
+                cmap=cmap,
+                norm=norm_binary,
+                origin="upper",
+                alpha=0.5,
+            )
+            ax_hlp.set_xlim(0, ground_truth.shape[1])
+            ax_hlp.set_ylim(ground_truth.shape[0], 0)
+
+            # Draw HLP regions for this agent
+            agent_region_metadata = agent_data.get("region_metadata")
+            agent_selected_region = agent_data.get("selected_region_id")
+            agent_region_scores = agent_data.get("region_scores")
+
+            if agent_region_metadata is not None:
+                _draw_regions_on_axis(
+                    ax_hlp,
+                    agent_region_metadata,
+                    agent_selected_region,
+                    agent_region_scores,
+                )
+            else:
+                ax_hlp.text(
+                    0.5,
+                    0.5,
+                    "No HLP regions",
+                    ha="center",
+                    va="center",
+                    transform=ax_hlp.transAxes,
+                    fontsize=12,
+                    color="gray",
+                    bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8),
+                )
 
     plt.tight_layout()
-    plt.savefig(save_path)
+    plt.savefig(save_path, dpi=150)
     plt.close(fig)
 
 
-def plot_metrics(save_path, entropy_list, mse_list, coverage_list, height_list, height_range=None):
+def _draw_regions_on_axis(ax, region_metadata, selected_region_id, region_scores):
+    """Helper function to draw region visualization on an axis."""
+    # Get top 5 regions by score (if scores available)
+    top_5_regions = set()
+    if region_scores is not None and len(region_scores) > 0:
+        sorted_regions = sorted(region_scores.items(), key=lambda x: x[1], reverse=True)
+        top_5_regions = {rid for rid, score in sorted_regions[:5]}
+
+    for region_id, metadata in region_metadata.items():
+        center = metadata["center"]
+        bounds = metadata["bounds"]
+
+        # Bounds are already in grid (i,j) coordinates
+        (row_min, row_max), (col_min, col_max) = bounds
+
+        # Rectangle dimensions in grid indices
+        rect_width = col_max - col_min
+        rect_height = row_max - row_min
+
+        # Determine color based on selection and ranking
+        if region_id == selected_region_id:
+            edge_color = "red"
+            line_width = 2.5
+            alpha = 0.9
+        elif region_id in top_5_regions:
+            edge_color = "cyan"
+            line_width = 2.0
+            alpha = 0.75
+        else:
+            edge_color = "yellow"
+            line_width = 1.5
+            alpha = 0.6
+
+        # Draw rectangle (note: ax uses j for x-axis, i for y-axis)
+        rect = patches.Rectangle(
+            (col_min, row_min),  # (j, i) coordinates
+            rect_width,
+            rect_height,
+            linewidth=line_width,
+            edgecolor=edge_color,
+            facecolor="none",
+            alpha=alpha,
+        )
+        ax.add_patch(rect)
+
+        # Draw center point (center is in (row, col) format)
+        center_j = center[1]  # col
+        center_i = center[0]  # row
+
+        # Color based on rank
+        if region_id == selected_region_id:
+            marker_color = "red"
+            marker_size = 10
+        elif region_id in top_5_regions:
+            marker_color = "cyan"
+            marker_size = 8
+        else:
+            marker_color = "yellow"
+            marker_size = 6
+
+        ax.plot(
+            center_j,
+            center_i,
+            "x",
+            color=marker_color,
+            markersize=marker_size,
+            markeredgewidth=2,
+            alpha=0.9,
+        )
+
+        # Add region ID label at center
+        if region_id == selected_region_id:
+            label_facecolor = "red"
+            label_fontsize = 9
+            label_weight = "bold"
+        elif region_id in top_5_regions:
+            label_facecolor = "blue"
+            label_fontsize = 8
+            label_weight = "bold"
+        else:
+            label_facecolor = "gray"
+            label_fontsize = 7
+            label_weight = "normal"
+
+        ax.text(
+            center_j,
+            center_i + rect_height * 0.1,
+            str(region_id),
+            color="white",
+            fontsize=label_fontsize,
+            ha="center",
+            va="center",
+            weight=label_weight,
+            bbox=dict(
+                boxstyle="round,pad=0.4",
+                facecolor=label_facecolor,
+                alpha=0.8,
+                edgecolor="white",
+                linewidth=1,
+            ),
+        )
+
+
+def plot_metrics(
+    save_path, entropy_list, mse_list, coverage_list, height_list, height_range=None
+):
     """
     Plot metrics (entropy, MSE, coverage, height) over time and save the resulting figure.
 
@@ -353,7 +638,7 @@ def plot_metrics(save_path, entropy_list, mse_list, coverage_list, height_list, 
     ax4.set_ylabel("Height")
     ax4.set_title("Height over Steps")
     ax4.grid(True)
-    
+
     # Set height y-axis limits if provided
     if height_range is not None:
         min_h, max_h = height_range
@@ -361,9 +646,13 @@ def plot_metrics(save_path, entropy_list, mse_list, coverage_list, height_list, 
         padding = (max_h - min_h) * 0.05
         ax4.set_ylim(min_h - padding, max_h + padding)
         # Add horizontal lines for min and max limits
-        ax4.axhline(y=min_h, color='gray', linestyle='--', alpha=0.7, label=f'Min: {min_h:.1f}')
-        ax4.axhline(y=max_h, color='gray', linestyle='--', alpha=0.7, label=f'Max: {max_h:.1f}')
-        ax4.legend(loc='best', fontsize=8)
+        ax4.axhline(
+            y=min_h, color="gray", linestyle="--", alpha=0.7, label=f"Min: {min_h:.1f}"
+        )
+        ax4.axhline(
+            y=max_h, color="gray", linestyle="--", alpha=0.7, label=f"Max: {max_h:.1f}"
+        )
+        ax4.legend(loc="best", fontsize=8)
 
     plt.tight_layout()
     if save_path.endswith(".png"):
