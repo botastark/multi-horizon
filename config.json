@@ -24,6 +24,21 @@
             "hlp_replan_frequency": 10
         }
     },
+    "multi_agent": {
+        "num_agents": 2,
+        "enable_coordination": true,
+        "belief_fusion": true,
+        "fusion_method": "lbp",
+        "use_lbp": true,
+        "lbp_iterations": 1,
+        "news_mode": "BM",
+        "pairwise_potential": [[0.6, 0.4], [0.4, 0.6]],
+        "region_allocation": "auction",
+        "communication_range": -1,
+        "collision_avoidance_distance": 5.0,
+        "belief_fusion_weight": 0.7,
+        "coordination_frequency": 5
+    },
     "correlation_types": ["equal"],
     "n_steps": 100,
     "iters": [0, 1],
