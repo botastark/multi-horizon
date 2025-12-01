@@ -238,6 +238,43 @@ class CommunicationBus:
         with self._lock:
             return self._stats.copy()
 
+    def clear_queue(self, agent_id: int) -> int:
+        """
+        Clear all pending messages for an agent.
+
+        Call this at the start of each step to prevent message buildup.
+
+        Args:
+            agent_id: ID of agent whose queue to clear
+
+        Returns:
+            Number of messages cleared
+        """
+        if agent_id not in self._queues:
+            return 0
+
+        cleared = 0
+        with self._lock:
+            while not self._queues[agent_id].empty():
+                try:
+                    self._queues[agent_id].get_nowait()
+                    cleared += 1
+                except queue.Empty:
+                    break
+        return cleared
+
+    def clear_all_queues(self) -> int:
+        """
+        Clear all message queues for all agents.
+
+        Returns:
+            Total number of messages cleared
+        """
+        total_cleared = 0
+        for agent_id in self._queues:
+            total_cleared += self.clear_queue(agent_id)
+        return total_cleared
+
 
 # =============================================================================
 # Belief Fusion - LBP-based Combining Observations from Multiple Agents
@@ -1515,22 +1552,23 @@ class MultiAgentCoordinator:
             agent_observations: Dict mapping agent_id to observation dict with:
                 - 'fp_ij': Footprint indices
                 - 'submap': Binary observation array
-                - 'sigmas': Tuple (sigma0, sigma1) or None
+                - 'sigmas': Tuple (sigma0, sigma1) or None (uses defaults)
         """
         if not self.belief_fusion_enabled or self.lbp_fusion is None:
             return
 
         for agent_id, obs in agent_observations.items():
             sigmas = obs.get("sigmas")
+            # Use default sigmas if not provided
             if sigmas is None:
-                continue
+                sigma0, sigma1 = 0.1, 0.1  # Default false positive/negative rates
+            else:
+                sigma0, sigma1 = sigmas
 
             fp_ij = obs.get("fp_ij")
             submap = obs.get("submap")
             if fp_ij is None or submap is None:
                 continue
-
-            sigma0, sigma1 = sigmas
 
             # LBP inference runs asynchronously (decentralized per agent)
             if self.use_lbp:
@@ -1946,3 +1984,57 @@ def generate_multi_agent_starts(
             positions.append((x, y))
 
     return positions[:num_agents]
+
+
+# =============================================================================
+# Integration: Hierarchical Dec-MCTS Planner Factory
+# =============================================================================
+
+
+def create_hierarchical_planners(
+    num_agents: int,
+    cameras: List[Any],
+    grid_info: Any,
+    config: Optional[Dict[str, Any]] = None,
+) -> Tuple[Any, List[Any]]:
+    """
+    Factory function to create hierarchical Dec-MCTS planners for all agents.
+
+    Creates:
+    - A shared IntentBus for all agents
+    - A HierarchicalDecMCTSPlanner for each agent
+
+    Args:
+        num_agents: Number of agents
+        cameras: List of camera objects (one per agent)
+        grid_info: Grid information
+        config: Configuration dict with planner parameters
+
+    Returns:
+        (intent_bus, list_of_planners)
+    """
+    from hierarchical_dec_mcts import IntentBus, create_hierarchical_planner
+
+    config = config or {}
+
+    # Create shared intent bus
+    intent_bus = IntentBus(num_agents=num_agents)
+
+    # Create planners for each agent
+    planners = []
+    for agent_id in range(num_agents):
+        planner = create_hierarchical_planner(
+            agent_id=agent_id,
+            num_agents=num_agents,
+            camera=cameras[agent_id],
+            grid_info=grid_info,
+            intent_bus=intent_bus,
+            config=config,
+        )
+        planners.append(planner)
+
+    logger.info(
+        f"Created {num_agents} hierarchical Dec-MCTS planners with shared IntentBus"
+    )
+
+    return intent_bus, planners

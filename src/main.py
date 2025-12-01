@@ -401,28 +401,29 @@ def run_multi_agent_experiment(
             f"Agent {agent_id}: Start position {start_pos}, grid ({current_row:.0f}, {current_col:.0f})"
         )
 
-    # Setup logging
-    loggers = {}
+    # Setup logging - single unified logger for multi-agent
+    multi_agent_logger = None
     if ENABLE_LOGGING:
         log_folder = os.path.join(results_folder, "txt")
-        for agent in agents:
-            agent_id = agent["agent_id"]
-            loggers[agent_id] = FastLogger(
-                log_folder,
-                strategy=action_strategy,
-                pairwise=corr_type,
-                grid=grid_info,
-                init_x=agent["uav_pos"],
-                r=grf_r,
-                n_agent=f"{iter_idx}_agent{agent_id}",
-                e=e_margin,
-                conf_dict=conf_dict,
-                header_extras=[
-                    ("mcts_params", json.dumps(mcts_params, sort_keys=True)),
-                    ("num_agents", str(num_agents)),
-                    ("agent_id", str(agent_id)),
-                ],
-            )
+        # Collect all agent init positions
+        init_positions = [agent["uav_pos"] for agent in agents]
+        multi_agent_logger = FastLogger(
+            log_folder,
+            strategy=action_strategy,
+            pairwise=corr_type,
+            grid=grid_info,
+            init_x=init_positions,
+            r=grf_r,
+            n_agent=num_agents,
+            e=e_margin,
+            conf_dict=conf_dict,
+            filename=f"multi_agent_iter{iter_idx}.log",
+            multi_agent=True,
+            num_agents=num_agents,
+            header_extras=[
+                ("mcts_params", json.dumps(mcts_params, sort_keys=True)),
+            ],
+        )
 
     # Setup step-wise plotting directory
     if ENABLE_STEPWISE_PLOTTING:
@@ -431,6 +432,11 @@ def run_multi_agent_experiment(
             + f"/{corr_type}_{action_strategy}_e{e_margin}_r{grf_r}/{iter_idx}/steps/",
             exist_ok=True,
         )
+
+    # Initialize fused metrics lists for plotting
+    fused_entropy_history = []
+    fused_mse_history = []
+    combined_coverage_history = []
 
     # Main multi-agent loop
     for step in tqdm(range(0, n_steps), desc="steps", position=3, leave=False):
@@ -450,7 +456,7 @@ def run_multi_agent_experiment(
             uav_pos = agent["uav_pos"]
             belief_map = agent["belief_map"]
 
-            # Process coordination messages (if any from previous step)
+            # Process any pending coordination messages from previous step
             coordinator.process_messages(agent_id)
 
             # Get observations
@@ -485,9 +491,21 @@ def run_multi_agent_experiment(
         # PHASE 2: Synchronous News Belief Update + Fusion (Paper-compliant)
         # Step A: ALL agents update their news beliefs from observations
         # Step B: ALL agents fuse with their neighbors
-        # This ensures proper decentralized coordination without double-counting
+        # This is a CENTRALIZED coordinator pattern where all updates happen
+        # synchronously without message passing. The news_map_beliefs are
+        # shared via coordinator's internal state, not via message bus.
         # =====================================================================
         if coordinator.lbp_fusion is not None:
+            # Debug: Check if observations were collected
+            if step < 3:
+                print(
+                    f"Step {step} agent_observations keys: {list(agent_observations.keys())}"
+                )
+                for agent_id, obs in agent_observations.items():
+                    print(
+                        f"  Agent {agent_id}: sigmas={obs.get('sigmas')}, fp_ij_keys={list(obs.get('fp_ij', {}).keys())}"
+                    )
+
             # Use the coordinator's synchronous fusion method
             # Step A: Update all news beliefs
             coordinator.update_all_news(agent_observations)
@@ -495,11 +513,26 @@ def run_multi_agent_experiment(
             # Step B: Fuse all agents with their neighbors
             coordinator.fuse_all_news()
 
-            # NOTE: We keep using each agent's LOCAL occupancy_map belief for
-            # planning and visualization. The coordinator fusion updates its
-            # internal map_beliefs for multi-agent coordination/consensus,
-            # but each agent's local belief (from occupancy_map) is more accurate
-            # for that agent's own observations.
+            # Debug: Check fusion happened
+            fusion_stats = coordinator.get_statistics().get("lbp_fusion", {})
+            if step < 3 or step % 20 == 0:  # Log first 3 steps and every 20th step
+                print(f"Step {step} LBP Fusion stats: {fusion_stats}")
+
+            # IMPORTANT: Feed fused beliefs back to agents for planning
+            # Each agent should use the fused belief (combining info from all agents)
+            # rather than their local belief alone. This enables true belief sharing.
+            for agent in agents:
+                agent_id = agent["agent_id"]
+                fused_belief = coordinator.get_agent_belief(agent_id)
+                if fused_belief is not None:
+                    # Update agent's belief_map with fused version
+                    # belief_map[:, :, 0] = P(free), belief_map[:, :, 1] = P(occupied)
+                    agent["belief_map"][:, :, 1] = fused_belief
+                    agent["belief_map"][:, :, 0] = 1 - fused_belief
+                    if step < 3:
+                        print(
+                            f"  Agent {agent_id}: Updated belief_map with fused belief"
+                        )
         else:
             # Fallback to simple belief sharing (weighted averaging)
             for agent in agents:
@@ -537,22 +570,6 @@ def run_multi_agent_experiment(
             agent["mse"].append(mse_val)
             agent["coverage"].append(coverage_val)
             agent["height"].append(uav_pos.altitude)
-
-            # Log
-            if ENABLE_LOGGING and agent_id in loggers:
-                loggers[agent_id].log_data(
-                    agent["entropy"][-1],
-                    agent["mse"][-1],
-                    agent["height"][-1],
-                    agent["coverage"][-1],
-                    step=step,
-                    action=agent["actions"][-1] if len(agent["actions"]) > 0 else None,
-                    ig=(
-                        agent["info_gain_action"].get(agent["actions"][-1])
-                        if len(agent["actions"]) > 0
-                        else None
-                    ),
-                )
 
             # Select action
             next_action, info_gain_action = planner.select_action(
@@ -706,6 +723,18 @@ def run_multi_agent_experiment(
                         agent_region_scores = getattr(
                             tdhp, "current_region_scores", None
                         )
+                elif action_strategy == "hierarchical_dec_mcts" and hasattr(
+                    agent_planner, "_hierarchical_planner"
+                ):
+                    hdp = agent_planner._hierarchical_planner
+                    if hasattr(hdp, "current_region_metadata"):
+                        agent_region_metadata = hdp.current_region_metadata
+                        agent_selected_region = getattr(
+                            hdp, "current_selected_region", None
+                        )
+                        agent_region_scores = getattr(
+                            hdp, "current_region_scores", None
+                        )
 
                 per_agent_data.append(
                     {
@@ -753,12 +782,74 @@ def run_multi_agent_experiment(
                 per_agent_data=per_agent_data,  # Pass per-agent observation/belief/HLP data
             )
 
+            # Plot aggregated metrics for multi-agent iteration
+            # Use fused belief for entropy/MSE, OR-based coverage, per-agent heights
+
+            # Compute combined observed_ids (union of all agents' observed_ids)
+            combined_observed_ids = set()
+            for agent in agents:
+                combined_observed_ids.update(agent["observed_ids"])
+
+            # Compute metrics from fused belief (display_belief)
+            fused_entropy_val, fused_mse_val, combined_coverage_val = compute_metrics(
+                ground_truth_map, display_belief, combined_observed_ids, grid_info
+            )
+
+            # Append to running history lists
+            fused_entropy_history.append(fused_entropy_val)
+            fused_mse_history.append(fused_mse_val)
+            combined_coverage_history.append(combined_coverage_val)
+
+            # Log multi-agent data (common metrics + per-agent lists)
+            if ENABLE_LOGGING and multi_agent_logger is not None:
+                heights = [agent["height"][-1] for agent in agents]
+                actions = [
+                    agent["actions"][-1] if len(agent["actions"]) > 0 else None
+                    for agent in agents
+                ]
+                igs = [
+                    (
+                        agent["info_gain_action"].get(agent["actions"][-1])
+                        if len(agent["actions"]) > 0
+                        else None
+                    )
+                    for agent in agents
+                ]
+                multi_agent_logger.log_multi_agent_data(
+                    entropy=fused_entropy_val,
+                    mse=fused_mse_val,
+                    coverage=combined_coverage_val,
+                    heights=heights,
+                    actions=actions,
+                    igs=igs,
+                    step=step,
+                )
+
+            # Per-agent heights (list of lists)
+            per_agent_heights = [agent["height"][: step + 1] for agent in agents]
+
+            plot_metrics(
+                f"{results_folder}/{corr_type}_{action_strategy}_e{e_margin}_r{grf_r}/iter_{iter_idx}.png",
+                fused_entropy_history,
+                fused_mse_history,
+                combined_coverage_history,
+                per_agent_heights,
+                height_range=agents[0]["camera"].get_hrange(),
+            )
+
         print(f"--- Step {step} complete ---\n")
+
+    # Drain any remaining messages from queues (cleanup old messages)
+    coordinator.comm_bus.clear_all_queues()
 
     # Finalize planners
     for agent in agents:
         if hasattr(agent["planner"], "finalize_episode"):
             agent["planner"].finalize_episode()
+
+    # Close logger
+    if ENABLE_LOGGING and multi_agent_logger is not None:
+        multi_agent_logger.close()
 
     # Print coordination statistics
     coord_stats = coordinator.get_statistics()
