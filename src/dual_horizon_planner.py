@@ -1395,33 +1395,31 @@ class DualHorizonPlanner:
         # High uncertainty: favor short-horizon for IG exploitation
         # High fragmentation: favor long-horizon to consolidate
 
-        # Base weights
+        # Base weights from config (w_ig for LLP/short, w_coverage for HLP/long)
+        # These control the base tradeoff between:
+        # - Short horizon (LLP): maximize information gain / reduce entropy
+        # - Long horizon (HLP): cover as much area as fast as possible
         base_short = self.w_ig
         base_long = self.w_coverage
 
-        # Adjust based on coverage progress
-        # Early mission: boost long-horizon slightly (reduced factor)
-        coverage_adjustment = 0.15 * (1.0 - coverage_progress)  # Reduced from 0.3
+        # Normalize base weights to sum to 1
+        base_total = base_short + base_long
+        if base_total > 0:
+            base_short = base_short / base_total
+            base_long = base_long / base_total
+        else:
+            base_short = 0.5
+            base_long = 0.5
 
-        # High uncertainty: boost short-horizon for IG exploitation
-        uncertainty_adjustment = UNCERTAINTY_ADJUSTMENT_FACTOR * uncertainty_ratio
-
-        # High fragmentation: boost long-horizon to reach isolated patches
-        fragmentation_adjustment = FRAGMENTATION_ADJUSTMENT_FACTOR * fragmentation_score
+        # Only fragmentation affects the balance - high fragmentation slightly boosts HLP
+        # to consolidate isolated patches (max +0.1 boost to long horizon)
+        frag_adjustment = min(
+            0.1, FRAGMENTATION_ADJUSTMENT_FACTOR * fragmentation_score
+        )
 
         # Compute final weights
-        w_short = (
-            base_short
-            + uncertainty_adjustment
-            - coverage_adjustment
-            - fragmentation_adjustment
-        )
-        w_long = (
-            base_long
-            - uncertainty_adjustment
-            + coverage_adjustment
-            + fragmentation_adjustment
-        )
+        w_short = base_short - frag_adjustment
+        w_long = base_long + frag_adjustment
 
         # Normalize to sum to 1
         total = w_short + w_long

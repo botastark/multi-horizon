@@ -251,33 +251,147 @@ def plot_terrain(
     o_z = np.zeros_like(o_x) + 0.01  # Slightly above z=0
     ax1.plot(o_x, o_y, o_z, color="red", lw=1)
 
-    # ---- Subplot 2: 2D Last Observation (fused/first agent) ----
+    # ---- Subplot 2: 2D Top-View UAV Trajectories with Time Coloring ----
     ax2 = fig.add_subplot(num_rows, 4, 2)
-    ax2.set_xlabel("X-axis")
-    ax2.set_ylabel("Y-axis")
-    title_suffix = " (Fused)" if multi_agent else ""
-    ax2.set_title(f"Last Observation z_t{title_suffix}")
+    ax2.set_xlabel("X (m)")
+    ax2.set_ylabel("Y (m)")
+    ax2.set_title("UAV Trajectories (Top View)")
     ax2.set_xlim(x_range)
     ax2.set_ylim(y_range)
-    cmap = colors.ListedColormap(["lemonchiffon", "darkgreen"])
+    ax2.set_aspect("equal")
+    ax2.grid(True, alpha=0.3)
 
-    bounds = [-0.5, 0.5, 1.5]
-    norm_binary = colors.BoundaryNorm(bounds, cmap.N)
+    # Time-based colormap
+    time_cmap = plt.get_cmap("viridis")
 
-    if submap is not None and submap.size > 0:
-        ax2.imshow(
-            submap,
-            cmap=cmap,
-            norm=norm_binary,
-            extent=[ox_min, ox_max, oy_min, oy_max],
-            origin="upper",
+    if (
+        multi_agent
+        and isinstance(uav_pos, list)
+        and len(uav_pos) > 0
+        and isinstance(uav_pos[0], list)
+    ):
+        # Multi-agent: plot each agent's trajectory with time coloring
+        max_steps = max(
+            len(agent_positions) for agent_positions in uav_pos if agent_positions
         )
-    ax2.plot(o_x, o_y, color="red", lw=0.9)
+
+        for agent_idx, agent_positions in enumerate(uav_pos):
+            if len(agent_positions) == 0:
+                continue
+
+            uav_x = [uav.position[0] for uav in agent_positions]
+            uav_y = [uav.position[1] for uav in agent_positions]
+            n_points = len(uav_x)
+
+            # Plot trajectory segments with time-based colors
+            for i in range(n_points - 1):
+                t_norm = i / max(1, max_steps - 1)  # Normalize time to [0, 1]
+                ax2.plot(
+                    uav_x[i : i + 2],
+                    uav_y[i : i + 2],
+                    color=time_cmap(t_norm),
+                    linewidth=2.5,
+                    alpha=0.8,
+                )
+
+            # Mark start position
+            if n_points > 0:
+                ax2.scatter(
+                    [uav_x[0]],
+                    [uav_y[0]],
+                    color=time_cmap(0),
+                    s=100,
+                    marker="o",
+                    edgecolors="black",
+                    linewidths=1.5,
+                    zorder=10,
+                    label=f"Agent {agent_idx} start" if agent_idx == 0 else None,
+                )
+                # Mark current position with triangle
+                ax2.scatter(
+                    [uav_x[-1]],
+                    [uav_y[-1]],
+                    color=time_cmap(
+                        1.0
+                        if n_points == max_steps
+                        else (n_points - 1) / max(1, max_steps - 1)
+                    ),
+                    s=120,
+                    marker="^",
+                    edgecolors="black",
+                    linewidths=1.5,
+                    zorder=10,
+                )
+                # Add agent label near current position
+                ax2.annotate(
+                    f"A{agent_idx}",
+                    (uav_x[-1], uav_y[-1]),
+                    xytext=(5, 5),
+                    textcoords="offset points",
+                    fontsize=9,
+                    fontweight="bold",
+                )
+
+        # Add colorbar for time
+        sm = plt.cm.ScalarMappable(
+            cmap=time_cmap, norm=Normalize(vmin=0, vmax=max_steps - 1)
+        )
+        sm.set_array([])
+        cbar = plt.colorbar(sm, ax=ax2, fraction=0.046, pad=0.04)
+        cbar.set_label("Time Step", fontsize=9)
+    else:
+        # Single-agent trajectory
+        if uav_pos and len(uav_pos) > 0:
+            uav_x = [uav.position[0] for uav in uav_pos]
+            uav_y = [uav.position[1] for uav in uav_pos]
+            n_points = len(uav_x)
+
+            for i in range(n_points - 1):
+                t_norm = i / max(1, n_points - 1)
+                ax2.plot(
+                    uav_x[i : i + 2],
+                    uav_y[i : i + 2],
+                    color=time_cmap(t_norm),
+                    linewidth=2.5,
+                    alpha=0.8,
+                )
+
+            if n_points > 0:
+                ax2.scatter(
+                    [uav_x[0]],
+                    [uav_y[0]],
+                    color=time_cmap(0),
+                    s=100,
+                    marker="o",
+                    edgecolors="black",
+                    linewidths=1.5,
+                    zorder=10,
+                    label="Start",
+                )
+                ax2.scatter(
+                    [uav_x[-1]],
+                    [uav_y[-1]],
+                    color=time_cmap(1),
+                    s=120,
+                    marker="^",
+                    edgecolors="black",
+                    linewidths=1.5,
+                    zorder=10,
+                    label="Current",
+                )
+
+            sm = plt.cm.ScalarMappable(
+                cmap=time_cmap, norm=Normalize(vmin=0, vmax=n_points - 1)
+            )
+            sm.set_array([])
+            cbar = plt.colorbar(sm, ax=ax2, fraction=0.046, pad=0.04)
+            cbar.set_label("Time Step", fontsize=9)
 
     # ---- Subplot 3: Belief Map (fused) ----
     ax3 = fig.add_subplot(num_rows, 4, 3)
     ax3.set_xlabel("j-axis")
     ax3.set_ylabel("i-axis")
+    title_suffix = " (Fused)" if multi_agent else ""
     ax3.set_title(f"Belief Map M{title_suffix}")
 
     belief_map = belief[:, :, 1] if belief.ndim == 3 else belief
@@ -295,6 +409,11 @@ def plot_terrain(
     ax4.set_xlabel("j-axis")
     ax4.set_ylabel("i-axis")
     ax4.set_title("Ground Truth (i,j)")
+
+    # Binary colormap for ground truth
+    cmap = colors.ListedColormap(["lemonchiffon", "darkgreen"])
+    bounds = [-0.5, 0.5, 1.5]
+    norm_binary = colors.BoundaryNorm(bounds, cmap.N)
 
     ax4.imshow(
         ground_truth,
@@ -601,13 +720,27 @@ def plot_metrics(
         entropy_list (list): List of entropy values.
         mse_list (list): List of mean squared error values.
         coverage_list (list): List of coverage values.
-        height_list (list): List of UAV height values.
+        height_list (list): List of UAV height values, or list of lists for multi-agent
+                           (each inner list is one agent's height history).
         height_range (tuple): Optional (min_height, max_height) for y-axis limits.
     """
-    # Ensure all metric lists have the same length
-    assert len(entropy_list) == len(mse_list) == len(coverage_list) == len(height_list)
+    # Check if height_list is multi-agent (list of lists)
+    is_multi_agent_height = (
+        isinstance(height_list, list)
+        and len(height_list) > 0
+        and isinstance(height_list[0], list)
+    )
 
-    steps = range(len(entropy_list))
+    if is_multi_agent_height:
+        # Use first agent's length for steps
+        steps = range(len(entropy_list))
+    else:
+        # Single agent: ensure all metric lists have the same length
+        assert (
+            len(entropy_list) == len(mse_list) == len(coverage_list) == len(height_list)
+        )
+        steps = range(len(entropy_list))
+
     fig, axes = plt.subplots(2, 2, figsize=(10, 8))
     (ax1, ax2), (ax3, ax4) = axes
 
@@ -625,7 +758,7 @@ def plot_metrics(
     ax2.set_title("MSE over Steps")
     ax2.grid(True)
 
-    # Plot covberage in the second subplot
+    # Plot coverage in the third subplot
     ax3.plot(steps, coverage_list, "g*-", label="Coverage", markersize=5)
     ax3.set_xlabel("Number of steps")
     ax3.set_ylabel("Coverage")
@@ -633,7 +766,39 @@ def plot_metrics(
     ax3.grid(True)
 
     # Plot height in the fourth subplot
-    ax4.plot(steps, height_list, "m^-", label="Height", markersize=5)
+    if is_multi_agent_height:
+        # Multi-agent: plot each agent's height separately
+        # Use proper color values (not format string shortcuts)
+        agent_colors = [
+            "#FF6B6B",  # coral red
+            "#4ECDC4",  # teal
+            "#45B7D1",  # sky blue
+            "#96CEB4",  # sage green
+            "#FFEAA7",  # light yellow
+            "#DDA0DD",  # plum
+            "#98D8C8",  # mint
+            "#F7DC6F",  # gold
+        ]
+        markers = ["^", "s", "d", "o", "v", "<", ">", "p"]
+        for i, agent_heights in enumerate(height_list):
+            color = agent_colors[i % len(agent_colors)]
+            marker = markers[i % len(markers)]
+            agent_steps = range(len(agent_heights))
+            ax4.plot(
+                agent_steps,
+                agent_heights,
+                linestyle="-",
+                marker=marker,
+                color=color,
+                label=f"Agent {i}",
+                markersize=5,
+                alpha=0.8,
+            )
+        ax4.legend(loc="best", fontsize=8)
+    else:
+        # Single agent
+        ax4.plot(steps, height_list, "m^-", label="Height", markersize=5)
+
     ax4.set_xlabel("Steps")
     ax4.set_ylabel("Height")
     ax4.set_title("Height over Steps")

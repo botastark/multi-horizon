@@ -356,6 +356,7 @@ class FastLogger:
     New features:
       - Optionally prints extra header sections (e.g., MCTS params) **before** the step table
       - log_data(...) now accepts step, action, ig (info gain) and prints extra columns
+      - log_multi_agent_data(...) for multi-agent logging with per-agent lists
       - Backwards compatible: old calls still work
     """
 
@@ -372,10 +373,14 @@ class FastLogger:
         conf_dict=None,
         filename="run.log",
         header_extras=None,
+        multi_agent=False,
+        num_agents=1,
     ):
         os.makedirs(log_folder, exist_ok=True)
         self.path = os.path.join(log_folder, filename)
         self._f = open(self.path, "a", buffering=1)
+        self.multi_agent = multi_agent
+        self.num_agents = num_agents
 
         # Header
         self._w(f"[{_dt.datetime.now().isoformat(timespec='seconds')}]\n")
@@ -394,22 +399,46 @@ class FastLogger:
             self._w(
                 f"Grid info: range: 0-{x}-{y}, cell_size:{length}, map shape: {shape}, center:{center}\n"
             )
+
+        # UAV init positions - support list for multi-agent
         if init_x is not None:
-            try:
-                pos = getattr(init_x, "position", getattr(init_x, "pos", init_x))
-                alt = getattr(init_x, "altitude", getattr(init_x, "alt", None))
-                self._w(f"init UAV position: {tuple(pos)} - {alt} \n")
-            except Exception:
-                self._w(f"init UAV position: {init_x}\n")
+            if isinstance(init_x, list):
+                # Multi-agent: list of positions
+                positions = []
+                for uav in init_x:
+                    try:
+                        pos = getattr(uav, "position", getattr(uav, "pos", uav))
+                        alt = getattr(uav, "altitude", getattr(uav, "alt", None))
+                        positions.append(f"({pos[0]:.1f}, {pos[1]:.1f}, {alt:.1f})")
+                    except Exception:
+                        positions.append(str(uav))
+                self._w(f"init UAV positions: [{', '.join(positions)}]\n")
+            else:
+                # Single agent
+                try:
+                    pos = getattr(init_x, "position", getattr(init_x, "pos", init_x))
+                    alt = getattr(init_x, "altitude", getattr(init_x, "alt", None))
+                    self._w(f"init UAV position: {tuple(pos)} - {alt} \n")
+                except Exception:
+                    self._w(f"init UAV position: {init_x}\n")
+                    self._w(f"init UAV position: {init_x}\n")
 
         # Header extras (e.g. MCTS params)
         if header_extras:
             for title, text in header_extras:
                 self._w(f"{title}: {text}\n")
 
-        # Table header
-        self._w("Step   Entropy      MSE        Height   Coverage   Action    IG\n")
-        self._w("----------------------------------------------------------------\n")
+        # Table header - different format for multi-agent
+        if multi_agent:
+            self._w(
+                "Step   Entropy      MSE        Coverage   Heights              Actions                   IGs\n"
+            )
+            self._w("-" * 110 + "\n")
+        else:
+            self._w("Step   Entropy      MSE        Height   Coverage   Action    IG\n")
+            self._w(
+                "----------------------------------------------------------------\n"
+            )
 
     def _w(self, s: str):
         self._f.write(s)
@@ -439,6 +468,45 @@ class FastLogger:
         act_s = f"{str(action):<8}" if action is not None else "-       "
         ig_s = f"{float(ig):<.4f}" if ig is not None else "-"
         self._w(f"{step_s} {ent_s} {mse_s} {h_s} {cov_s} {act_s} {ig_s}\n")
+
+    def log_multi_agent_data(
+        self,
+        entropy,
+        mse,
+        coverage,
+        heights,
+        actions,
+        igs,
+        step=None,
+    ):
+        """
+        Log multi-agent data with common metrics and per-agent lists.
+
+        Args:
+            entropy: Common fused entropy value
+            mse: Common fused MSE value
+            coverage: Common combined coverage value
+            heights: List of heights per agent [h0, h1, ...]
+            actions: List of actions per agent [a0, a1, ...]
+            igs: List of info gains per agent [ig0, ig1, ...]
+            step: Step number
+        """
+        try:
+            step_s = f"{step:<5d}" if step is not None else "-    "
+        except Exception:
+            step_s = f"{str(step):<5}"
+        ent_s = f"{float(entropy):<11.2f}"
+        mse_s = f"{float(mse):<10.3f}"
+        cov_s = f"{float(coverage):<9.4f}"
+
+        # Format per-agent lists
+        h_list = "[" + ", ".join(f"{h:.1f}" for h in heights) + "]"
+        act_list = "[" + ", ".join(str(a) if a else "-" for a in actions) + "]"
+        ig_list = "[" + ", ".join(f"{ig:.4f}" if ig else "-" for ig in igs) + "]"
+
+        self._w(
+            f"{step_s} {ent_s} {mse_s} {cov_s} {h_list:<20} {act_list:<25} {ig_list}\n"
+        )
 
     def close(self):
         try:

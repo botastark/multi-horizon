@@ -1,8 +1,8 @@
 {
-    "_comment": "Possible field types: Gaussian, Ortomap. Possible start positions: corner, edge. action_strategy: ig, sweep, mcts, dual_horizon, threaded_dual_horizon.",
+    "_comment": "Possible field types: Gaussian, Ortomap. Possible start positions: corner, edge. action_strategy: ig, sweep, mcts, dual_horizon, threaded_dual_horizon, hierarchical_dec_mcts.",
     "field_type": "Gaussian",
     "start_position": "corner",
-    "action_strategy": "threaded_dual_horizon",
+    "action_strategy": "hierarchical_dec_mcts",
     "mcts_params": {
         "planning_depth": 15,
         "num_iterations": 100,
@@ -20,12 +20,22 @@
             "tile_size": [100, 100],
             "current_target_bonus": 0.15,
             "coverage_delta_threshold": 0.05,
-            "position_delta_threshold": 30,
-            "hlp_replan_frequency": 10
+            "position_delta_threshold": 30
         }
     },
+    "hierarchical_dec_mcts": {
+        "_comment": "Configuration for hierarchical Dec-MCTS with shared beliefs and intents",
+        "llp_horizon": 5,
+        "llp_iterations": 100,
+        "hlp_horizon": 3,
+        "hlp_iterations": 50,
+        "tile_size": [100, 100],
+        "hlp_replan_interval": 1.0,
+        "intent_discount": 0.8,
+        "enable_belief_sharing": true
+    },
     "multi_agent": {
-        "num_agents": 2,
+        "num_agents": 4,
         "enable_coordination": true,
         "belief_fusion": true,
         "fusion_method": "lbp",

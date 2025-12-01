@@ -355,10 +355,17 @@ class LLPWorker(threading.Thread):
         self.ucb1_c = mcts_params.get("ucb1_c", 0.95)
         self.discount_factor = mcts_params.get("discount_factor", 0.99)
         self.w_ig = mcts_params.get("horizon_weights", {}).get("w_ig", 0.8)
+        self.w_coverage = mcts_params.get("horizon_weights", {}).get("w_coverage", 0.2)
 
-        # Blend weights (updated from HLP guidance)
-        self._w_short = 0.6
-        self._w_long = 0.4
+        # Blend weights from config (w_ig for LLP/short, w_coverage for HLP/long)
+        # Normalized to sum to 1
+        base_total = self.w_ig + self.w_coverage
+        if base_total > 0:
+            self._w_short = self.w_ig / base_total
+            self._w_long = self.w_coverage / base_total
+        else:
+            self._w_short = 0.5
+            self._w_long = 0.5
         self._blend_lock = threading.Lock()
 
         # Statistics
@@ -472,6 +479,11 @@ class LLPWorker(threading.Thread):
         guidance = self.intent_bus.get_guidance()
 
         if guidance is not None and time.time() < guidance.valid_until:
+            # Update blend weights from HLP suggestion
+            suggested_w_long = guidance.blend_weight_suggestion
+            suggested_w_short = 1.0 - suggested_w_long
+            self.update_blend_weights(suggested_w_short, suggested_w_long)
+
             # Apply HLP guidance - compute alignment and blend
             blended_action, blended_scores = self._apply_guidance(
                 state, action_scores, guidance
@@ -646,7 +658,7 @@ class HLPWorker(threading.Thread):
 
     Runs region analysis and selection asynchronously,
     sending guidance to LLP via the intent bus.
-    
+
     For multi-agent scenarios, uses coordinator for decentralized
     region allocation to prevent collisions.
     """
@@ -901,13 +913,13 @@ class HLPWorker(threading.Thread):
             region_centers = {
                 rid: meta["center"] for rid, meta in region_metadata.items()
             }
-            
+
             # Get current UAV position in grid coordinates
             current_row, current_col = self.camera.convert_xy_ij(
                 uav_pos.position[0], uav_pos.position[1], self.camera.grid.center
             )
             agent_position = (current_row, current_col)
-            
+
             # Use coordinator for decentralized region allocation if available
             if self.coordinator is not None:
                 selected_region_id = self.coordinator.request_region(
@@ -925,7 +937,7 @@ class HLPWorker(threading.Thread):
             else:
                 # Single-agent mode: just pick the best
                 selected_region_id = max(region_scores, key=region_scores.get)
-            
+
             selected_metadata = region_metadata[selected_region_id]
 
             # Update current target tracking
@@ -940,17 +952,31 @@ class HLPWorker(threading.Thread):
                 0, {"center": (H_dim / 2, W_dim / 2)}
             )
 
-        # Compute suggested blend weight
+        # Compute suggested blend weight from config (w_ig for LLP, w_coverage for HLP)
         coverage_progress = np.mean(covered_mask) if covered_mask is not None else 0.0
         fragmentation_info = analyze_coverage_fragmentation(covered_mask)
 
-        # Suggest higher w_long when fragmentation is high or coverage is low
-        base_w_long = 0.4
-        frag_boost = (
-            FRAGMENTATION_ADJUSTMENT_FACTOR * fragmentation_info["fragmentation_score"]
+        # Base blend weight from config: w_coverage / (w_ig + w_coverage)
+        # This controls the base tradeoff between:
+        # - HLP (w_coverage): cover as much area as fast as possible
+        # - LLP (w_ig): maximize information gain / reduce entropy
+        base_total = self.w_ig + self.w_coverage
+        if base_total > 0:
+            base_w_long = self.w_coverage / base_total
+        else:
+            base_w_long = 0.5
+
+        # Only fragmentation affects the balance - high fragmentation slightly boosts HLP
+        # to consolidate isolated patches (max +0.1 boost)
+        frag_boost = min(
+            0.1,
+            FRAGMENTATION_ADJUSTMENT_FACTOR * fragmentation_info["fragmentation_score"],
         )
-        coverage_boost = 0.15 * (1.0 - coverage_progress)
-        suggested_w_long = min(0.7, base_w_long + frag_boost + coverage_boost)
+
+        # Clamp to reasonable range around the base
+        min_w_long = max(0.1, base_w_long - 0.15)
+        max_w_long = min(0.9, base_w_long + 0.15)
+        suggested_w_long = np.clip(base_w_long + frag_boost, min_w_long, max_w_long)
 
         # Create guidance
         guidance = HLPGuidance(
@@ -1092,7 +1118,7 @@ class ThreadedDualHorizonPlanner:
 
     Manages LLP and HLP worker threads and coordinates
     action selection via the intent bus.
-    
+
     For multi-agent scenarios, uses coordinator for decentralized
     region allocation to prevent drone collisions.
     """
@@ -1294,53 +1320,56 @@ class ThreadedDualHorizonPlanner:
     ):
         """Log detailed planning step information."""
         log = self._detailed_logger
+        prefix = f"[Agent {self.agent_id}]"
 
         log.info(f"\n{'='*60}")
-        log.info(f"STEP {self.step_count}")
+        log.info(f"{prefix} STEP {self.step_count}")
         log.info(f"{'='*60}")
 
         # UAV Position
         uav_pos = state.get("uav_pos")
         if uav_pos is not None:
             log.info(
-                f"UAV Position: ({uav_pos.position[0]:.2f}, {uav_pos.position[1]:.2f}, {uav_pos.altitude:.2f})"
+                f"{prefix} UAV Position: ({uav_pos.position[0]:.2f}, {uav_pos.position[1]:.2f}, {uav_pos.altitude:.2f})"
             )
 
         # Coverage
         covered_mask = state.get("covered_mask")
         if covered_mask is not None:
             coverage = float(np.mean(covered_mask))
-            log.info(f"Coverage: {coverage:.1%}")
+            log.info(f"{prefix} Coverage: {coverage:.1%}")
 
         # HLP Guidance
         if guidance is not None:
-            log.info(f"\n[HLP] Target Region: {guidance.target_region_id}")
-            log.info(f"[HLP] Target Center: {guidance.target_center}")
-            log.info(f"[HLP] Region Scores (top 5):")
+            log.info(f"{prefix} [HLP] Target Region: {guidance.target_region_id}")
+            log.info(f"{prefix} [HLP] Target Center: {guidance.target_center}")
+            log.info(f"{prefix} [HLP] Region Scores (top 5):")
             sorted_regions = sorted(
                 guidance.region_scores.items(), key=lambda x: x[1], reverse=True
             )[:5]
             for rid, score in sorted_regions:
                 meta = guidance.region_metadata.get(rid, {})
                 cov = meta.get("coverage", 0)
-                log.info(f"      Region {rid}: {score:.4f} (coverage: {cov:.1%})")
+                log.info(
+                    f"{prefix}       Region {rid}: {score:.4f} (coverage: {cov:.1%})"
+                )
 
         # LLP Action Scores
-        log.info(f"\n[LLP] Action Scores:")
+        log.info(f"{prefix} [LLP] Action Scores:")
         blended_scores = metrics.get("blended_scores", metrics.get("action_scores", {}))
         for act, score in sorted(
             blended_scores.items(), key=lambda x: x[1], reverse=True
         ):
             marker = " <--" if act == action else ""
-            log.info(f"      {act:8s}: {score:.4f}{marker}")
+            log.info(f"{prefix}       {act:8s}: {score:.4f}{marker}")
 
         # Selected Action
-        log.info(f"\n[SELECTED] {action}")
+        log.info(f"{prefix} [SELECTED] {action}")
 
         # Bus Stats
         bus_stats = metrics.get("bus_stats", {})
         log.info(
-            f"\n[BUS] Guidance updates: {bus_stats.get('guidance_updates', 0)}, "
+            f"{prefix} [BUS] Guidance updates: {bus_stats.get('guidance_updates', 0)}, "
             f"HLP replans: {metrics.get('hlp_replan_count', 0)}"
         )
 
