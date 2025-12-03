@@ -27,21 +27,11 @@ from multi_agent_coordinator import (
 from viewer import plot_metrics, plot_terrain, plot_terrain_2d
 
 from helper import create_run_folder, make_param_tag
+from config_loader import load_config  # Use new config loader with backward compat
+
 import matplotlib
 
 matplotlib.use("Agg")
-
-
-# -----------------------------------------------------------------------------
-# Load Experiment Configuration from JSON File
-# -----------------------------------------------------------------------------
-def load_config(config_file):
-    """Load experiment configuration from a JSON file and filter out comment keys."""
-    with open(config_file, "r") as f:
-        config = json.load(f)
-    # Remove any keys starting with "_" (used for comments)
-    config = {k: v for k, v in config.items() if not k.startswith("_")}
-    return config
 
 
 # -----------------------------------------------------------------------------

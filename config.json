@@ -1,59 +1,110 @@
 {
-    "_comment": "Possible field types: Gaussian, Ortomap. Possible start positions: corner, edge. action_strategy: ig, sweep, mcts, dual_horizon, threaded_dual_horizon, hierarchical_dec_mcts.",
-    "field_type": "Gaussian",
-    "start_position": "corner",
-    "action_strategy": "hierarchical_dec_mcts",
-    "mcts_params": {
+    "_schema_version": "2.0",
+    "_description": "Multi-Horizon Multi-Agent UAV Active Sensing Configuration",
+
+    "simulation": {
+        "_comment": "Core simulation settings",
+        "field_type": "Gaussian",
+        "start_position": "corner",
+        "num_steps": 100,
+        "iterations": [0, 1],
+        "correlation_types": ["equal"],
+        "error_margins": [null],
+        "project_path": "./"
+    },
+
+    "strategy": {
+        "_comment": "Action strategy selection: ig, sweep, mcts, dual_horizon, threaded_dual_horizon, hierarchical_dec_mcts",
+        "type": "hierarchical_dec_mcts"
+    },
+
+    "agents": {
+        "_comment": "Multi-agent configuration",
+        "num_agents": 2,
+        "start_positions": "corner",
+        "communication_range": -1,
+        "collision_avoidance_distance": 5.0     
+    },
+
+    "planner": {
+        "_comment": "MCTS planner parameters",
         "planning_depth": 15,
         "num_iterations": 100,
-        "ucb1_c": 0.95,
+        "ucb1_exploration": 0.95,
         "discount_factor": 0.99,
-        "timeout": 2000,
-        "parallel": 1,
-        "horizon_weights": {
-            "w_coverage": 0.1,
-            "w_fragmentation": 0.5,
-            "w_ig": 0.9,
-            "w_distance": 0.5,
-            "short_horizon_depth": 5,
-            "long_horizon_depth": 20,
-            "tile_size": [100, 100],
+        "timeout_ms": 2000,
+        "parallel_simulations": 1
+    },
+
+    "dual_horizon": {
+        "_comment": "Dual-horizon (LLP + HLP) planning weights",
+        "weights": {
+            "coverage": 0.1,
+            "fragmentation": 0.5,
+            "information_gain": 0.9,
+            "distance": 0.5
+        },
+        "llp": {
+            "horizon": 5,
+            "iterations": 100
+        },
+        "hlp": {
+            "horizon": 20,
+            "iterations": 200,
+            "tile_size": [100, 100]
+        },
+        "hysteresis": {
             "current_target_bonus": 0.15,
             "coverage_delta_threshold": 0.05,
             "position_delta_threshold": 30
         }
     },
-    "hierarchical_dec_mcts": {
-        "_comment": "Configuration for hierarchical Dec-MCTS with shared beliefs and intents",
-        "llp_horizon": 5,
-        "llp_iterations": 100,
-        "hlp_horizon": 3,
-        "hlp_iterations": 50,
-        "tile_size": [100, 100],
-        "hlp_replan_interval": 1.0,
-        "intent_discount": 0.8,
-        "enable_belief_sharing": true
-    },
-    "multi_agent": {
-        "num_agents": 4,
-        "enable_coordination": true,
-        "belief_fusion": true,
+
+    "belief": {
+        "_comment": "Belief fusion and LBP settings",
+        "fusion_enabled": true,
         "fusion_method": "lbp",
-        "use_lbp": true,
-        "lbp_iterations": 1,
-        "news_mode": "BM",
-        "pairwise_potential": [[0.6, 0.4], [0.4, 0.6]],
-        "region_allocation": "auction",
-        "communication_range": -1,
-        "collision_avoidance_distance": 5.0,
-        "belief_fusion_weight": 0.7,
-        "coordination_frequency": 5
+        "lbp": {
+            "enabled": true,
+            "iterations": 1,
+            "pairwise_potential": [[0.6, 0.4], [0.4, 0.6]]
+        },
+        "news_mode": "BM"
     },
-    "correlation_types": ["equal"],
-    "n_steps": 100,
-    "iters": [0, 1],
-    "error_margins": ["None"],
-    "enable_plotting": true,
-    "enable_logging": true,
-    "project_path": "./"
+
+    "decentralized": {
+        "_comment": "Fully decentralized agent communication settings",
+        "enabled": true,
+        "sharing": {
+            "belief_fusion": true,
+            "llp_intent": true,
+            "hlp_intent": true,
+            "position": true
+        },
+        "communication": {
+            "message_queue_size": 100,
+            "stale_threshold_sec": 10.0,
+            "drop_probability": 0.0,
+            "message_delay_sec": 0.0
+        },
+        "coordination": {
+            "intent_horizon": 5,
+            "intent_discount": 0.8,
+            "overlap_penalty_weight": 0.3,
+            "d_uct": {
+                "_comment": "D-UCT discounting for asynchronous drift handling",
+                "enabled": true,
+                "decay_factor": 0.9,
+                "min_visits_before_decay": 5,
+                "stale_intent_threshold_sec": 2.0
+            }
+        }
+    },
+
+    "output": {
+        "_comment": "Logging and visualization settings",
+        "enable_plotting": true,
+        "enable_logging": true,
+        "save_steps": true
+    }
 }
