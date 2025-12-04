@@ -41,6 +41,112 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
+# Detailed Logging for Hierarchical Dec-MCTS
+# =============================================================================
+
+
+def log_planning_decision(
+    agent_id: int,
+    step: int,
+    llp_action_scores: Dict[str, float],
+    hlp_region_scores: Dict[int, float],
+    alignment_adjustments: Dict[str, float],
+    final_action_scores: Dict[str, float],
+    selected_action: str,
+    target_region: Optional[int],
+    intents_received: Dict[str, Any],
+):
+    """
+    Log detailed planning decision with LLP scores, HLP scores, and alignment.
+
+    Args:
+        agent_id: Agent ID
+        step: Current step number
+        llp_action_scores: Raw LLP action scores (IG-based)
+        hlp_region_scores: HLP region scores
+        alignment_adjustments: Alignment bonus per action toward HLP target
+        final_action_scores: Final scores after alignment adjustment
+        selected_action: The action selected
+        target_region: HLP target region
+        intents_received: Summary of teammate intents received
+    """
+    logger.info("")
+    logger.info(f"{'='*60}")
+    logger.info(f"[Agent {agent_id}] PLANNING DECISION")
+    logger.info(f"{'='*60}")
+
+    # LLP Action Scores
+    logger.info("")
+    logger.info("LLP ACTION SCORES (Information Gain):")
+    sorted_actions = sorted(llp_action_scores.items(), key=lambda x: x[1], reverse=True)
+    for action, score in sorted_actions:
+        marker = " <--" if action == selected_action else ""
+        logger.info(f"  {action:8s}: {score:10.2f}{marker}")
+
+    # HLP Region Scores
+    logger.info("")
+    logger.info("HLP REGION SCORES:")
+    sorted_regions = sorted(
+        hlp_region_scores.items(), key=lambda x: x[1], reverse=True
+    )[:5]
+    for region_id, score in sorted_regions:
+        marker = " <-- TARGET" if region_id == target_region else ""
+        logger.info(f"  Region {region_id:2d}: {score:.4f}{marker}")
+
+    # Alignment Adjustments
+    if alignment_adjustments:
+        logger.info("")
+        logger.info("ALIGNMENT ADJUSTMENTS (toward HLP target):")
+        for action, adj in sorted(
+            alignment_adjustments.items(), key=lambda x: x[1], reverse=True
+        ):
+            if adj != 0:
+                logger.info(f"  {action:8s}: +{adj:.2f}")
+
+    # Final Scores
+    logger.info("")
+    logger.info("FINAL ACTION SCORES (LLP + Alignment):")
+    sorted_final = sorted(final_action_scores.items(), key=lambda x: x[1], reverse=True)
+    for action, score in sorted_final:
+        marker = " <-- SELECTED" if action == selected_action else ""
+        logger.info(f"  {action:8s}: {score:10.2f}{marker}")
+
+    # Intents received
+    if intents_received:
+        logger.info("")
+        logger.info("INTENTS FROM TEAMMATES:")
+        for key, value in intents_received.items():
+            logger.info(f"  {key}: {value}")
+
+    logger.info(f"{'='*60}")
+
+
+def log_intent_sharing(
+    agent_id: int,
+    ll_intent_summary: Dict[str, Any],
+    hl_intent_summary: Dict[str, Any],
+):
+    """
+    Log intent sharing details.
+
+    Args:
+        agent_id: Agent ID
+        ll_intent_summary: Summary of LL intent being broadcast
+        hl_intent_summary: Summary of HL intent being broadcast
+    """
+    logger.info("")
+    logger.info(f"[Agent {agent_id}] BROADCASTING INTENTS:")
+    logger.info(
+        f"  LL Intent: actions={ll_intent_summary.get('actions', [])[:3]}..., "
+        f"total_ig={ll_intent_summary.get('total_ig', 0):.2f}"
+    )
+    logger.info(
+        f"  HL Intent: target_region={hl_intent_summary.get('target_region')}, "
+        f"region_sequence={hl_intent_summary.get('region_sequence', [])}"
+    )
+
+
+# =============================================================================
 # Intent Data Structures
 # =============================================================================
 
@@ -441,6 +547,51 @@ class LowLevelPlanner:
 
         return float(np.sum(discounted_entropy))
 
+    def _evaluate_single_action(
+        self,
+        current_state: Tuple[float, float, float],
+        action: str,
+        coverage_discount: np.ndarray,
+    ) -> Tuple[float, float]:
+        """
+        Evaluate a single action for logging purposes.
+
+        Returns:
+            (ig_score, alignment_bonus)
+        """
+        # Get current state
+        current_pos = current_state[:2]
+        current_alt = current_state[2]
+
+        # Temporarily set camera state
+        org = self.camera.get_x()
+        original_pos, original_alt = org.position, org.altitude
+
+        self.camera.set_position(current_pos)
+        self.camera.set_altitude(current_alt)
+
+        # Get next state
+        future_state = self.camera.x_future(action)
+        if future_state is None:
+            self.camera.set_position(original_pos)
+            self.camera.set_altitude(original_alt)
+            return 0.0, 0.0
+
+        next_pos = future_state[0]
+        next_alt = future_state[1]
+
+        # Compute IG
+        ig = self._compute_ig(next_pos, next_alt, coverage_discount)
+
+        # Compute alignment
+        alignment = self._compute_alignment_bonus(next_pos, current_pos)
+
+        # Restore camera state
+        self.camera.set_position(original_pos)
+        self.camera.set_altitude(original_alt)
+
+        return ig, alignment
+
     def _compute_alignment_bonus(
         self,
         position: Tuple[float, float],
@@ -569,12 +720,26 @@ class LowLevelPlanner:
         # Compute teammate coverage discount
         coverage_discount = self._compute_teammate_coverage_mask()
 
+        # Track per-action scores for logging
+        self._action_scores = {}  # Raw IG scores
+        self._alignment_adjustments = {}  # Alignment bonus per action
+        self._final_action_scores = {}  # Combined scores
+
         # Simple MCTS: evaluate random rollouts and pick best
         best_reward = float("-inf")
         best_actions = []
         best_states = []
         best_footprints = []
         best_igs = []
+
+        # First, compute single-step scores for each action (for logging)
+        for action in self.actions:
+            ig, alignment = self._evaluate_single_action(
+                current_state, action, coverage_discount
+            )
+            self._action_scores[action] = ig
+            self._alignment_adjustments[action] = alignment
+            self._final_action_scores[action] = ig + alignment
 
         for _ in range(self.num_iterations):
             # Random action sequence
@@ -1127,6 +1292,22 @@ class HierarchicalDecMCTSPlanner:
         # Get best action
         best_action = self.llp.get_best_action()
 
+        # Collect detailed scoring info for logging
+        llp_action_scores = getattr(self.llp, "_action_scores", {})
+        alignment_adjustments = getattr(self.llp, "_alignment_adjustments", {})
+        final_action_scores = getattr(self.llp, "_final_action_scores", {})
+        hlp_region_scores = dict(self.hlp._region_coverage)
+
+        # Get teammate intent summary
+        ll_intents = self.intent_bus.get_teammate_ll_intents(self.agent_id)
+        hl_intents = self.intent_bus.get_teammate_hl_intents(self.agent_id)
+        intents_received = {
+            "ll_intents_from": list(ll_intents.keys()),
+            "hl_intents_from": list(hl_intents.keys()),
+        }
+        for tid, hl_int in hl_intents.items():
+            intents_received[f"agent_{tid}_target"] = hl_int.current_target_region
+
         # Compile metrics
         metrics = {
             "ll_intent": ll_intent,
@@ -1136,6 +1317,12 @@ class HierarchicalDecMCTSPlanner:
             "hl_value": hl_intent.value,
             "target_region": hl_intent.current_target_region,
             "expected_ig": ll_intent.total_expected_ig,
+            # Detailed scoring for logging
+            "llp_action_scores": llp_action_scores,
+            "alignment_adjustments": alignment_adjustments,
+            "final_action_scores": final_action_scores,
+            "hlp_region_scores": hlp_region_scores,
+            "intents_received": intents_received,
         }
 
         self._stats["planning_cycles"] += 1

@@ -1,10 +1,13 @@
 import os
+import sys
 import json
 import random
+import logging
 import numpy as np
 from tqdm import tqdm
 import argparse
 import copy
+from datetime import datetime
 
 
 from helper import (
@@ -22,6 +25,7 @@ from multi_agent_coordinator import (
     MultiAgentCoordinator,
     generate_multi_agent_starts,
 )
+from async_runner import AsyncMultiAgentRunner, create_async_runner_from_config
 
 # from new_camera import Camera  # Updated import for new camera model
 from viewer import plot_metrics, plot_terrain, plot_terrain_2d
@@ -32,6 +36,99 @@ from config_loader import load_config  # Use new config loader with backward com
 import matplotlib
 
 matplotlib.use("Agg")
+
+
+# =============================================================================
+# Logging Setup - Redirect all output to file
+# =============================================================================
+
+# Store original stdout for tqdm
+_original_stdout = sys.stdout
+_original_stderr = sys.stderr
+
+
+def setup_main_logger(log_dir: str = "logs", experiment_name: str = None) -> str:
+    """
+    Set up main logger to redirect all output to a file.
+
+    This captures:
+    - All logging.* calls
+    - All print() statements (via stdout redirect)
+
+    Args:
+        log_dir: Directory for log files
+        experiment_name: Optional experiment name for log filename
+
+    Returns:
+        Path to the created log file
+    """
+    os.makedirs(log_dir, exist_ok=True)
+
+    # Create timestamped log file
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    exp_suffix = f"_{experiment_name}" if experiment_name else ""
+    log_filename = f"main{exp_suffix}_{timestamp}.log"
+    log_file = os.path.join(log_dir, log_filename)
+
+    # Configure root logger
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(message)s",
+        handlers=[
+            logging.FileHandler(log_file),
+            # Optionally keep console output: logging.StreamHandler()
+        ],
+    )
+
+    # Create a custom stream to redirect print() to logger
+    class LoggerWriter:
+        """Redirect stdout/stderr to logger and file."""
+
+        def __init__(self, logger, level, log_file_handle):
+            self.logger = logger
+            self.level = level
+            self.log_file = log_file_handle
+            self.buffer = ""
+
+        def write(self, message):
+            if message and message.strip():
+                self.logger.log(self.level, message.strip())
+
+        def flush(self):
+            if self.log_file:
+                self.log_file.flush()
+
+    # Open log file for print redirect
+    log_file_handle = open(log_file, "a")
+
+    # Get main logger
+    main_logger = logging.getLogger("main")
+
+    # Redirect print statements to logger
+    sys.stdout = LoggerWriter(main_logger, logging.INFO, log_file_handle)
+    sys.stderr = LoggerWriter(main_logger, logging.ERROR, log_file_handle)
+
+    # Log initialization (use original stdout for immediate feedback)
+    _original_stdout.write(f"Logging to: {log_file}\n")
+    _original_stdout.flush()
+
+    main_logger.info("=" * 80)
+    main_logger.info("MAIN EXPERIMENT LOG")
+    main_logger.info(f"Experiment: {experiment_name if experiment_name else 'default'}")
+    main_logger.info(f"Log file: {log_file}")
+    main_logger.info("=" * 80)
+
+    return log_file
+
+
+def get_main_logger():
+    """Get the main logger instance."""
+    return logging.getLogger("main")
+
+
+def get_tqdm_file():
+    """Get file handle for tqdm progress bars (uses original stderr)."""
+    return _original_stderr
 
 
 # -----------------------------------------------------------------------------
@@ -145,7 +242,9 @@ def run_single_agent_experiment(
 
     info_gain_action = {}
 
-    for step in tqdm(range(0, n_steps), desc="steps", position=3, leave=False):
+    for step in tqdm(
+        range(0, n_steps), desc="steps", position=3, leave=False, file=get_tqdm_file()
+    ):
         sigmas = None
         if conf_dict is not None:
             s0, s1 = conf_dict[np.round(uav_pos.altitude, decimals=2)]
@@ -267,6 +366,192 @@ def run_single_agent_experiment(
         "height": height,
         "uav_positions": uav_positions,
         "actions": actions,
+    }
+
+
+def run_async_multi_agent(
+    config,
+    agents,
+    coordinator,
+    map_obj,
+    ground_truth_map,
+    grid_info,
+    n_steps,
+    results_folder,
+    corr_type,
+    action_strategy,
+    e_margin,
+    grf_r,
+    iter_idx,
+    conf_dict,
+    ENABLE_STEPWISE_PLOTTING,
+    ENABLE_LOGGING,
+    multi_agent_logger,
+    fused_entropy_history,
+    fused_mse_history,
+    combined_coverage_history,
+):
+    """
+    Run multi-agent experiment with true asynchronous execution.
+
+    Each agent runs in its own thread with independent planning cycles.
+    Agents communicate via async message queues with realistic delays.
+    D-UCT discounting handles stale intents from asynchronous drift.
+
+    Args:
+        config: Configuration dict
+        agents: List of pre-initialized agent state dicts
+        coordinator: MultiAgentCoordinator instance
+        map_obj: Map/environment object for observations
+        ground_truth_map: Ground truth for metrics
+        grid_info: Grid information
+        n_steps: Target number of steps
+        ... (other args for logging/plotting)
+
+    Returns:
+        Results dict compatible with sync version
+    """
+    async_config = config.get("decentralized", {}).get("async", {})
+    num_agents = len(agents)
+
+    print(f"\n{'='*60}")
+    print(f"ASYNC MULTI-AGENT EXPERIMENT: {num_agents} agents")
+    print(f"Planning rate: {async_config.get('planning_rate_hz', 5.0)} Hz")
+    print(f"HLP rate: {async_config.get('hlp_rate_hz', 2.0)} Hz")
+    print(f"Comm delay: {async_config.get('comm_delay_ms', 50.0)} ms")
+    print(f"Max intent age: {async_config.get('max_intent_age_sec', 5.0)} sec")
+    print(f"{'='*60}\n")
+
+    # Create async runner
+    async_runner = AsyncMultiAgentRunner(
+        num_agents=num_agents,
+        planning_rate_hz=async_config.get("planning_rate_hz", 5.0),
+        hlp_rate_hz=async_config.get("hlp_rate_hz", 2.0),
+        comm_delay_ms=async_config.get("comm_delay_ms", 50.0),
+        drop_probability=async_config.get("drop_probability", 0.0),
+    )
+
+    # Add agents to the async runner
+    for agent in agents:
+        agent_id = agent["agent_id"]
+        async_runner.add_agent(
+            agent_id=agent_id,
+            camera=agent["camera"],
+            planner=agent["planner"],
+            belief_map=agent["belief_map"],
+            occupancy_map=agent["occupancy_map"],
+            initial_position=agent["uav_pos"].position,
+            initial_altitude=agent["uav_pos"].altitude,
+            config=config,
+        )
+
+    # Checkpoint callback for logging and visualization
+    checkpoint_count = [0]
+
+    def on_checkpoint(agent_states):
+        """Called periodically during async execution."""
+        nonlocal checkpoint_count
+        step = checkpoint_count[0]
+
+        # Log progress
+        positions = [(s.position, s.altitude) for s in agent_states.values()]
+        steps = [s.step for s in agent_states.values()]
+        cycles = [s.planning_cycles for s in agent_states.values()]
+
+        print(f"[Async Checkpoint {step}] Steps: {steps}, Planning cycles: {cycles}")
+
+        # Compute metrics from current beliefs (simplified for async)
+        # In async mode, we log at checkpoints rather than per-step
+        checkpoint_count[0] += 1
+
+    # Set checkpoint callback
+    checkpoint_interval = (
+        1.0 / async_config.get("observation_rate_hz", 10.0) * 10
+    )  # Every 10 obs cycles
+    async_runner.set_checkpoint_callback(on_checkpoint, interval=checkpoint_interval)
+
+    # Calculate runtime based on expected step duration
+    # Estimate: n_steps at planning_rate_hz
+    planning_rate = async_config.get("agent_planning_rate_hz", 5.0)
+    estimated_duration = n_steps / planning_rate
+    timeout = estimated_duration * 2.0  # 2x buffer for safety
+
+    print(
+        f"Running async experiment for ~{estimated_duration:.1f}s (timeout: {timeout:.1f}s)"
+    )
+
+    # Run until all agents complete target steps
+    async_runner.run_until_steps(target_steps=n_steps, timeout_sec=timeout)
+
+    # Collect results
+    all_states = async_runner.get_all_states()
+    all_stats = async_runner.get_all_statistics()
+    all_logs = async_runner.get_all_logs()
+    network_stats = async_runner.get_network_statistics()
+
+    print(f"\n{'='*60}")
+    print("ASYNC EXECUTION STATISTICS")
+    print(f"{'='*60}")
+    for agent_id, stats in all_stats.items():
+        print(
+            f"Agent {agent_id}: LLP cycles={stats['llp_cycles']}, "
+            f"HLP cycles={stats['hlp_cycles']}, "
+            f"actions={stats['actions_executed']}, "
+            f"intents_sent={stats['intents_broadcast']}, "
+            f"intents_rcvd={stats['intents_received']}"
+        )
+    print(
+        f"Network: sent={network_stats['messages_sent']}, "
+        f"delivered={network_stats['messages_delivered']}, "
+        f"dropped={network_stats['messages_dropped']}"
+    )
+    print(f"{'='*60}\n")
+
+    # Convert async logs to compatible format
+    # Extract action sequences and positions from logs
+    results_agents = []
+    for agent_id in range(num_agents):
+        agent_log = all_logs.get(agent_id, [])
+        agent_state = all_states.get(agent_id)
+
+        actions = [entry["action"] for entry in agent_log]
+        positions = [entry["position"] for entry in agent_log]
+
+        # Reconstruct uav_positions from log
+        uav_positions = [
+            uav_position((entry["position"], entry["altitude"])) for entry in agent_log
+        ]
+        # Add initial position
+        if uav_positions:
+            uav_positions.insert(0, agents[agent_id]["uav_positions"][0])
+
+        # Metrics would need to be computed from final state
+        # For now, return empty lists (async doesn't track per-step metrics the same way)
+        results_agents.append(
+            {
+                "agent_id": agent_id,
+                "entropy": [],  # Would need reconstruction
+                "mse": [],
+                "coverage": [],
+                "height": [entry["altitude"] for entry in agent_log],
+                "uav_positions": uav_positions,
+                "actions": actions,
+            }
+        )
+
+    coord_stats = coordinator.get_statistics()
+    coord_stats["async_execution"] = {
+        "agent_stats": all_stats,
+        "network_stats": network_stats,
+    }
+
+    # Close logger
+    if ENABLE_LOGGING and multi_agent_logger is not None:
+        multi_agent_logger.close()
+
+    return {
+        "agents": results_agents,
+        "coordination_stats": coord_stats,
     }
 
 
@@ -428,8 +713,44 @@ def run_multi_agent_experiment(
     fused_mse_history = []
     combined_coverage_history = []
 
+    # =========================================================================
+    # CHECK FOR ASYNC EXECUTION MODE
+    # =========================================================================
+    async_config = config.get("decentralized", {}).get("async", {})
+    async_enabled = async_config.get("enabled", False)
+
+    if async_enabled:
+        # Run in true async mode using threaded agents
+        return run_async_multi_agent(
+            config=config,
+            agents=agents,
+            coordinator=coordinator,
+            map_obj=map_obj,
+            ground_truth_map=ground_truth_map,
+            grid_info=grid_info,
+            n_steps=n_steps,
+            results_folder=results_folder,
+            corr_type=corr_type,
+            action_strategy=action_strategy,
+            e_margin=e_margin,
+            grf_r=grf_r,
+            iter_idx=iter_idx,
+            conf_dict=conf_dict,
+            ENABLE_STEPWISE_PLOTTING=ENABLE_STEPWISE_PLOTTING,
+            ENABLE_LOGGING=ENABLE_LOGGING,
+            multi_agent_logger=multi_agent_logger,
+            fused_entropy_history=fused_entropy_history,
+            fused_mse_history=fused_mse_history,
+            combined_coverage_history=combined_coverage_history,
+        )
+
+    # =========================================================================
+    # SYNCHRONOUS EXECUTION MODE (DEFAULT)
+    # =========================================================================
     # Main multi-agent loop
-    for step in tqdm(range(0, n_steps), desc="steps", position=3, leave=False):
+    for step in tqdm(
+        range(0, n_steps), desc="steps", position=3, leave=False, file=get_tqdm_file()
+    ):
         # =====================================================================
         # PHASE 1: All agents observe and update local belief (SYNCHRONOUS)
         # Each agent:
@@ -477,6 +798,16 @@ def run_multi_agent_experiment(
                 "uav_pos": uav_pos,
             }
 
+        # Log sigmas once at the start (step 0 only)
+        if step == 0:
+            sample_sigmas = agent_observations.get(0, {}).get("sigmas")
+            if sample_sigmas:
+                print(
+                    f"Sensor model sigmas: s0={sample_sigmas[0]:.4f}, s1={sample_sigmas[1]:.4f}"
+                )
+            else:
+                print("Sensor model: No sigmas (perfect observations)")
+
         # =====================================================================
         # PHASE 2: Synchronous News Belief Update + Fusion (Paper-compliant)
         # Step A: ALL agents update their news beliefs from observations
@@ -486,16 +817,6 @@ def run_multi_agent_experiment(
         # shared via coordinator's internal state, not via message bus.
         # =====================================================================
         if coordinator.lbp_fusion is not None:
-            # Debug: Check if observations were collected
-            if step < 3:
-                print(
-                    f"Step {step} agent_observations keys: {list(agent_observations.keys())}"
-                )
-                for agent_id, obs in agent_observations.items():
-                    print(
-                        f"  Agent {agent_id}: sigmas={obs.get('sigmas')}, fp_ij_keys={list(obs.get('fp_ij', {}).keys())}"
-                    )
-
             # Use the coordinator's synchronous fusion method
             # Step A: Update all news beliefs
             coordinator.update_all_news(agent_observations)
@@ -503,10 +824,12 @@ def run_multi_agent_experiment(
             # Step B: Fuse all agents with their neighbors
             coordinator.fuse_all_news()
 
-            # Debug: Check fusion happened
+            # Log fusion stats periodically
             fusion_stats = coordinator.get_statistics().get("lbp_fusion", {})
-            if step < 3 or step % 20 == 0:  # Log first 3 steps and every 20th step
-                print(f"Step {step} LBP Fusion stats: {fusion_stats}")
+            if step == 0 or step % 20 == 0:
+                print(
+                    f"[Step {step}] Belief Fusion: news_fusions={fusion_stats.get('news_fusions', 0)}, mode={fusion_stats.get('news_mode', 'N/A')}"
+                )
 
             # IMPORTANT: Feed fused beliefs back to agents for planning
             # Each agent should use the fused belief (combining info from all agents)
@@ -519,10 +842,6 @@ def run_multi_agent_experiment(
                     # belief_map[:, :, 0] = P(free), belief_map[:, :, 1] = P(occupied)
                     agent["belief_map"][:, :, 1] = fused_belief
                     agent["belief_map"][:, :, 0] = 1 - fused_belief
-                    if step < 3:
-                        print(
-                            f"  Agent {agent_id}: Updated belief_map with fused belief"
-                        )
         else:
             # Fallback to simple belief sharing (weighted averaging)
             for agent in agents:
@@ -598,8 +917,9 @@ def run_multi_agent_experiment(
 
                 next_action = best_action
 
+            # Log selected action (detailed scoring already logged by planner)
             print(
-                f"[Agent {agent_id}] Step {step}: {next_action} | pos={uav_pos.position}"
+                f"[Agent {agent_id}] Step {step}: action={next_action} | pos=({uav_pos.position[0]:.1f}, {uav_pos.position[1]:.1f})"
             )
 
             # Update UAV position
@@ -827,7 +1147,7 @@ def run_multi_agent_experiment(
                 height_range=agents[0]["camera"].get_hrange(),
             )
 
-        print(f"--- Step {step} complete ---\n")
+        print(f"{'─'*40}")
 
     # Drain any remaining messages from queues (cleanup old messages)
     coordinator.comm_bus.clear_all_queues()
@@ -895,6 +1215,13 @@ def main():
     if config.get("action_strategy") == "mcts" and config.get("params_in_path", True):
         run_base = run_base + "__" + make_param_tag(config.get("mcts_params", {}))
     results_folder = os.path.join(base_dir, run_base)
+
+    # Setup logging to file (must be early, before any print statements)
+    log_dir = os.path.join(results_folder, "logs")
+    log_file = setup_main_logger(log_dir=log_dir, experiment_name=run_base)
+    logger = get_main_logger()
+    logger.info(f"Results folder: {results_folder}")
+    logger.info(f"Config loaded from: {args.config}")
 
     ENABLE_STEPWISE_PLOTTING = config["enable_plotting"]
     ENABLE_LOGGING = config["enable_logging"]
@@ -980,15 +1307,21 @@ def main():
     # Main Experiment Loop
     # -----------------------------------------------------------------------------
 
-    for corr_type in tqdm(correlation_types, desc="Pairwise", position=0):
+    for corr_type in tqdm(
+        correlation_types, desc="Pairwise", position=0, file=get_tqdm_file()
+    ):
         for e_margin in tqdm(
-            error_margins, desc=f"Error Margins (pairwise = {corr_type})", position=1
+            error_margins,
+            desc=f"Error Margins (pairwise = {corr_type})",
+            position=1,
+            file=get_tqdm_file(),
         ):
             for iter_idx in tqdm(
                 range(iters[0], iters[-1]),
                 desc=f"Iters (e={e_margin})",
                 position=2,
                 leave=False,
+                file=get_tqdm_file(),
             ):
                 map_obj.reset()
                 ground_truth_map = map_obj.get_ground_truth()
