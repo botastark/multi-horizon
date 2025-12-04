@@ -42,6 +42,7 @@ class AsyncMessageType(Enum):
     POSITION = "position"
     BELIEF_NEWS = "belief_news"
     OBSERVATION = "observation"
+    FUSED_BELIEF = "fused_belief"  # Belief fusion result from coordinator
     STOP = "stop"
 
 
@@ -367,6 +368,13 @@ class AsyncAgentThread(threading.Thread):
         self._log_buffer: List[Dict] = []
         self._log_lock = threading.Lock()
 
+        # Coordinator for collision avoidance and belief fusion (set externally)
+        self.coordinator = None
+
+        # Teammate positions for collision avoidance (updated via POSITION messages)
+        self._teammate_positions: Dict[int, Tuple[Tuple[float, float], float]] = {}
+        self._positions_lock = threading.Lock()
+
     def initialize(
         self,
         camera: Any,
@@ -398,6 +406,15 @@ class AsyncAgentThread(threading.Thread):
             # Set camera state
             self.camera.set_position(initial_position)
             self.camera.set_altitude(initial_altitude)
+
+    def set_coordinator(self, coordinator: Any):
+        """
+        Set the multi-agent coordinator for collision avoidance and belief fusion.
+
+        Args:
+            coordinator: MultiAgentCoordinator instance
+        """
+        self.coordinator = coordinator
 
     def run(self):
         """Main agent loop - runs in separate thread."""
@@ -466,20 +483,63 @@ class AsyncAgentThread(threading.Thread):
 
             elif msg.msg_type == AsyncMessageType.POSITION:
                 # Update teammate position (for collision avoidance)
-                pass
+                with self._positions_lock:
+                    self._teammate_positions[msg.sender_id] = (
+                        msg.payload.get("position", (0.0, 0.0)),
+                        msg.payload.get("altitude", 0.0),
+                    )
+
+            elif msg.msg_type == AsyncMessageType.BELIEF_NEWS:
+                # Handle belief news for fusion (via coordinator)
+                if self.coordinator is not None and hasattr(
+                    self.coordinator, "receive_news"
+                ):
+                    self.coordinator.receive_news(
+                        sender_id=msg.sender_id,
+                        news_belief=msg.payload.get("news_belief"),
+                        footprint=msg.payload.get("footprint"),
+                    )
+
+            elif msg.msg_type == AsyncMessageType.FUSED_BELIEF:
+                # Update local belief with fused version
+                fused = msg.payload.get("fused_belief")
+                if fused is not None:
+                    with self._state_lock:
+                        if self.belief_map is not None:
+                            self.belief_map[:, :, 1] = fused
+                            self.belief_map[:, :, 0] = 1 - fused
 
             elif msg.msg_type == AsyncMessageType.STOP:
                 self.stop()
 
     def _run_llp_cycle(self):
-        """Run one LLP planning cycle."""
+        """
+        Run one LLP planning cycle.
+
+        Supports multiple planner types:
+        - mh_dec_mcts/hierarchical_dec_mcts: Hierarchical LLP/HLP
+        - dec_mcts: Single-level MCTS
+        - greedy_ig: Greedy information gain
+        """
         if self.planner is None:
             return
 
         with self._state_lock:
-            # Update planner with current state
+            strategy = self.planner.strategy
+
+            # Multi-Horizon Dec-MCTS (hierarchical)
             if hasattr(self.planner, "_hierarchical_planner"):
                 hier_planner = self.planner._hierarchical_planner
+
+                # Update belief (use fused belief if available via coordinator)
+                if self.coordinator is not None:
+                    fused_belief = self.coordinator.get_agent_belief(self.agent_id)
+                    if fused_belief is not None:
+                        self.belief_map[:, :, 1] = fused_belief
+                        self.belief_map[:, :, 0] = 1 - fused_belief
+                        self.planner.M = self.belief_map.copy()
+                        # Update LLP belief as well
+                        hier_planner.llp.belief = self.planner.M.copy()
 
                 # Update teammate intents (with D-UCT staleness)
                 with self._intents_lock:
@@ -501,21 +561,198 @@ class AsyncAgentThread(threading.Thread):
                 )
                 self._stats["intents_broadcast"] += 1
 
-                # Get best action
+                # Get best action (collision avoidance handled within LLP via coordinator)
                 best_action = hier_planner.llp.get_best_action()
 
-                # Execute action
-                self._execute_action(best_action)
+            # Dec-MCTS (single-level)
+            elif hasattr(self.planner, "_dec_mcts_planner"):
+                dec_planner = self.planner._dec_mcts_planner
+
+                # Update teammate intents
+                with self._intents_lock:
+                    teammate_intents = dict(self._teammate_ll_intents)
+                dec_planner.update_teammate_intents(teammate_intents)
+
+                # Update belief (use fused belief if available via coordinator)
+                if self.coordinator is not None:
+                    fused_belief = self.coordinator.get_agent_belief(self.agent_id)
+                    if fused_belief is not None:
+                        self.belief_map[:, :, 1] = fused_belief
+                        self.belief_map[:, :, 0] = 1 - fused_belief
+                        self.planner.M = self.belief_map.copy()
+
+                # Update state
+                dec_planner.update_state(
+                    position=self.position,
+                    altitude=self.altitude,
+                    belief=self.planner.M.copy(),
+                )
+
+                # Run planning
+                intent = dec_planner.plan()
+
+                # Apply collision avoidance if coordinator available
+                best_action = (
+                    intent.action_sequence[0] if intent.action_sequence else "hover"
+                )
+                if self.coordinator is not None and hasattr(
+                    self.coordinator, "get_collision_penalty"
+                ):
+                    # Dec-MCTS provides action values in the intent
+                    if hasattr(intent, "action_values") and intent.action_values:
+                        action_scores = intent.action_values
+                        best_score = float("-inf")
+
+                        # Get max score for normalization
+                        valid_scores = [abs(s) for s in action_scores.values()]
+                        max_score = max(valid_scores) if valid_scores else 1.0
+                        max_score = max(max_score, 1.0)
+
+                        for action, score in action_scores.items():
+                            proposed_state = self.camera.x_future(action)
+                            if proposed_state is None:
+                                continue
+
+                            proposed_pos, _ = proposed_state
+                            proposed_row, proposed_col = self.camera.convert_xy_ij(
+                                proposed_pos[0],
+                                proposed_pos[1],
+                                self.camera.grid.center,
+                            )
+
+                            collision_penalty = self.coordinator.get_collision_penalty(
+                                self.agent_id, (proposed_row, proposed_col)
+                            )
+
+                            collision_weight = self.config.get(
+                                "collision_penalty_weight", 1.0
+                            )
+                            adjusted_score = (
+                                score - collision_penalty * max_score * collision_weight
+                            )
+
+                            if adjusted_score > best_score:
+                                best_score = adjusted_score
+                                best_action = action
+
+                # Broadcast intent
+                self.comm_network.broadcast(
+                    self.agent_id,
+                    AsyncMessageType.LL_INTENT,
+                    intent,
+                )
+                self._stats["intents_broadcast"] += 1
+
+            # Greedy IG
+            elif hasattr(self.planner, "_greedy_ig_planner"):
+                greedy_planner = self.planner._greedy_ig_planner
+
+                # Update teammate intents
+                with self._intents_lock:
+                    teammate_intents = dict(self._teammate_ll_intents)
+                greedy_planner.update_teammate_intents(teammate_intents)
+
+                # Update belief (use fused belief if available via coordinator)
+                if self.coordinator is not None:
+                    fused_belief = self.coordinator.get_agent_belief(self.agent_id)
+                    if fused_belief is not None:
+                        self.belief_map[:, :, 1] = fused_belief
+                        self.belief_map[:, :, 0] = 1 - fused_belief
+                        self.planner.M = self.belief_map.copy()
+
+                greedy_planner.update_belief(self.planner.M.copy())
+
+                # Run planning
+                intent = greedy_planner.plan(
+                    current_position=self.position,
+                    current_altitude=self.altitude,
+                )
+
+                # Apply collision avoidance if coordinator available
+                best_action = intent.action
+                if self.coordinator is not None and hasattr(
+                    self.coordinator, "get_collision_penalty"
+                ):
+                    action_scores = greedy_planner.get_action_scores()
+                    best_score = float("-inf")
+
+                    # Get max IG for normalization
+                    valid_scores = [
+                        s for s in action_scores.values() if s > float("-inf")
+                    ]
+                    max_ig = max(valid_scores) if valid_scores else 1.0
+                    max_ig = max(max_ig, 1.0)  # Ensure minimum scale
+
+                    for action, ig_score in action_scores.items():
+                        if ig_score <= float("-inf"):
+                            continue
+
+                        # Get proposed position for this action
+                        proposed_state = self.camera.x_future(action)
+                        if proposed_state is None:
+                            continue
+
+                        proposed_pos, proposed_alt = proposed_state
+                        proposed_row, proposed_col = self.camera.convert_xy_ij(
+                            proposed_pos[0], proposed_pos[1], self.camera.grid.center
+                        )
+
+                        # Get collision penalty from coordinator (0-1 range)
+                        collision_penalty = self.coordinator.get_collision_penalty(
+                            self.agent_id, (proposed_row, proposed_col)
+                        )
+
+                        # Adjusted score = IG - collision_penalty * max_ig * weight
+                        # This ensures collision penalty has meaningful impact regardless of IG magnitude
+                        collision_weight = self.config.get(
+                            "collision_penalty_weight", 1.0
+                        )
+                        adjusted_score = (
+                            ig_score - collision_penalty * max_ig * collision_weight
+                        )
+
+                        if adjusted_score > best_score:
+                            best_score = adjusted_score
+                            best_action = action
+
+                    # Log collision avoidance decision if penalty was applied
+                    if best_action != intent.action:
+                        logger.debug(
+                            f"Agent {self.agent_id}: collision avoidance changed action {intent.action} -> {best_action}"
+                        )
+
+                # Broadcast intent
+                self.comm_network.broadcast(
+                    self.agent_id,
+                    AsyncMessageType.LL_INTENT,
+                    intent,
+                )
+                self._stats["intents_broadcast"] += 1
+
+            else:
+                # Fallback: use basic planning
+                best_action, _ = self.planner.select_action(
+                    self.planner.M, visited_x=[]
+                )
+
+            # Execute action
+            self._execute_action(best_action)
 
         self._stats["llp_cycles"] += 1
         self.planning_cycles += 1
 
     def _run_hlp_cycle(self):
-        """Run one HLP planning cycle (slower rate)."""
+        """
+        Run one HLP planning cycle (slower rate).
+
+        Only applies to hierarchical planners (mh_dec_mcts).
+        For non-hierarchical planners, this is a no-op.
+        """
         if self.planner is None:
             return
 
         with self._state_lock:
+            # Only run HLP for hierarchical planners
             if hasattr(self.planner, "_hierarchical_planner"):
                 hier_planner = self.planner._hierarchical_planner
 
@@ -554,7 +791,7 @@ class AsyncAgentThread(threading.Thread):
                     hl_intent_for_llp.target_center = (world_x, world_y)
                     hier_planner.llp.update_hl_guidance(hl_intent_for_llp)
 
-        self._stats["hlp_cycles"] += 1
+                self._stats["hlp_cycles"] += 1
 
     def _execute_action(self, action: str):
         """Execute an action and update state."""
@@ -577,6 +814,17 @@ class AsyncAgentThread(threading.Thread):
 
             # Log action
             self._log_action(action)
+
+            # Update coordinator with new position (for collision avoidance)
+            if self.coordinator is not None:
+                current_row, current_col = self.camera.convert_xy_ij(
+                    self.position[0], self.position[1], self.camera.grid.center
+                )
+                self.coordinator.update_agent_state(
+                    agent_id=self.agent_id,
+                    position=(current_row, current_col),
+                    altitude=self.altitude,
+                )
 
             # Broadcast position
             self.comm_network.broadcast(
@@ -684,6 +932,21 @@ class AsyncMultiAgentRunner:
         self._checkpoint_interval: float = 1.0  # seconds
         self._checkpoint_thread: Optional[threading.Thread] = None
 
+        # Shared coordinator for collision avoidance and belief fusion
+        self.coordinator = None
+
+    def set_coordinator(self, coordinator: Any):
+        """
+        Set the multi-agent coordinator for all agents.
+
+        Args:
+            coordinator: MultiAgentCoordinator instance
+        """
+        self.coordinator = coordinator
+        # Propagate to existing agents
+        for agent in self.agents.values():
+            agent.set_coordinator(coordinator)
+
     def add_agent(
         self,
         agent_id: int,
@@ -694,6 +957,7 @@ class AsyncMultiAgentRunner:
         initial_position: Tuple[float, float],
         initial_altitude: float,
         config: Optional[Dict] = None,
+        coordinator: Optional[Any] = None,
     ):
         """
         Add an agent to the runner.
@@ -707,6 +971,7 @@ class AsyncMultiAgentRunner:
             initial_position: Start position
             initial_altitude: Start altitude
             config: Agent config
+            coordinator: MultiAgentCoordinator for collision avoidance/belief fusion
         """
         agent = AsyncAgentThread(
             agent_id=agent_id,
@@ -725,6 +990,25 @@ class AsyncMultiAgentRunner:
             initial_position=initial_position,
             initial_altitude=initial_altitude,
         )
+
+        # Set coordinator for collision avoidance and belief fusion
+        effective_coordinator = (
+            coordinator if coordinator is not None else self.coordinator
+        )
+        if effective_coordinator is not None:
+            agent.set_coordinator(effective_coordinator)
+            # Register initial position with coordinator
+            initial_row, initial_col = camera.convert_xy_ij(
+                initial_position[0], initial_position[1], camera.grid.center
+            )
+            effective_coordinator.update_agent_state(
+                agent_id=agent_id,
+                position=(initial_row, initial_col),
+                altitude=initial_altitude,
+            )
+            logger.info(
+                f"Agent {agent_id} initial position registered: ({initial_row:.1f}, {initial_col:.1f})"
+            )
 
         self.agents[agent_id] = agent
         logger.info(f"Added agent {agent_id} to async runner")

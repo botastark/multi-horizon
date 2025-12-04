@@ -6,12 +6,14 @@ while maintaining backward compatibility with the legacy format.
 
 New Config Structure (v2.0):
     - simulation: Core simulation settings
-    - strategy: Action strategy selection
+    - strategy: Action strategy selection (greedy_ig, dec_mcts, mh_dec_mcts)
     - agents: Multi-agent configuration
     - planner: MCTS planner parameters
-    - dual_horizon: LLP + HLP planning settings
+    - greedy_ig: Greedy IG planner settings
+    - dec_mcts: Dec-MCTS planner settings
+    - hierarchical_dec_mcts: Multi-Horizon Dec-MCTS settings
     - belief: Belief fusion and LBP settings
-    - decentralized: Decentralized agent communication
+    - decentralized: Decentralized agent communication and D-UCT
     - output: Logging and visualization
 
 Legacy format keys are automatically mapped from the new structure.
@@ -19,10 +21,37 @@ Legacy format keys are automatically mapped from the new structure.
 
 import json
 import os
+import numpy as np
 from typing import Dict, Any, Optional
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Pairwise Potential Helpers
+# =============================================================================
+
+def get_pairwise_potential(potential_type: str) -> np.ndarray:
+    """
+    Get pairwise potential matrix based on type.
+    
+    Args:
+        potential_type: One of 'equal', 'biased', 'adaptive'
+        
+    Returns:
+        2x2 numpy array for pairwise potential
+    """
+    if potential_type == "equal":
+        return np.array([[0.5, 0.5], [0.5, 0.5]])
+    elif potential_type == "biased":
+        return np.array([[0.7, 0.3], [0.3, 0.7]])
+    elif potential_type == "adaptive":
+        # Adaptive will be computed dynamically, use equal as default
+        return np.array([[0.5, 0.5], [0.5, 0.5]])
+    else:
+        logger.warning(f"Unknown pairwise_potential_type '{potential_type}', using 'equal'")
+        return np.array([[0.5, 0.5], [0.5, 0.5]])
 
 
 def load_config(config_file: str) -> Dict[str, Any]:
@@ -91,13 +120,9 @@ def _convert_v2_to_legacy(config: Dict[str, Any]) -> Dict[str, Any]:
     result["enable_plotting"] = output.get("enable_plotting", True)
     result["enable_logging"] = output.get("enable_logging", True)
 
-    # Build mcts_params (legacy format)
+    # Build mcts_params (legacy format for basic MCTS)
     planner = config.get("planner", {})
-    dual = config.get("dual_horizon", {})
-    weights = dual.get("weights", {})
-    hysteresis = dual.get("hysteresis", {})
-    llp = dual.get("llp", {})
-    hlp = dual.get("hlp", {})
+    hier_cfg = config.get("hierarchical_dec_mcts", {})
 
     result["mcts_params"] = {
         "planning_depth": planner.get("planning_depth", 15),
@@ -107,18 +132,9 @@ def _convert_v2_to_legacy(config: Dict[str, Any]) -> Dict[str, Any]:
         "timeout": planner.get("timeout_ms", 2000),
         "parallel": planner.get("parallel_simulations", 1),
         "horizon_weights": {
-            "w_coverage": weights.get("coverage", 0.1),
-            "w_fragmentation": weights.get("fragmentation", 0.5),
-            "w_ig": weights.get("information_gain", 0.9),
-            "w_distance": weights.get("distance", 0.5),
-            "short_horizon_depth": llp.get("horizon", 5),
-            "long_horizon_depth": hlp.get("horizon", 20),
-            "tile_size": hlp.get("tile_size", [100, 100]),
-            "current_target_bonus": hysteresis.get("current_target_bonus", 0.15),
-            "coverage_delta_threshold": hysteresis.get(
-                "coverage_delta_threshold", 0.05
-            ),
-            "position_delta_threshold": hysteresis.get("position_delta_threshold", 30),
+            "short_horizon_depth": hier_cfg.get("llp_horizon", 5),
+            "long_horizon_depth": hier_cfg.get("hlp_horizon", 3) * 5,  # regions to steps
+            "tile_size": hier_cfg.get("tile_size", [100, 100]),
         },
     }
 
@@ -126,13 +142,15 @@ def _convert_v2_to_legacy(config: Dict[str, Any]) -> Dict[str, Any]:
     dec_coord = config.get("decentralized", {}).get("coordination", {})
     belief = config.get("belief", {})
     d_uct = dec_coord.get("d_uct", {})
+    hier_cfg = config.get("hierarchical_dec_mcts", {})
 
     result["hierarchical_dec_mcts"] = {
-        "llp_horizon": llp.get("horizon", 5),
-        "llp_iterations": llp.get("iterations", 100),
-        "hlp_horizon": hlp.get("horizon", 3),
-        "hlp_iterations": hlp.get("iterations", 50),
-        "tile_size": hlp.get("tile_size", [100, 100]),
+        "llp_horizon": hier_cfg.get("llp_horizon", 5),
+        "llp_iterations": hier_cfg.get("llp_iterations", 50),
+        "hlp_horizon": hier_cfg.get("hlp_horizon", 3),
+        "hlp_iterations": hier_cfg.get("hlp_iterations", 30),
+        "tile_size": hier_cfg.get("tile_size", [100, 100]),
+        "hlp_replan_interval": hier_cfg.get("hlp_replan_interval", 1.0),
         "intent_discount": dec_coord.get("intent_discount", 0.8),
         "enable_belief_sharing": belief.get("fusion_enabled", True),
         # D-UCT settings for asynchronous drift handling
@@ -142,10 +160,33 @@ def _convert_v2_to_legacy(config: Dict[str, Any]) -> Dict[str, Any]:
         "d_uct_stale_threshold": d_uct.get("stale_intent_threshold_sec", 2.0),
     }
 
+    # Build greedy_ig (legacy format for benchmark)
+    greedy_ig_cfg = config.get("greedy_ig", {})
+    result["greedy_ig"] = {
+        "intent_discount": greedy_ig_cfg.get("intent_discount", 0.5),
+        "overlap_penalty_weight": greedy_ig_cfg.get("overlap_penalty_weight", 0.3),
+    }
+
+    # Build dec_mcts (single-level MCTS planner)
+    dec_mcts_cfg = config.get("dec_mcts", {})
+    result["dec_mcts"] = {
+        "horizon": dec_mcts_cfg.get("horizon", 10),
+        "iterations": dec_mcts_cfg.get("iterations", 100),
+        "ucb_c": dec_mcts_cfg.get("ucb_c", 1.4),
+        "discount_factor": dec_mcts_cfg.get("discount_factor", 0.95),
+        "overlap_penalty_weight": dec_mcts_cfg.get("overlap_penalty_weight", 0.3),
+        "timeout": dec_mcts_cfg.get("timeout", 5.0),
+        "parallel": dec_mcts_cfg.get("parallel", 1),
+    }
+
     # Build multi_agent (legacy format)
     agents = config.get("agents", {})
     belief_cfg = config.get("belief", {})
     lbp = belief_cfg.get("lbp", {})
+
+    # Resolve pairwise_potential from type
+    pairwise_type = lbp.get("pairwise_potential_type", "equal")
+    pairwise_potential = get_pairwise_potential(pairwise_type)
 
     result["multi_agent"] = {
         "num_agents": agents.get("num_agents", 4),
@@ -155,7 +196,8 @@ def _convert_v2_to_legacy(config: Dict[str, Any]) -> Dict[str, Any]:
         "use_lbp": lbp.get("enabled", True),
         "lbp_iterations": lbp.get("iterations", 1),
         "news_mode": belief_cfg.get("news_mode", "BM"),
-        "pairwise_potential": lbp.get("pairwise_potential", [[0.6, 0.4], [0.4, 0.6]]),
+        "pairwise_potential_type": pairwise_type,
+        "pairwise_potential": pairwise_potential,
         "region_allocation": "auction",
         "communication_range": agents.get("communication_range", -1),
         "collision_avoidance_distance": agents.get("collision_avoidance_distance", 5.0),
