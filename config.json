@@ -98,6 +98,17 @@
                 "min_visits_before_decay": 5,
                 "stale_intent_threshold_sec": 2.0
             }
+        },
+        "async": {
+            "_comment": "True asynchronous execution settings",
+            "enabled": false,
+            "planning_rate_hz": 5.0,
+            "hlp_rate_hz": 2.0,
+            "observation_rate_hz": 10.0,
+            "comm_delay_ms": 50.0,
+            "drop_probability": 0.0,
+            "max_intent_age_sec": 5.0,
+            "sync_every_n_steps": 10
         }
     },
 

@@ -14,13 +14,6 @@ This document describes the **fully decentralized** multi-agent planner with sha
 
 **Position Broadcasting for Coordination**: Agents broadcast their positions to modulate action choices via footprint overlap penalties, promoting non-redundant exploration without relying on any central controller.
 
-**D-UCT for Asynchronous Drift**: Since agents plan asynchronously, teammate intents may become stale. D-UCT (Decentralized UCT) discounting reduces the influence of old intents:
-```
-discount = decay_factor ^ ((age - threshold) / threshold)  if age > threshold
-         = 1.0                                              otherwise
-```
-This prevents overreacting to outdated plans while still using the most recent information available.
-
 ## Architecture
 
 ### Fully Decentralized Architecture
@@ -161,7 +154,7 @@ Where:
 - `teammate_discount`: Reduces IG for cells teammates plan to cover
 - `alignment_bonus`: Bonus for moving toward HLP target (soft guidance)
 - `γ`: Discount factor
-https://teams.microsoft.com/l/message/19:meeting_OGVkMDE4YzAtY2UyOS00MGRiLWIwOTItOGRjYzhlNmE4NjMx@thread.v2/1764769397235?context=%7B%22contextType%22%3A%22chat%22%7D
+
 **Key Features:**
 - Uses teammates' LL-intents to reduce IG in cells they'll cover
 - Respects HLP guidance via alignment bonus
@@ -450,3 +443,4 @@ agent0.belief_manager.reset_news_for_neighbor(1)    # Reset to prevent re-fusion
 3. **Communication Constraints**: Add realistic communication delays and packet loss
 4. **Adaptive Intent Frequency**: Adjust broadcast frequency based on plan changes
 5. **Consensus Mechanisms**: Implement distributed consensus for coordinated region allocation
+
