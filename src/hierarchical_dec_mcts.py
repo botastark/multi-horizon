@@ -55,6 +55,7 @@ def log_planning_decision(
     selected_action: str,
     target_region: Optional[int],
     intents_received: Dict[str, Any],
+    mcts_action_values: Optional[Dict[str, float]] = None,
 ):
     """
     Log detailed planning decision with LLP scores, HLP scores, and alignment.
@@ -62,26 +63,38 @@ def log_planning_decision(
     Args:
         agent_id: Agent ID
         step: Current step number
-        llp_action_scores: Raw LLP action scores (IG-based)
+        llp_action_scores: Raw LLP action scores (single-step IG)
         hlp_region_scores: HLP region scores
         alignment_adjustments: Alignment bonus per action toward HLP target
         final_action_scores: Final scores after alignment adjustment
         selected_action: The action selected
         target_region: HLP target region
         intents_received: Summary of teammate intents received
+        mcts_action_values: MCTS rollout values per first action (actual decision basis)
     """
     logger.info("")
     logger.info(f"{'='*60}")
     logger.info(f"[Agent {agent_id}] PLANNING DECISION")
     logger.info(f"{'='*60}")
 
-    # LLP Action Scores
+    # MCTS Action Values (the actual decision basis)
+    if mcts_action_values:
+        logger.info("")
+        logger.info("MCTS ACTION VALUES (Multi-step rollout - DECISION BASIS):")
+        sorted_mcts = sorted(mcts_action_values.items(), key=lambda x: x[1], reverse=True)
+        for action, score in sorted_mcts:
+            marker = " <-- SELECTED" if action == selected_action else ""
+            if score > float("-inf"):
+                logger.info(f"  {action:8s}: {score:10.2f}{marker}")
+            else:
+                logger.info(f"  {action:8s}:        N/A{marker}")
+
+    # Single-step IG scores (for reference)
     logger.info("")
-    logger.info("LLP ACTION SCORES (Information Gain):")
+    logger.info("SINGLE-STEP IG SCORES (for reference only):")
     sorted_actions = sorted(llp_action_scores.items(), key=lambda x: x[1], reverse=True)
     for action, score in sorted_actions:
-        marker = " <--" if action == selected_action else ""
-        logger.info(f"  {action:8s}: {score:10.2f}{marker}")
+        logger.info(f"  {action:8s}: {score:10.2f}")
 
     # HLP Region Scores
     logger.info("")
@@ -95,21 +108,14 @@ def log_planning_decision(
 
     # Alignment Adjustments
     if alignment_adjustments:
-        logger.info("")
-        logger.info("ALIGNMENT ADJUSTMENTS (toward HLP target):")
-        for action, adj in sorted(
-            alignment_adjustments.items(), key=lambda x: x[1], reverse=True
-        ):
-            if adj != 0:
+        nonzero_alignments = {a: v for a, v in alignment_adjustments.items() if v != 0}
+        if nonzero_alignments:
+            logger.info("")
+            logger.info("ALIGNMENT ADJUSTMENTS (toward HLP target):")
+            for action, adj in sorted(
+                nonzero_alignments.items(), key=lambda x: x[1], reverse=True
+            ):
                 logger.info(f"  {action:8s}: +{adj:.2f}")
-
-    # Final Scores
-    logger.info("")
-    logger.info("FINAL ACTION SCORES (LLP + Alignment):")
-    sorted_final = sorted(final_action_scores.items(), key=lambda x: x[1], reverse=True)
-    for action, score in sorted_final:
-        marker = " <-- SELECTED" if action == selected_action else ""
-        logger.info(f"  {action:8s}: {score:10.2f}{marker}")
 
     # Intents received
     if intents_received:
@@ -184,6 +190,20 @@ class LLIntent:
         """Check if intent is too old to be useful."""
         return time.time() - self.timestamp > max_age
 
+    def staleness_discount(
+        self, decay_factor: float = 0.9, threshold_sec: float = 2.0
+    ) -> float:
+        """
+        Compute D-UCT discount factor based on intent age.
+
+        Returns:
+        - 1.0 = fresh intent (full influence)
+        - <1.0 = stale intent (reduced influence)
+        """
+        age = time.time() - self.timestamp
+        staleness = max(0, age / threshold_sec)
+        return decay_factor**staleness
+
     def get_covered_cells(self) -> Set[Tuple[int, int]]:
         """Get set of (row, col) cells this plan will cover."""
         cells = set()
@@ -229,6 +249,18 @@ class HLIntent:
     def is_stale(self, max_age: float = 5.0) -> bool:
         """Check if intent is too old (HLP has longer validity)."""
         return time.time() - self.timestamp > max_age
+
+    def staleness_discount(
+        self, decay_factor: float = 0.95, threshold_sec: float = 5.0
+    ) -> float:
+        """
+        Compute D-UCT discount factor based on intent age.
+
+        HLP intents use slower decay since regions change less frequently.
+        """
+        age = time.time() - self.timestamp
+        staleness = max(0, age / threshold_sec)
+        return decay_factor**staleness
 
     def get_target_regions(self) -> Set[int]:
         """Get set of regions this agent intends to cover."""
@@ -482,9 +514,12 @@ class LowLevelPlanner:
             if ll_intent.is_stale():
                 continue
 
+            # D-UCT: Apply staleness discount for asynchronous drift
+            staleness_factor = ll_intent.staleness_discount()
+
             # Apply decreasing discount for future steps
             for step_idx, fp in enumerate(ll_intent.footprint_sequence):
-                step_discount = self.intent_discount**step_idx
+                step_discount = self.intent_discount**step_idx * staleness_factor
                 imin, imax, jmin, jmax = fp
                 # Clamp to valid bounds
                 imin = max(0, min(imin, H))
@@ -721,9 +756,10 @@ class LowLevelPlanner:
         coverage_discount = self._compute_teammate_coverage_mask()
 
         # Track per-action scores for logging
-        self._action_scores = {}  # Raw IG scores
+        self._action_scores = {}  # Raw IG scores (single-step)
         self._alignment_adjustments = {}  # Alignment bonus per action
         self._final_action_scores = {}  # Combined scores
+        self._mcts_action_values = {action: float("-inf") for action in self.actions}  # Best rollout value per first action
 
         # Simple MCTS: evaluate random rollouts and pick best
         best_reward = float("-inf")
@@ -732,7 +768,7 @@ class LowLevelPlanner:
         best_footprints = []
         best_igs = []
 
-        # First, compute single-step scores for each action (for logging)
+        # First, compute single-step scores for each action (for reference)
         for action in self.actions:
             ig, alignment = self._evaluate_single_action(
                 current_state, action, coverage_discount
@@ -749,6 +785,11 @@ class LowLevelPlanner:
             reward, states, footprints, igs = self._simulate_trajectory(
                 current_state, actions, coverage_discount
             )
+
+            # Track best rollout value for each first action (this is what MCTS actually uses)
+            first_action = actions[0]
+            if reward > self._mcts_action_values[first_action]:
+                self._mcts_action_values[first_action] = reward
 
             if reward > best_reward:
                 best_reward = reward
@@ -925,14 +966,18 @@ class HighLevelPlanner:
         self._teammate_hl_intents = hl_intents
         self._stats["intent_updates_received"] += 1
 
-    def _get_teammate_target_regions(self) -> Dict[int, Set[int]]:
-        """Get regions each teammate is targeting."""
+    def _get_teammate_target_regions(self) -> Dict[int, Tuple[Set[int], float]]:
+        """Get regions each teammate is targeting with D-UCT staleness discount."""
         targets = {}
         for teammate_id, hl_intent in self._teammate_hl_intents.items():
             if not hl_intent.is_stale():
-                targets[teammate_id] = hl_intent.get_target_regions()
+                staleness_discount = hl_intent.staleness_discount()
+                targets[teammate_id] = (
+                    hl_intent.get_target_regions(),
+                    staleness_discount,
+                )
             else:
-                targets[teammate_id] = set()
+                targets[teammate_id] = (set(), 0.0)
         return targets
 
     def _estimate_region_completion_time(
@@ -960,7 +1005,7 @@ class HighLevelPlanner:
         self,
         region_id: int,
         agent_position: Tuple[float, float],
-        teammate_targets: Dict[int, Set[int]],
+        teammate_targets: Dict[int, Tuple[Set[int], float]],
     ) -> float:
         """
         Compute score for a region (g2 component).
@@ -968,7 +1013,7 @@ class HighLevelPlanner:
         Considers:
         - Region entropy (uncertainty)
         - Distance from agent
-        - Whether teammates are already targeting it
+        - Whether teammates are already targeting it (with D-UCT discount)
         """
         region = self.regions[region_id]
 
@@ -983,11 +1028,12 @@ class HighLevelPlanner:
         max_dist = np.sqrt(self.grid_shape[0] ** 2 + self.grid_shape[1] ** 2)
         distance_penalty = distance / max_dist
 
-        # Teammate conflict penalty
+        # Teammate conflict penalty with D-UCT staleness discount
         conflict_penalty = 0.0
-        for teammate_id, targets in teammate_targets.items():
+        for teammate_id, (targets, staleness_discount) in teammate_targets.items():
             if region_id in targets:
-                conflict_penalty += 0.5  # Heavy penalty for overlap
+                # Reduce conflict penalty for stale intents
+                conflict_penalty += 0.5 * staleness_discount
 
         # Combined score
         score = remaining_uncertainty - 0.3 * distance_penalty - conflict_penalty
@@ -1296,6 +1342,7 @@ class HierarchicalDecMCTSPlanner:
         llp_action_scores = getattr(self.llp, "_action_scores", {})
         alignment_adjustments = getattr(self.llp, "_alignment_adjustments", {})
         final_action_scores = getattr(self.llp, "_final_action_scores", {})
+        mcts_action_values = getattr(self.llp, "_mcts_action_values", {})
         hlp_region_scores = dict(self.hlp._region_coverage)
 
         # Get teammate intent summary
@@ -1318,7 +1365,8 @@ class HierarchicalDecMCTSPlanner:
             "target_region": hl_intent.current_target_region,
             "expected_ig": ll_intent.total_expected_ig,
             # Detailed scoring for logging
-            "llp_action_scores": llp_action_scores,
+            "llp_action_scores": llp_action_scores,  # Single-step IG (for reference)
+            "mcts_action_values": mcts_action_values,  # MCTS rollout values (actual decision basis)
             "alignment_adjustments": alignment_adjustments,
             "final_action_scores": final_action_scores,
             "hlp_region_scores": hlp_region_scores,
