@@ -25,10 +25,257 @@ import queue
 import time
 import copy
 import logging
+import json
+import os
+from datetime import datetime
 from collections import defaultdict
 from enum import Enum
 
 logger = logging.getLogger(__name__)
+
+# =============================================================================
+# Dedicated Logger for Decentralized Agent Operations
+# =============================================================================
+
+# Global dedicated logger for detailed decentralized logging
+decentralized_logger: Optional[logging.Logger] = None
+
+
+def setup_decentralized_logger(
+    log_dir: str = "logs",
+    experiment_name: Optional[str] = None,
+) -> str:
+    """
+    Set up dedicated logger for decentralized agent operations.
+    
+    Creates a detailed log file capturing:
+    - News belief fusion events
+    - LLP/HLP intent sharing
+    - Position broadcasts
+    - Communication events
+    - Per-step state snapshots
+    
+    Args:
+        log_dir: Directory for log files
+        experiment_name: Optional experiment name for log filename
+        
+    Returns:
+        Path to the created log file
+    """
+    global decentralized_logger
+    
+    # Create log directory
+    os.makedirs(log_dir, exist_ok=True)
+    
+    # Create timestamped log file
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    exp_suffix = f"_{experiment_name}" if experiment_name else ""
+    log_filename = f"decentralized{exp_suffix}_{timestamp}.log"
+    decentralized_log_file = os.path.join(log_dir, log_filename)
+    
+    # Create dedicated logger
+    decentralized_logger = logging.getLogger("decentralized_detailed")
+    decentralized_logger.setLevel(logging.DEBUG)
+    decentralized_logger.handlers.clear()  # Remove existing handlers
+    
+    # File handler with detailed format
+    file_handler = logging.FileHandler(decentralized_log_file)
+    file_handler.setLevel(logging.DEBUG)
+    
+    # Detailed formatter (no timestamps - we log our own)
+    formatter = logging.Formatter("%(message)s")
+    file_handler.setFormatter(formatter)
+    decentralized_logger.addHandler(file_handler)
+    
+    # Log initialization
+    decentralized_logger.info("=" * 80)
+    decentralized_logger.info("DECENTRALIZED AGENT LOG")
+    decentralized_logger.info(f"Experiment: {experiment_name if experiment_name else 'default'}")
+    decentralized_logger.info(f"Timestamp: {timestamp}")
+    decentralized_logger.info("=" * 80)
+    file_handler.flush()
+    
+    return decentralized_log_file
+
+
+def flush_decentralized_logger():
+    """Flush the decentralized logger to ensure all logs are written to disk."""
+    global decentralized_logger
+    if decentralized_logger:
+        for handler in decentralized_logger.handlers:
+            handler.flush()
+
+
+def log_decentralized_step(
+    step_num: int,
+    agent_id: int,
+    position: Tuple[float, float],
+    altitude: float,
+    belief_stats: Dict[str, Any],
+    neighbors_in_range: List[int],
+    additional_info: Optional[Dict] = None,
+):
+    """
+    Log agent state at each planning step.
+    
+    Args:
+        step_num: Current step number
+        agent_id: Agent ID
+        position: Current (x, y) position
+        altitude: Current altitude
+        belief_stats: Statistics from belief manager
+        neighbors_in_range: List of neighbor IDs in communication range
+        additional_info: Optional additional metrics
+    """
+    if decentralized_logger is None:
+        return
+    
+    decentralized_logger.info("")
+    decentralized_logger.info(f"{'='*80}")
+    decentralized_logger.info(f"STEP {step_num} | AGENT {agent_id}")
+    decentralized_logger.info(f"{'='*80}")
+    
+    # Position and state
+    decentralized_logger.info(f"Position: ({position[0]:.2f}, {position[1]:.2f}), Altitude: {altitude:.2f}")
+    decentralized_logger.info(f"Neighbors in range: {neighbors_in_range}")
+    
+    # Belief statistics
+    decentralized_logger.info("")
+    decentralized_logger.info("BELIEF STATE:")
+    decentralized_logger.info(f"  Mean belief: {belief_stats.get('mean_belief', 0):.4f}")
+    decentralized_logger.info(f"  Belief entropy: {belief_stats.get('belief_entropy', 0):.4f}")
+    decentralized_logger.info(f"  Observations: {belief_stats.get('observations', 0)}")
+    decentralized_logger.info(f"  News fusions: {belief_stats.get('news_fusions', 0)}")
+    
+    if additional_info:
+        decentralized_logger.info("")
+        decentralized_logger.info("ADDITIONAL INFO:")
+        for key, value in additional_info.items():
+            decentralized_logger.info(f"  {key}: {value}")
+
+
+def log_news_belief_event(
+    event_type: str,
+    sender_id: int,
+    receiver_id: int,
+    cells_updated: int,
+    step: int,
+    staleness: Optional[float] = None,
+):
+    """
+    Log news belief sharing events.
+    
+    Args:
+        event_type: "sent" or "received" or "fused"
+        sender_id: Sender agent ID
+        receiver_id: Receiver agent ID
+        cells_updated: Number of cells with news
+        step: Current step number
+        staleness: Optional D-UCT staleness info
+    """
+    if decentralized_logger is None:
+        return
+    
+    decentralized_logger.info("")
+    decentralized_logger.info(f"NEWS BELIEF {event_type.upper()}")
+    decentralized_logger.info(f"  Sender: Agent {sender_id} → Receiver: Agent {receiver_id}")
+    decentralized_logger.info(f"  Cells updated: {cells_updated}")
+    decentralized_logger.info(f"  Step: {step}")
+    if staleness is not None:
+        decentralized_logger.info(f"  Staleness discount: {staleness:.4f}")
+
+
+def log_intent_event(
+    intent_type: str,  # "llp" or "hlp"
+    event_type: str,   # "shared" or "received"
+    agent_id: int,
+    intent_info: Dict[str, Any],
+    staleness_discount: Optional[float] = None,
+):
+    """
+    Log LLP/HLP intent sharing events.
+    
+    Args:
+        intent_type: "llp" or "hlp"
+        event_type: "shared" or "received"
+        agent_id: Agent ID (sender or receiver depending on event_type)
+        intent_info: Intent details
+        staleness_discount: D-UCT discount factor if applicable
+    """
+    if decentralized_logger is None:
+        return
+    
+    decentralized_logger.info("")
+    decentralized_logger.info(f"{intent_type.upper()} INTENT {event_type.upper()}")
+    decentralized_logger.info(f"  Agent: {agent_id}")
+    
+    if intent_type == "llp":
+        decentralized_logger.info(f"  Action sequence: {intent_info.get('action_sequence', [])[:5]}")
+        decentralized_logger.info(f"  Horizon: {intent_info.get('horizon', 0)}")
+        decentralized_logger.info(f"  Total value: {intent_info.get('total_value', 0):.4f}")
+    else:  # hlp
+        decentralized_logger.info(f"  Target region: {intent_info.get('target_region')}")
+        decentralized_logger.info(f"  Target center: {intent_info.get('target_center')}")
+        decentralized_logger.info(f"  Waypoints: {len(intent_info.get('waypoint_sequence', []))}")
+        decentralized_logger.info(f"  Priority: {intent_info.get('priority', 0):.4f}")
+    
+    if staleness_discount is not None:
+        decentralized_logger.info(f"  D-UCT staleness discount: {staleness_discount:.4f}")
+
+
+def log_position_broadcast(
+    agent_id: int,
+    position: Tuple[float, float],
+    altitude: float,
+    footprint_bounds: Tuple[int, int, int, int],
+    planned_steps: int,
+):
+    """
+    Log position broadcast events.
+    
+    Args:
+        agent_id: Agent broadcasting
+        position: Current position
+        altitude: Current altitude
+        footprint_bounds: Current camera footprint
+        planned_steps: Number of planned steps included
+    """
+    if decentralized_logger is None:
+        return
+    
+    decentralized_logger.info("")
+    decentralized_logger.info("POSITION BROADCAST")
+    decentralized_logger.info(f"  Agent: {agent_id}")
+    decentralized_logger.info(f"  Position: ({position[0]:.2f}, {position[1]:.2f})")
+    decentralized_logger.info(f"  Altitude: {altitude:.2f}")
+    decentralized_logger.info(f"  Footprint: {footprint_bounds}")
+    decentralized_logger.info(f"  Planned trajectory steps: {planned_steps}")
+
+
+def log_communication_summary(
+    agent_id: int,
+    step: int,
+    stats: Dict[str, Any],
+):
+    """
+    Log communication summary at end of step.
+    
+    Args:
+        agent_id: Agent ID
+        step: Current step
+        stats: Agent statistics dict
+    """
+    if decentralized_logger is None:
+        return
+    
+    decentralized_logger.info("")
+    decentralized_logger.info(f"COMMUNICATION SUMMARY | Agent {agent_id} | Step {step}")
+    decentralized_logger.info(f"  News sent: {stats.get('news_sent', 0)}")
+    decentralized_logger.info(f"  News received: {stats.get('news_received', 0)}")
+    decentralized_logger.info(f"  Positions broadcast: {stats.get('positions_broadcast', 0)}")
+    decentralized_logger.info(f"  LLP intents shared: {stats.get('llp_intents_shared', 0)}")
+    decentralized_logger.info(f"  HLP intents shared: {stats.get('hlp_intents_shared', 0)}")
+    decentralized_logger.info("-" * 40)
 
 
 # =============================================================================
@@ -805,6 +1052,15 @@ class DecentralizedAgent:
         try:
             self.outbox.put_nowait(("position", msg))
             self._stats["positions_broadcast"] += 1
+            
+            # Log position broadcast
+            log_position_broadcast(
+                agent_id=self.agent_id,
+                position=self.position,
+                altitude=self.altitude,
+                footprint_bounds=self.current_footprint or (0, 0, 0, 0),
+                planned_steps=len(msg.planned_positions),
+            )
         except queue.Full:
             logger.warning(
                 f"Agent {self.agent_id}: Position broadcast dropped (queue full)"
@@ -834,6 +1090,15 @@ class DecentralizedAgent:
                         self.outbox.put_nowait(("news", news_msg))
                         sent_count += 1
                         self._stats["news_sent"] += 1
+                        
+                        # Log news belief sent
+                        log_news_belief_event(
+                            event_type="sent",
+                            sender_id=self.agent_id,
+                            receiver_id=neighbor_id,
+                            cells_updated=int(np.sum(news_msg.news_mask)),
+                            step=news_msg.step,
+                        )
                     except queue.Full:
                         logger.warning(
                             f"Agent {self.agent_id}: News to {neighbor_id} dropped"
@@ -872,6 +1137,15 @@ class DecentralizedAgent:
             # Fuse received news into local belief
             self.belief_manager.fuse_received_news(news_msg)
             self._stats["news_received"] += 1
+            
+            # Log news belief received/fused
+            log_news_belief_event(
+                event_type="fused",
+                sender_id=news_msg.sender_id,
+                receiver_id=self.agent_id,
+                cells_updated=int(np.sum(news_msg.news_mask)),
+                step=news_msg.step,
+            )
 
             # The sender will reset their news for us after we acknowledge
             # In this implementation, we assume reliable delivery
@@ -900,6 +1174,20 @@ class DecentralizedAgent:
         with self._lock:
             self.neighbor_llp_intents[intent_msg.sender_id] = intent_msg
             self._stats["llp_intents_shared"] += 1
+            
+            # Log LLP intent received with D-UCT staleness
+            staleness = intent_msg.staleness_discount()
+            log_intent_event(
+                intent_type="llp",
+                event_type="received",
+                agent_id=intent_msg.sender_id,
+                intent_info={
+                    "action_sequence": intent_msg.action_sequence,
+                    "horizon": intent_msg.horizon,
+                    "total_value": intent_msg.total_value,
+                },
+                staleness_discount=staleness if staleness < 1.0 else None,
+            )
 
     def receive_hlp_intent(self, intent_msg: HLPIntent) -> None:
         """
@@ -914,6 +1202,21 @@ class DecentralizedAgent:
         with self._lock:
             self.neighbor_hlp_intents[intent_msg.sender_id] = intent_msg
             self._stats["hlp_intents_shared"] += 1
+            
+            # Log HLP intent received with D-UCT staleness
+            staleness = intent_msg.staleness_discount()
+            log_intent_event(
+                intent_type="hlp",
+                event_type="received",
+                agent_id=intent_msg.sender_id,
+                intent_info={
+                    "target_region": intent_msg.target_region,
+                    "target_center": intent_msg.target_center,
+                    "waypoint_sequence": intent_msg.waypoint_sequence,
+                    "priority": intent_msg.priority,
+                },
+                staleness_discount=staleness if staleness < 1.0 else None,
+            )
 
     def process_inbox(self) -> int:
         """
@@ -1128,6 +1431,18 @@ class DecentralizedAgent:
         try:
             self.outbox.put_nowait(("llp_intent", self.current_llp_intent))
             self._stats["llp_intents_shared"] += 1
+            
+            # Log LLP intent shared
+            log_intent_event(
+                intent_type="llp",
+                event_type="shared",
+                agent_id=self.agent_id,
+                intent_info={
+                    "action_sequence": self.current_llp_intent.action_sequence,
+                    "horizon": self.current_llp_intent.horizon,
+                    "total_value": self.current_llp_intent.total_value,
+                },
+            )
         except queue.Full:
             logger.warning(f"Agent {self.agent_id}: LLP intent share dropped")
 
@@ -1142,6 +1457,19 @@ class DecentralizedAgent:
         try:
             self.outbox.put_nowait(("hlp_intent", self.current_hlp_intent))
             self._stats["hlp_intents_shared"] += 1
+            
+            # Log HLP intent shared
+            log_intent_event(
+                intent_type="hlp",
+                event_type="shared",
+                agent_id=self.agent_id,
+                intent_info={
+                    "target_region": self.current_hlp_intent.target_region,
+                    "target_center": self.current_hlp_intent.target_center,
+                    "waypoint_sequence": self.current_hlp_intent.waypoint_sequence,
+                    "priority": self.current_hlp_intent.priority,
+                },
+            )
         except queue.Full:
             logger.warning(f"Agent {self.agent_id}: HLP intent share dropped")
 
@@ -1172,6 +1500,42 @@ class DecentralizedAgent:
             "neighbor_llp_intents": len(self.neighbor_llp_intents),
             "neighbor_hlp_intents": len(self.neighbor_hlp_intents),
         }
+
+    def log_step(self, step_num: int) -> None:
+        """
+        Log detailed state for current step.
+        
+        This method should be called at the end of each planning step
+        to capture a snapshot of the agent's state.
+        
+        Args:
+            step_num: Current step number
+        """
+        # Get current state
+        neighbors = self.get_neighbors_in_range()
+        belief_stats = self.belief_manager.get_statistics()
+        
+        # Log step snapshot
+        log_decentralized_step(
+            step_num=step_num,
+            agent_id=self.agent_id,
+            position=self.position,
+            altitude=self.altitude,
+            belief_stats=belief_stats,
+            neighbors_in_range=neighbors,
+            additional_info={
+                "neighbor_llp_intents": len(self.neighbor_llp_intents),
+                "neighbor_hlp_intents": len(self.neighbor_hlp_intents),
+                "current_footprint": self.current_footprint,
+            },
+        )
+        
+        # Log communication summary
+        log_communication_summary(
+            agent_id=self.agent_id,
+            step=step_num,
+            stats=self._stats,
+        )
 
     def get_neighbor_llp_intents(self) -> Dict[int, LLPIntent]:
         """Get all received LLP intents from neighbors."""

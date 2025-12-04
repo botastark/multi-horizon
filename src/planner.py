@@ -473,18 +473,39 @@ class planning:
         # Run hierarchical planning (includes intent sharing)
         action, metrics = planner.plan()
 
-        # Print stats periodically
-        if metrics.get("ll_intent") and metrics["ll_intent"].iterations % 50 == 0:
-            stats = planner.get_statistics()
-            print(
-                f"\n[DEC-MCTS] Agent {self.agent_id}: cycles={stats['hierarchical']['planning_cycles']}, "
-                f"target_region={metrics.get('target_region')}, "
-                f"expected_ig={metrics.get('expected_ig', 0):.2f}\n"
-            )
+        # Log detailed planning decision
+        from hierarchical_dec_mcts import log_planning_decision, log_intent_sharing
+
+        stats = planner.get_statistics()
+        log_planning_decision(
+            agent_id=self.agent_id,
+            step=stats["hierarchical"]["planning_cycles"],
+            llp_action_scores=metrics.get("llp_action_scores", {}),
+            hlp_region_scores=metrics.get("hlp_region_scores", {}),
+            alignment_adjustments=metrics.get("alignment_adjustments", {}),
+            final_action_scores=metrics.get("final_action_scores", {}),
+            selected_action=action,
+            target_region=metrics.get("target_region"),
+            intents_received=metrics.get("intents_received", {}),
+        )
+
+        # Log intent sharing
+        ll_intent = metrics.get("ll_intent")
+        hl_intent = metrics.get("hl_intent")
+        log_intent_sharing(
+            agent_id=self.agent_id,
+            ll_intent_summary={
+                "actions": ll_intent.action_sequence if ll_intent else [],
+                "total_ig": ll_intent.total_expected_ig if ll_intent else 0,
+            },
+            hl_intent_summary={
+                "target_region": hl_intent.current_target_region if hl_intent else None,
+                "region_sequence": hl_intent.region_sequence if hl_intent else [],
+            },
+        )
 
         # Build action scores from LL intent
         action_scores = {}
-        ll_intent = metrics.get("ll_intent")
         if ll_intent and ll_intent.action_sequence:
             for i, act in enumerate(ll_intent.action_sequence):
                 if i < len(ll_intent.ig_sequence):

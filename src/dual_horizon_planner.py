@@ -377,7 +377,7 @@ def compute_revisit_cost(
         uav_pos: Current UAV position with .position attribute
         uncovered_patches: Output from analyze_coverage_fragmentation()
         uav_speed: UAV movement speed in grid units per time step
-        grid_length: Length of each grid cell in real units
+        grid_length: Length of each grid cell in real unitsFRAGMENTATION
 
     Returns:
         Total expected revisit cost (higher = more expensive to cover later)
