@@ -487,7 +487,6 @@ class planning:
             selected_action=action,
             target_region=metrics.get("target_region"),
             intents_received=metrics.get("intents_received", {}),
-            mcts_action_values=metrics.get("mcts_action_values", {}),
         )
 
         # Log intent sharing

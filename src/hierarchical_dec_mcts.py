@@ -55,7 +55,6 @@ def log_planning_decision(
     selected_action: str,
     target_region: Optional[int],
     intents_received: Dict[str, Any],
-    mcts_action_values: Optional[Dict[str, float]] = None,
 ):
     """
     Log detailed planning decision with LLP scores, HLP scores, and alignment.
@@ -63,38 +62,26 @@ def log_planning_decision(
     Args:
         agent_id: Agent ID
         step: Current step number
-        llp_action_scores: Raw LLP action scores (single-step IG)
+        llp_action_scores: Raw LLP action scores (IG-based)
         hlp_region_scores: HLP region scores
         alignment_adjustments: Alignment bonus per action toward HLP target
         final_action_scores: Final scores after alignment adjustment
         selected_action: The action selected
         target_region: HLP target region
         intents_received: Summary of teammate intents received
-        mcts_action_values: MCTS rollout values per first action (actual decision basis)
     """
     logger.info("")
     logger.info(f"{'='*60}")
     logger.info(f"[Agent {agent_id}] PLANNING DECISION")
     logger.info(f"{'='*60}")
 
-    # MCTS Action Values (the actual decision basis)
-    if mcts_action_values:
-        logger.info("")
-        logger.info("MCTS ACTION VALUES (Multi-step rollout - DECISION BASIS):")
-        sorted_mcts = sorted(mcts_action_values.items(), key=lambda x: x[1], reverse=True)
-        for action, score in sorted_mcts:
-            marker = " <-- SELECTED" if action == selected_action else ""
-            if score > float("-inf"):
-                logger.info(f"  {action:8s}: {score:10.2f}{marker}")
-            else:
-                logger.info(f"  {action:8s}:        N/A{marker}")
-
-    # Single-step IG scores (for reference)
+    # LLP Action Scores
     logger.info("")
-    logger.info("SINGLE-STEP IG SCORES (for reference only):")
+    logger.info("LLP ACTION SCORES (Information Gain):")
     sorted_actions = sorted(llp_action_scores.items(), key=lambda x: x[1], reverse=True)
     for action, score in sorted_actions:
-        logger.info(f"  {action:8s}: {score:10.2f}")
+        marker = " <--" if action == selected_action else ""
+        logger.info(f"  {action:8s}: {score:10.2f}{marker}")
 
     # HLP Region Scores
     logger.info("")
@@ -108,14 +95,21 @@ def log_planning_decision(
 
     # Alignment Adjustments
     if alignment_adjustments:
-        nonzero_alignments = {a: v for a, v in alignment_adjustments.items() if v != 0}
-        if nonzero_alignments:
-            logger.info("")
-            logger.info("ALIGNMENT ADJUSTMENTS (toward HLP target):")
-            for action, adj in sorted(
-                nonzero_alignments.items(), key=lambda x: x[1], reverse=True
-            ):
+        logger.info("")
+        logger.info("ALIGNMENT ADJUSTMENTS (toward HLP target):")
+        for action, adj in sorted(
+            alignment_adjustments.items(), key=lambda x: x[1], reverse=True
+        ):
+            if adj != 0:
                 logger.info(f"  {action:8s}: +{adj:.2f}")
+
+    # Final Scores
+    logger.info("")
+    logger.info("FINAL ACTION SCORES (LLP + Alignment):")
+    sorted_final = sorted(final_action_scores.items(), key=lambda x: x[1], reverse=True)
+    for action, score in sorted_final:
+        marker = " <-- SELECTED" if action == selected_action else ""
+        logger.info(f"  {action:8s}: {score:10.2f}{marker}")
 
     # Intents received
     if intents_received:
@@ -759,7 +753,9 @@ class LowLevelPlanner:
         self._action_scores = {}  # Raw IG scores (single-step)
         self._alignment_adjustments = {}  # Alignment bonus per action
         self._final_action_scores = {}  # Combined scores
-        self._mcts_action_values = {action: float("-inf") for action in self.actions}  # Best rollout value per first action
+        self._mcts_action_values = {
+            action: float("-inf") for action in self.actions
+        }  # Best rollout value per first action
 
         # Simple MCTS: evaluate random rollouts and pick best
         best_reward = float("-inf")
