@@ -19,28 +19,28 @@ This document describes the **fully decentralized** multi-agent planner with sha
 ### Fully Decentralized Architecture
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
-│                        Fully Decentralized Multi-Agent System                    │
-│                              (No Central Controller)                             │
-│                                                                                  │
-│  ┌──────────────────────────┐        ┌──────────────────────────┐              │
-│  │   DecentralizedAgent 0   │◄──────►│   DecentralizedAgent 1   │              │
-│  │  ┌────────────────────┐  │  P2P   │  ┌────────────────────┐  │              │
-│  │  │  LocalBeliefMgr B  │  │  Comm  │  │  LocalBeliefMgr B  │  │              │
-│  │  │  ┌──────────────┐  │  │        │  │  ┌──────────────┐  │  │              │
-│  │  │  │ News δ_01    │  │  │ News   │  │  │ News δ_10    │  │  │              │
-│  │  │  │ News δ_02    │  │◄─┼─Beliefs│  │  │ News δ_12    │  │  │              │
-│  │  │  │ ...          │  │  │ Only   │  │  │ ...          │  │  │              │
-│  │  │  └──────────────┘  │  │        │  │  └──────────────┘  │  │              │
-│  │  └────────────────────┘  │        │  └────────────────────┘  │              │
-│  │  ┌─────────┐ ┌─────────┐ │Position│  ┌─────────┐ ┌─────────┐ │              │
-│  │  │   LLP   │ │   HLP   │ │Broadcast│ │   LLP   │ │   HLP   │ │              │
-│  │  └─────────┘ └─────────┘ │        │  └─────────┘ └─────────┘ │              │
-│  └──────────────────────────┘        └──────────────────────────┘              │
-│           │                                   │                                 │
-│           │         ┌───────────────┐         │                                 │
+│                        Fully Decentralized Multi-Agent System                   │
+│                              (No Central Controller)                            │
+│                                                                                 │
+│  ┌──────────────────────────┐         ┌──────────────────────────┐              │
+│  │   DecentralizedAgent 0   │◄───────►│   DecentralizedAgent 1   │              │
+│  │  ┌────────────────────┐  │  P2P    │  ┌────────────────────┐  │              │
+│  │  │  LocalBeliefMgr B  │  │  Comm   │  │  LocalBeliefMgr B  │  │              │
+│  │  │  ┌──────────────┐  │  │         │  │  ┌──────────────┐  │  │              │
+│  │  │  │ News δ_01    │  │  │ News    │  │  │ News δ_10    │  │  │              │
+│  │  │  │ News δ_02    │  │◄─┼─Beliefs │  │  │ News δ_12    │  │  │              │
+│  │  │  │ ...          │  │  │ Only    │  │  │ ...          │  │  │              │
+│  │  │  └──────────────┘  │  │         │  │  └──────────────┘  │  │              │
+│  │  └────────────────────┘  │         │  └────────────────────┘  │              │
+│  │  ┌─────────┐ ┌─────────┐ │Position │  ┌─────────┐ ┌─────────┐ │              │
+│  │  │   LLP   │ │   HLP   │ │Broadcast│  │   LLP   │ │   HLP   │ │              │
+│  │  └─────────┘ └─────────┘ │         │  └─────────┘ └─────────┘ │              │
+│  └──────────────────────────┘         └──────────────────────────┘              │
+│           │                                    │                                │
+│           │         ┌────────────────┐         │                                │
 │           └────────►│ Overlap Penalty│◄────────┘                                │
-│                     │  Calculation  │                                           │
-│                     └───────────────┘                                           │
+│                     │  Calculation   │                                          │
+│                     └────────────────┘                                          │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -49,16 +49,16 @@ This document describes the **fully decentralized** multi-agent planner with sha
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                           Multi-Agent System                                │
 │                                                                             │
-│  ┌─────────────────┐    IntentBus    ┌─────────────────┐                   │
-│  │     Agent 0     │◄───────────────►│     Agent 1     │                   │
-│  │  ┌───────────┐  │  (LL + HL       │  ┌───────────┐  │                   │
-│  │  │    LLP    │  │   intents)      │  │    LLP    │  │                   │
-│  │  └─────┬─────┘  │                 │  └─────┬─────┘  │                   │
-│  │        │        │                 │        │        │                   │
-│  │  ┌─────▼─────┐  │                 │  ┌─────▼─────┐  │                   │
-│  │  │    HLP    │  │                 │  │    HLP    │  │                   │
-│  │  └───────────┘  │                 │  └───────────┘  │                   │
-│  └─────────────────┘                 └─────────────────┘                   │
+│  ┌─────────────────┐    IntentBus    ┌─────────────────┐                    │
+│  │     Agent 0     │◄───────────────►│     Agent 1     │                    │
+│  │  ┌───────────┐  │  (LL + HL       │  ┌───────────┐  │                    │
+│  │  │    LLP    │  │   intents)      │  │    LLP    │  │                    │
+│  │  └─────┬─────┘  │                 │  └─────┬─────┘  │                    │
+│  │        │        │                 │        │        │                    │
+│  │  ┌─────▼─────┐  │                 │  ┌─────▼─────┐  │                    │
+│  │  │    HLP    │  │                 │  │    HLP    │  │                    │
+│  │  └───────────┘  │                 │  └───────────┘  │                    │
+│  └─────────────────┘                 └─────────────────┘                    │
 │           │                                   │                             │
 │           └───────────┬───────────────────────┘                             │
 │                       ▼                                                     │
@@ -436,11 +436,185 @@ agent0.belief_manager.reset_news_for_neighbor(1)    # Reset to prevent re-fusion
 }
 ```
 
+## Asynchronous Execution
+
+The system supports true asynchronous multi-agent execution via `async_runner.py`.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                       Async Multi-Agent Runner                                  │
+│                                                                                 │
+│  ┌───────────────────┐    ┌───────────────────┐    ┌───────────────────┐        │
+│  │  AsyncAgentThread │    │  AsyncAgentThread │    │  AsyncAgentThread │        │
+│  │     Agent 0       │    │     Agent 1       │    │     Agent 2       │        │
+│  │  ┌─────────────┐  │    │  ┌─────────────┐  │    │  ┌─────────────┐  │        │
+│  │  │ LLP @ 5 Hz  │  │    │  │ LLP @ 5 Hz  │  │    │  │ LLP @ 5 Hz  │  │        │
+│  │  │ HLP @ 2 Hz  │  │    │  │ HLP @ 2 Hz  │  │    │  │ HLP @ 2 Hz  │  │        │
+│  │  └─────────────┘  │    │  └─────────────┘  │    │  └─────────────┘  │        │
+│  └─────────┬─────────┘    └─────────┬─────────┘    └─────────┬─────────┘        │
+│            │                        │                        │                  │
+│            └────────────────────────┼────────────────────────┘                  │
+│                                     ▼                                           │
+│                        ┌─────────────────────────┐                              │
+│                        │   AsyncCommNetwork      │                              │
+│                        │  - Per-agent inboxes    │                              │
+│                        │  - Configurable delay   │                              │
+│                        │  - Message timestamping │                              │
+│                        └─────────────────────────┘                              │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Key Differences: Sync vs Async
+
+| Aspect           | Synchronous Mode         | Asynchronous Mode           |
+|------------------|--------------------------|-----------------------------|
+| Execution        | Lock-step per timestep   | Independent threads         |
+| Planning         | All agents plan together | Each plans at own rate      |
+| Communication    | Instant                  | Delayed (configurable)      |
+| Intent staleness | Always fresh             | D-UCT discounting applies   |
+| Use case         | Simulation/testing       | Realistic deployment        |
+
+### Usage
+
+Enable async mode in config:
+```json
+{
+    "decentralized": {
+        "async": {
+            "enabled": true,
+            "planning_rate_hz": 5.0,
+            "hlp_rate_hz": 2.0,
+            "comm_delay_ms": 50.0
+        }
+    }
+}
+```
+
+Or manually:
+```python
+from async_runner import AsyncMultiAgentRunner
+
+runner = AsyncMultiAgentRunner(
+    num_agents=3,
+    planning_rate_hz=5.0,
+    hlp_rate_hz=2.0,
+    comm_delay_ms=50.0,
+)
+
+# Add agents
+for agent_id in range(num_agents):
+    runner.add_agent(
+        agent_id=agent_id,
+        camera=cameras[agent_id],
+        planner=planners[agent_id],
+        belief_map=initial_beliefs[agent_id],
+        occupancy_map=occupancy_maps[agent_id],
+        initial_position=start_positions[agent_id],
+        initial_altitude=start_altitudes[agent_id],
+    )
+
+# Run until all agents complete 100 steps
+runner.run_until_steps(target_steps=100, timeout_sec=300.0)
+
+# Get results
+all_states = runner.get_all_states()
+all_logs = runner.get_all_logs()
+network_stats = runner.get_network_statistics()
+```
+
 ## Future Improvements
 
-1. **Full D-UCT Implementation**: Currently uses simplified MCTS; could add D-UCT discounting for asynchronous drift handling
-2. **Trajectory Prediction**: Use more sophisticated models for teammate trajectory prediction
-3. **Communication Constraints**: Add realistic communication delays and packet loss
-4. **Adaptive Intent Frequency**: Adjust broadcast frequency based on plan changes
-5. **Consensus Mechanisms**: Implement distributed consensus for coordinated region allocation
+1. **Trajectory Prediction**: Use more sophisticated models for teammate trajectory prediction
+2. **Adaptive Intent Frequency**: Adjust broadcast frequency based on plan changes
+3. **Consensus Mechanisms**: Implement distributed consensus for coordinated region allocation
+
+## D-UCT Discounting (Implemented)
+
+The system implements D-UCT (Decentralized UCT) discounting to handle asynchronous drift—when teammate intents become stale due to communication delays or async planning cycles.
+
+### Staleness Tracking
+
+Each intent (`LLPIntent` and `HLPIntent`) includes a timestamp and methods to compute staleness:
+
+```python
+@dataclass
+class LLPIntent:
+    timestamp: float = field(default_factory=time.time)
+    
+    def is_stale(self, threshold_sec: float = 2.0) -> bool:
+        """Check if intent is stale for D-UCT discounting."""
+        return time.time() - self.timestamp > threshold_sec
+    
+    def staleness_discount(self, decay_factor: float = 0.9, threshold_sec: float = 2.0) -> float:
+        """
+        Compute D-UCT discount factor based on intent age.
+        
+        Returns:
+        - 1.0 = fresh intent (full influence)
+        - <1.0 = stale intent (reduced influence)
+        """
+        staleness = max(0, (time.time() - self.timestamp) / threshold_sec)
+        return decay_factor ** staleness
+```
+
+### Application in Planning
+
+When evaluating teammate intents, the discount factor reduces their influence:
+
+```python
+# In LowLevelPlanner reward computation:
+for teammate_id, intent in teammate_ll_intents.items():
+    staleness_discount = intent.staleness_discount()  # e.g., 0.81 for 2x threshold age
+    
+    # Discounted overlap penalty
+    overlap_penalty = base_overlap * staleness_discount
+    
+    # Log the staleness for debugging
+    logger.info(f"  D-UCT staleness discount: {staleness_discount:.4f}")
+```
+
+### Configuration
+
+```json
+{
+    "decentralized": {
+        "coordination": {
+            "d_uct": {
+                "enabled": true,
+                "decay_factor": 0.9,
+                "min_visits_before_decay": 5,
+                "stale_intent_threshold_sec": 2.0
+            }
+        }
+    }
+}
+```
+
+### Async Execution Mode
+
+For true asynchronous execution where D-UCT matters most:
+
+```json
+{
+    "decentralized": {
+        "async": {
+            "enabled": true,
+            "planning_rate_hz": 5.0,
+            "hlp_rate_hz": 2.0,
+            "comm_delay_ms": 50.0,
+            "drop_probability": 0.0,
+            "max_intent_age_sec": 5.0
+        }
+    }
+}
+```
+
+When `async.enabled = true`:
+- Each agent runs in its own thread
+- LLP plans at `planning_rate_hz` (independent per agent)
+- HLP plans at `hlp_rate_hz` (slower, region-level)
+- Communication has realistic delays (`comm_delay_ms`)
+- D-UCT discounting automatically reduces influence of stale intents
 
