@@ -6,7 +6,7 @@
         "_comment": "Core simulation settings",
         "field_type": "Gaussian",
         "start_position": "corner",
-        "num_steps": 100,
+        "num_steps": 50,
         "iterations": [0, 1],
         "correlation_types": ["equal"],
         "error_margins": [null],
@@ -14,8 +14,8 @@
     },
 
     "strategy": {
-        "_comment": "Action strategy selection: ig, sweep, mcts, dual_horizon, threaded_dual_horizon, hierarchical_dec_mcts",
-        "type": "hierarchical_dec_mcts"
+        "_comment": "Action strategy selection: greedy_ig, dec_mcts, mh_dec_mcts (or hierarchical_dec_mcts)",
+        "type": "greedy_ig"
     },
 
     "agents": {
@@ -36,28 +36,31 @@
         "parallel_simulations": 1
     },
 
-    "dual_horizon": {
-        "_comment": "Dual-horizon (LLP + HLP) planning weights",
-        "weights": {
-            "coverage": 0.1,
-            "fragmentation": 0.5,
-            "information_gain": 0.9,
-            "distance": 0.5
-        },
-        "llp": {
-            "horizon": 5,
-            "iterations": 100
-        },
-        "hlp": {
-            "horizon": 20,
-            "iterations": 200,
-            "tile_size": [100, 100]
-        },
-        "hysteresis": {
-            "current_target_bonus": 0.15,
-            "coverage_delta_threshold": 0.05,
-            "position_delta_threshold": 30
-        }
+    "greedy_ig": {
+        "_comment": "Greedy IG baseline planner settings (single-step lookahead)",
+        "intent_discount": 0.5,
+        "overlap_penalty_weight": 0.3
+    },
+
+    "dec_mcts": {
+        "_comment": "Dec-MCTS planner settings (single-level MCTS, multi-agent)",
+        "horizon": 10,
+        "iterations": 100,
+        "ucb_c": 1.4,
+        "discount_factor": 0.95,
+        "overlap_penalty_weight": 0.3,
+        "timeout": 5.0,
+        "parallel": 1
+    },
+
+    "hierarchical_dec_mcts": {
+        "_comment": "Multi-Horizon Dec-MCTS (alias: mh_dec_mcts) - LLP + HLP hierarchy",
+        "llp_horizon": 5,
+        "llp_iterations": 50,
+        "hlp_horizon": 3,
+        "hlp_iterations": 30,
+        "tile_size": [100, 100],
+        "hlp_replan_interval": 1.0
     },
 
     "belief": {
@@ -67,7 +70,8 @@
         "lbp": {
             "enabled": true,
             "iterations": 1,
-            "pairwise_potential": [[0.6, 0.4], [0.4, 0.6]]
+            "pairwise_potential_type": "equal",
+            "_pairwise_options": "equal (0.5/0.5), biased (0.7/0.3), adaptive (computed from observations)"
         },
         "news_mode": "BM"
     },

@@ -607,13 +607,38 @@ def plot_terrain(
 
 
 def _draw_regions_on_axis(ax, region_metadata, selected_region_id, region_scores):
-    """Helper function to draw region visualization on an axis."""
-    # Get top 5 regions by score (if scores available)
-    top_5_regions = set()
+    """
+    Helper function to draw region visualization on an axis.
+    
+    Regions are colored based on their scores using a red-to-blue colormap:
+    - Red: Low value (low priority regions)
+    - Blue: High value (high priority regions)
+    - Selected region: Highlighted with thick black border
+    
+    Args:
+        ax: Matplotlib axis
+        region_metadata: Dict mapping region_id -> metadata (center, bounds)
+        selected_region_id: ID of currently selected region (highlighted)
+        region_scores: Dict mapping region_id -> score value
+    """
+    import matplotlib.cm as cm
+    from matplotlib.colors import Normalize
+    
+    # Use RdYlBu_r (red-yellow-blue reversed) colormap: red=low, blue=high
+    # Or use coolwarm: blue=low, red=high. Let's use custom red-to-blue
+    cmap = cm.get_cmap('RdYlBu')  # Red (low) -> Yellow -> Blue (high)
+    
+    # Compute score normalization
     if region_scores is not None and len(region_scores) > 0:
-        sorted_regions = sorted(region_scores.items(), key=lambda x: x[1], reverse=True)
-        top_5_regions = {rid for rid, score in sorted_regions[:5]}
-
+        scores = list(region_scores.values())
+        min_score = min(scores)
+        max_score = max(scores)
+        score_range = max_score - min_score if max_score > min_score else 1.0
+        norm = Normalize(vmin=min_score, vmax=max_score)
+    else:
+        norm = None
+        score_range = 1.0
+    
     for region_id, metadata in region_metadata.items():
         center = metadata["center"]
         bounds = metadata["bounds"]
@@ -625,29 +650,36 @@ def _draw_regions_on_axis(ax, region_metadata, selected_region_id, region_scores
         rect_width = col_max - col_min
         rect_height = row_max - row_min
 
-        # Determine color based on selection and ranking
-        if region_id == selected_region_id:
-            edge_color = "red"
-            line_width = 2.5
-            alpha = 0.9
-        elif region_id in top_5_regions:
-            edge_color = "cyan"
-            line_width = 2.0
-            alpha = 0.75
+        # Get score-based color
+        if region_scores is not None and region_id in region_scores:
+            score = region_scores[region_id]
+            normalized_score = norm(score) if norm else 0.5
+            fill_color = cmap(normalized_score)
+            fill_alpha = 0.3 + 0.4 * normalized_score  # Higher score = more visible
         else:
-            edge_color = "yellow"
+            fill_color = 'gray'
+            fill_alpha = 0.2
+        
+        # Determine edge style based on selection
+        if region_id == selected_region_id:
+            edge_color = "black"
+            line_width = 3.0
+            edge_alpha = 1.0
+            fill_alpha = min(0.7, fill_alpha + 0.2)  # Make selected more visible
+        else:
+            edge_color = fill_color
             line_width = 1.5
-            alpha = 0.6
+            edge_alpha = 0.8
 
-        # Draw rectangle (note: ax uses j for x-axis, i for y-axis)
+        # Draw filled rectangle with score-based color
         rect = patches.Rectangle(
             (col_min, row_min),  # (j, i) coordinates
             rect_width,
             rect_height,
             linewidth=line_width,
             edgecolor=edge_color,
-            facecolor="none",
-            alpha=alpha,
+            facecolor=fill_color,
+            alpha=fill_alpha,
         )
         ax.add_patch(rect)
 
@@ -655,15 +687,12 @@ def _draw_regions_on_axis(ax, region_metadata, selected_region_id, region_scores
         center_j = center[1]  # col
         center_i = center[0]  # row
 
-        # Color based on rank
+        # Center marker
         if region_id == selected_region_id:
-            marker_color = "red"
+            marker_color = "black"
             marker_size = 10
-        elif region_id in top_5_regions:
-            marker_color = "cyan"
-            marker_size = 8
         else:
-            marker_color = "yellow"
+            marker_color = fill_color
             marker_size = 6
 
         ax.plot(
@@ -676,37 +705,54 @@ def _draw_regions_on_axis(ax, region_metadata, selected_region_id, region_scores
             alpha=0.9,
         )
 
-        # Add region ID label at center
+        # Add region ID and score label at center
+        if region_scores is not None and region_id in region_scores:
+            score = region_scores[region_id]
+            label_text = f"{region_id}\n{score:.2f}"
+        else:
+            label_text = str(region_id)
+        
         if region_id == selected_region_id:
-            label_facecolor = "red"
+            label_facecolor = "black"
             label_fontsize = 9
             label_weight = "bold"
-        elif region_id in top_5_regions:
-            label_facecolor = "blue"
-            label_fontsize = 8
-            label_weight = "bold"
+            text_color = "white"
         else:
-            label_facecolor = "gray"
+            # Use contrasting text color based on fill brightness
+            if norm and region_id in region_scores:
+                brightness = norm(region_scores[region_id])
+                text_color = "white" if brightness > 0.5 else "black"
+            else:
+                text_color = "white"
+            label_facecolor = fill_color
             label_fontsize = 7
             label_weight = "normal"
 
         ax.text(
             center_j,
-            center_i + rect_height * 0.1,
-            str(region_id),
-            color="white",
+            center_i + rect_height * 0.15,
+            label_text,
+            color=text_color,
             fontsize=label_fontsize,
             ha="center",
             va="center",
             weight=label_weight,
             bbox=dict(
-                boxstyle="round,pad=0.4",
+                boxstyle="round,pad=0.3",
                 facecolor=label_facecolor,
-                alpha=0.8,
-                edgecolor="white",
+                alpha=0.85,
+                edgecolor="white" if region_id == selected_region_id else "none",
                 linewidth=1,
             ),
         )
+    
+    # Add colorbar if scores are available
+    if region_scores is not None and len(region_scores) > 0:
+        sm = cm.ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])
+        cbar = plt.colorbar(sm, ax=ax, shrink=0.6, pad=0.02)
+        cbar.set_label('Region Score', fontsize=8)
+        cbar.ax.tick_params(labelsize=7)
 
 
 def plot_metrics(

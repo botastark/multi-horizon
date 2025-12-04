@@ -41,8 +41,8 @@ class planning:
             "horizon_weights": mcts_params.get("horizon_weights", {}),
         }
 
-        # Logging configuration for dual-horizon
-        self.log_dir = "logs/dual_horizon"
+        # Logging configuration
+        self.log_dir = "logs"
         self.experiment_name = None
 
     def set_experiment_info(self, experiment_name: str, log_dir: str = None):
@@ -52,41 +52,22 @@ class planning:
             self.log_dir = log_dir
 
     def finalize_episode(self):
-        """Finalize episode and log statistics for dual-horizon planner."""
-        if self.strategy == "dual_horizon" and hasattr(self, "_dual_horizon_planner"):
-            state = {
-                "covered_mask": getattr(self, "covered_mask", None),
-                "belief": self.M.copy(),
-            }
-            self._dual_horizon_planner.finalize_episode(state)
+        """Finalize episode and log statistics for planners."""
+        # Log Dec-MCTS stats
+        if self.strategy == "dec_mcts" and hasattr(self, "_dec_mcts_planner"):
+            stats = self._dec_mcts_planner.get_statistics()
+            print(f"\n[DEC-MCTS] Final Stats for Agent {self.agent_id}:")
+            print(f"  Plans generated: {stats['plans_generated']}")
+            print(f"  Total iterations: {stats['total_iterations']}")
+            print(f"  Avg planning time: {stats['avg_planning_time']*1000:.1f}ms")
+            print(f"  Intent updates received: {stats['intent_updates_received']}\n")
 
-        # Stop threaded planner workers
-        if self.strategy == "threaded_dual_horizon" and hasattr(
-            self, "_threaded_dual_horizon_planner"
-        ):
-            self._threaded_dual_horizon_planner.stop()
-            # Print final stats
-            stats = self._threaded_dual_horizon_planner.get_statistics()
-            print(f"\n[THREADED] Final Stats:")
-            print(f"  Total steps: {stats.get('step_count', 0)}")
-            if "llp" in stats:
-                print(
-                    f"  LLP: {stats['llp']['step_count']} steps, "
-                    f"avg planning time: {stats['llp']['avg_planning_time']*1000:.1f}ms"
-                )
-            if "hlp" in stats:
-                print(
-                    f"  HLP: {stats['hlp']['replan_count']} replans, "
-                    f"avg planning time: {stats['hlp']['avg_planning_time']*1000:.1f}ms"
-                )
-            print(f"  Bus stats: {stats.get('bus_stats', {})}\n")
-
-        # Log hierarchical Dec-MCTS stats
-        if self.strategy == "hierarchical_dec_mcts" and hasattr(
+        # Log Multi-Horizon Dec-MCTS stats (also supports "mh_dec_mcts" alias)
+        if self.strategy in ("hierarchical_dec_mcts", "mh_dec_mcts") and hasattr(
             self, "_hierarchical_planner"
         ):
             stats = self._hierarchical_planner.get_statistics()
-            print(f"\n[HIERARCHICAL DEC-MCTS] Final Stats for Agent {self.agent_id}:")
+            print(f"\n[MH DEC-MCTS] Final Stats for Agent {self.agent_id}:")
             print(f"  Planning cycles: {stats['hierarchical']['planning_cycles']}")
             print(
                 f"  LL intents broadcast: {stats['hierarchical']['ll_intents_broadcast']}"
@@ -101,6 +82,14 @@ class planning:
                 f"  HLP: plans={stats['hlp']['plans_generated']}, intent_updates={stats['hlp']['intent_updates_received']}"
             )
             print(f"  Intent Bus: {stats['intent_bus']}\n")
+
+        # Log Greedy IG stats
+        if self.strategy == "greedy_ig" and hasattr(self, "_greedy_ig_planner"):
+            stats = self._greedy_ig_planner.get_statistics()
+            print(f"\n[GREEDY IG] Final Stats for Agent {self.agent_id}:")
+            print(f"  Plans generated: {stats['plans_generated']}")
+            print(f"  Total IG: {stats['total_ig']:.4f}")
+            print(f"  Intent updates received: {stats['intent_updates_received']}\n")
 
     def reset(self, conf_dict=None):
         """Reset UAV and planning state, and reinitialize the belief map."""
@@ -211,6 +200,115 @@ class planning:
         self.last_action = next_action
         return next_action, info_gain_action
 
+    def greedy_ig_decision(self):
+        """
+        Run greedy IG planning with multi-agent support.
+
+        This is the paper's baseline: single-step lookahead IG with
+        teammate overlap avoidance. Used as benchmark against MH methods.
+
+        Features:
+        - Single-step IG computation
+        - Teammate intent sharing via coordinator
+        - Overlap penalty for coordination
+        - Compatible with async execution
+
+        Returns:
+            Tuple of (selected_action, action_scores_dict)
+        """
+        from greedy_ig_planner import (
+            GreedyIGPlanner,
+            GreedyIGCoordinator,
+            log_greedy_ig_decision,
+            create_greedy_ig_planner,
+        )
+
+        # Create or get greedy IG planner
+        if not hasattr(self, "_greedy_ig_planner"):
+            # Check if coordinator has a shared greedy IG coordinator
+            greedy_coordinator = None
+            if self.coordinator is not None:
+                if not hasattr(self.coordinator, "_greedy_ig_coordinator"):
+                    num_agents = getattr(self.coordinator, "num_agents", 1)
+                    self.coordinator._greedy_ig_coordinator = GreedyIGCoordinator(
+                        num_agents=num_agents
+                    )
+                greedy_coordinator = self.coordinator._greedy_ig_coordinator
+
+            # Extract config
+            greedy_config = (
+                self.conf_dict.get("greedy_ig", {}) if self.conf_dict else {}
+            )
+            dec_config = (
+                self.conf_dict.get("decentralized", {}) if self.conf_dict else {}
+            )
+
+            config = {
+                "intent_discount": greedy_config.get("intent_discount", 0.5),
+                "overlap_penalty_weight": dec_config.get(
+                    "overlap_penalty_weight",
+                    greedy_config.get("overlap_penalty_weight", 0.3),
+                ),
+            }
+
+            self._greedy_ig_planner = create_greedy_ig_planner(
+                agent_id=self.agent_id,
+                camera=self.uav,
+                grid_info=self.uav.grid,
+                conf_dict=self.conf_dict,
+                config=config,
+            )
+            self._greedy_ig_coordinator = greedy_coordinator
+
+            print(f"\n[GREEDY IG] Agent {self.agent_id} initialized")
+            print(f"  Overlap penalty weight: {config['overlap_penalty_weight']}\n")
+
+        planner = self._greedy_ig_planner
+
+        # Update belief
+        planner.update_belief(self.M.copy())
+
+        # Get teammate intents
+        if self._greedy_ig_coordinator is not None:
+            teammate_intents = self._greedy_ig_coordinator.get_teammate_intents(
+                self.agent_id
+            )
+            planner.update_teammate_intents(teammate_intents)
+        else:
+            teammate_intents = {}
+
+        # Get current position
+        uav_pos = self.uav.get_x()
+
+        # Run planning
+        intent = planner.plan(
+            current_position=uav_pos.position,
+            current_altitude=uav_pos.altitude,
+        )
+
+        # Share intent with coordinator
+        if self._greedy_ig_coordinator is not None:
+            self._greedy_ig_coordinator.share_intent(intent)
+
+        # Log decision
+        log_greedy_ig_decision(
+            agent_id=self.agent_id,
+            step=planner._stats["plans_generated"],
+            raw_ig_scores=planner._raw_ig_scores,
+            overlap_penalties=planner._overlap_penalties,
+            final_scores=planner._action_scores,
+            selected_action=intent.action,
+            intents_received={
+                "teammates": list(teammate_intents.keys()),
+            },
+        )
+
+        # Get action and scores
+        action = intent.action
+        action_scores = planner.get_action_scores()
+
+        return action, action_scores
+
     def select_action(self, belief, visited_x):
         """Select the next UAV action based on the current belief and the chosen strategy."""
         self.M = belief
@@ -220,173 +318,174 @@ class planning:
             return self.sweep(permitted_actions, visited_x)
         elif self.strategy == "mcts":
             return self.mcts_based()
-        elif self.strategy == "dual_horizon":
-            # Use dual-horizon planner
-            return self.dual_horizon_decision()
-        elif self.strategy == "threaded_dual_horizon":
-            # Use threaded dual-horizon planner with async LLP/HLP
-            return self.threaded_dual_horizon_decision()
-        elif self.strategy == "hierarchical_dec_mcts":
-            # Use hierarchical Dec-MCTS with shared beliefs and intents
+        elif self.strategy == "greedy_ig":
+            # Use greedy IG planner (single-step lookahead, multi-agent)
+            return self.greedy_ig_decision()
+        elif self.strategy == "dec_mcts":
+            # Use Dec-MCTS planner (single-level MCTS, multi-agent)
+            return self.dec_mcts_decision()
+        elif self.strategy in ("mh_dec_mcts", "hierarchical_dec_mcts"):
+            # Use Multi-Horizon Dec-MCTS with LLP/HLP hierarchy
             return self.hierarchical_dec_mcts_decision(visited_x)
+        elif self.strategy == "ig":
+            # Legacy single-agent IG (backward compatibility)
+            return self.ig_based(permitted_actions)
 
+        # Default fallback to legacy IG
         return self.ig_based(permitted_actions)
 
-    def dual_horizon_decision(self):
+    def dec_mcts_decision(self):
         """
-        Run dual-horizon planning that combines short-horizon IG exploitation
-        with long-horizon coverage optimization to avoid fragmentation.
+        Run Dec-MCTS planning (single-level MCTS with multi-agent support).
+
+        This is a flat MCTS planner without the LLP/HLP hierarchy:
+        - Single MCTS tree for action selection
+        - Intent sharing for decentralized coordination
+        - D-UCT discounting for async operation
+        - IG-based rollout rewards
+
+        Use as comparison between greedy IG and multi-horizon planning.
 
         Returns:
-            Tuple of (selected_action, metrics_dict)
+            Tuple of (selected_action, action_scores)
         """
-        from dual_horizon_planner import DualHorizonPlanner, setup_dual_horizon_logger
+        from dec_mcts import (
+            DecMCTSPlanner,
+            DecMCTSCoordinator,
+            log_dec_mcts_decision,
+            setup_dec_mcts_logger,
+        )
 
         # Initialize logger on first call
-        if not hasattr(self, "_dual_horizon_logger_initialized"):
-            log_dir = getattr(self, "log_dir", "logs/dual_horizon")
+        if not hasattr(self, "_dec_mcts_logger_initialized"):
+            log_dir = getattr(self, "log_dir", "logs/dec_mcts")
             exp_name = getattr(self, "experiment_name", None)
             import os
 
             os.makedirs(log_dir, exist_ok=True)
-            log_file = setup_dual_horizon_logger(
-                log_dir=log_dir, experiment_name=exp_name
+            log_file = setup_dec_mcts_logger(log_dir=log_dir, experiment_name=exp_name)
+            print(f"\n[DEC-MCTS] Logging to: {log_file}\n")
+            self._dec_mcts_logger_initialized = True
+
+        # Create or get Dec-MCTS planner
+        if not hasattr(self, "_dec_mcts_planner"):
+            # Check if coordinator has a shared Dec-MCTS coordinator
+            dec_mcts_coordinator = None
+            if self.coordinator is not None:
+                if not hasattr(self.coordinator, "_dec_mcts_coordinator"):
+                    num_agents = getattr(self.coordinator, "num_agents", 1)
+                    self.coordinator._dec_mcts_coordinator = DecMCTSCoordinator(
+                        num_agents=num_agents
+                    )
+                dec_mcts_coordinator = self.coordinator._dec_mcts_coordinator
+
+            # Extract config
+            dec_mcts_config = (
+                self.conf_dict.get("dec_mcts", {}) if self.conf_dict else {}
             )
-            print(f"\n[DUAL HORIZON] Logging to: {log_file}\n")
-            self._dual_horizon_logger_initialized = True
-
-        # Build state dict for dual-horizon planner
-        state = {
-            "uav_pos": self.uav.get_x(),
-            "belief": self.M.copy(),
-            "covered_mask": getattr(self, "covered_mask", None),
-        }
-
-        # Initialize covered_mask if not present
-        if state["covered_mask"] is None:
-            H_dim, W_dim = self.M.shape[:2]
-            state["covered_mask"] = np.zeros((H_dim, W_dim), dtype=bool)
-            self.covered_mask = state["covered_mask"]
-
-        # Get horizon weights from mcts_params
-        horizon_weights = self.mcts_params.get("horizon_weights", {})
-
-        # Create or reuse dual-horizon planner
-        if not hasattr(self, "_dual_horizon_planner"):
-            self._dual_horizon_planner = DualHorizonPlanner(
-                uav_camera=self.uav,
-                conf_dict=self.conf_dict,
-                mcts_params=self.mcts_params,
-                horizon_weights=horizon_weights,
+            dec_config = (
+                self.conf_dict.get("decentralized", {}) if self.conf_dict else {}
             )
+            d_uct_config = dec_config.get("d_uct", {})
 
-        planner = self._dual_horizon_planner
+            config = {
+                "horizon": dec_mcts_config.get(
+                    "horizon", self.mcts_params.get("planning_depth", 10)
+                ),
+                "iterations": dec_mcts_config.get(
+                    "iterations", self.mcts_params.get("num_iterations", 100)
+                ),
+                "ucb_c": dec_mcts_config.get(
+                    "ucb_c", self.mcts_params.get("ucb1_c", 1.4)
+                ),
+                "discount_factor": dec_mcts_config.get(
+                    "discount_factor", self.mcts_params.get("discount_factor", 0.95)
+                ),
+                "overlap_penalty_weight": dec_config.get("overlap_penalty_weight", 0.3),
+                "d_uct_decay": d_uct_config.get("decay_factor", 0.9),
+                "d_uct_threshold": d_uct_config.get("threshold_sec", 2.0),
+                "parallel": dec_mcts_config.get(
+                    "parallel", self.mcts_params.get("parallel", 1)
+                ),
+                "timeout": dec_mcts_config.get(
+                    "timeout", self.mcts_params.get("timeout", 5.0)
+                ),
+            }
 
-        # Run dual-horizon planning
-        action, metrics = planner.select_action(state, strategy="dual")
-
-        # Update covered_mask based on chosen action
-        x_future = uav_position(self.uav.x_future(action))
-        [[imin, imax], [jmin, jmax]] = self.uav.get_range(
-            position=x_future.position, altitude=x_future.altitude, index_form=True
-        )
-        self.covered_mask[imin:imax, jmin:jmax] = True
-
-        # Return action and scores (combined_scores or action_scores)
-        scores = metrics.get("combined_scores", metrics.get("action_scores", {}))
-
-        return action, scores
-
-    def threaded_dual_horizon_decision(self):
-        """
-        Run threaded dual-horizon planning with async LLP/HLP workers
-        communicating via an intent bus.
-
-        This provides better responsiveness as HLP runs in the background
-        while LLP makes real-time decisions.
-
-        Returns:
-            Tuple of (selected_action, metrics_dict)
-        """
-        from threaded_dual_horizon import (
-            ThreadedDualHorizonPlanner,
-            setup_dual_horizon_logger,
-        )
-        from dual_horizon_planner import setup_dual_horizon_logger
-
-        # Initialize logger on first call
-        if not hasattr(self, "_threaded_dual_horizon_logger_initialized"):
-            log_dir = getattr(self, "log_dir", "logs/dual_horizon")
-            exp_name = f"threaded_{getattr(self, 'experiment_name', 'default')}"
-            import os
-
-            os.makedirs(log_dir, exist_ok=True)
-            log_file = setup_dual_horizon_logger(
-                log_dir=log_dir, experiment_name=exp_name
-            )
-            print(f"\n[THREADED DUAL HORIZON] Logging to: {log_file}\n")
-            self._threaded_dual_horizon_logger_initialized = True
-
-        # Build state dict for threaded planner
-        state = {
-            "uav_pos": self.uav.get_x(),
-            "belief": self.M.copy(),
-            "covered_mask": getattr(self, "covered_mask", None),
-        }
-
-        # Initialize covered_mask if not present
-        if state["covered_mask"] is None:
-            H_dim, W_dim = self.M.shape[:2]
-            state["covered_mask"] = np.zeros((H_dim, W_dim), dtype=bool)
-            self.covered_mask = state["covered_mask"]
-
-        # Create or reuse threaded planner
-        if not hasattr(self, "_threaded_dual_horizon_planner"):
-            self._threaded_dual_horizon_planner = ThreadedDualHorizonPlanner(
-                uav_camera=self.uav,
-                conf_dict=self.conf_dict,
-                mcts_params=self.mcts_params,
-                initial_state=state,
+            self._dec_mcts_planner = DecMCTSPlanner(
                 agent_id=self.agent_id,
-                coordinator=self.coordinator,
+                camera=self.uav,
+                grid_info=self.uav.grid,
+                conf_dict=self.conf_dict,
+                config=config,
             )
-            # Start the worker threads
-            self._threaded_dual_horizon_planner.start(state)
+            self._dec_mcts_coordinator = dec_mcts_coordinator
 
-        planner = self._threaded_dual_horizon_planner
-
-        # Run threaded planning
-        action, metrics = planner.select_action(state, strategy="dual")
-
-        # Update covered_mask based on chosen action
-        x_future = uav_position(self.uav.x_future(action))
-        [[imin, imax], [jmin, jmax]] = self.uav.get_range(
-            position=x_future.position, altitude=x_future.altitude, index_form=True
-        )
-        self.covered_mask[imin:imax, jmin:jmax] = True
-
-        # Print threading stats periodically
-        if metrics.get("llp_step_count", 0) % 10 == 0:
-            stats = planner.get_statistics()
+            print(f"\n[DEC-MCTS] Agent {self.agent_id} initialized")
+            print(f"  Horizon: {config['horizon']}, Iterations: {config['iterations']}")
             print(
-                f"\n[THREADED] Stats: LLP steps={stats.get('llp', {}).get('step_count', 0)}, "
-                f"HLP replans={stats.get('hlp', {}).get('replan_count', 0)}, "
-                f"Bus msgs={stats.get('bus_stats', {})}\n"
+                f"  D-UCT decay: {config['d_uct_decay']}, threshold: {config['d_uct_threshold']}s\n"
             )
 
-        # Return action and scores
-        scores = metrics.get("blended_scores", metrics.get("action_scores", {}))
+        planner = self._dec_mcts_planner
 
-        return action, scores
+        # Update state
+        uav_pos = self.uav.get_x()
+        planner.update_state(
+            position=uav_pos.position,
+            altitude=uav_pos.altitude,
+            belief=self.M.copy(),
+        )
+
+        # Get teammate intents
+        if self._dec_mcts_coordinator is not None:
+            teammate_intents = self._dec_mcts_coordinator.get_teammate_intents(
+                self.agent_id
+            )
+            planner.update_teammate_intents(teammate_intents)
+        else:
+            teammate_intents = {}
+
+        # Run planning
+        intent = planner.plan()
+
+        # Share intent with coordinator
+        if self._dec_mcts_coordinator is not None:
+            self._dec_mcts_coordinator.share_intent(intent)
+
+        # Log decision
+        stats = planner.get_statistics()
+        log_dec_mcts_decision(
+            agent_id=self.agent_id,
+            step=stats["plans_generated"],
+            mcts_action_values=planner.get_action_values(),
+            mcts_action_visits=planner.get_action_visits(),
+            selected_action=(
+                intent.action_sequence[0] if intent.action_sequence else "hover"
+            ),
+            trajectory_summary={
+                "length": len(intent.action_sequence),
+                "total_ig": intent.total_expected_ig,
+            },
+            intents_received={"teammates": list(teammate_intents.keys())},
+        )
+
+        # Build action scores from MCTS values
+        action_scores = planner.get_action_values()
+
+        action = intent.action_sequence[0] if intent.action_sequence else "hover"
+        return action, action_scores
 
     def hierarchical_dec_mcts_decision(self, visited_x):
         """
-        Run hierarchical Dec-MCTS planning with shared beliefs and intents.
+        Run Multi-Horizon Dec-MCTS planning with shared beliefs and intents.
 
-        Implements the Dec-MCTS framework from the Multi-Horizon paper:
+        Implements the full MH Dec-MCTS framework from the Multi-Horizon paper:
         - Two-level planning (LLP + HLP) per agent
         - Asynchronous intent sharing between agents
         - Reward decomposition: g = g1(LL intents) + g2(all intents)
+
+        Also known as "mh_dec_mcts" strategy.
 
         Args:
             visited_x: List of visited positions

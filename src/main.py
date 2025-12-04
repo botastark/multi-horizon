@@ -307,42 +307,19 @@ def run_single_agent_experiment(
         camera.set_position(uav_pos.position)
 
         if ENABLE_STEPWISE_PLOTTING:
+            # Get region metadata from hierarchical planners
             region_metadata = None
             selected_region_id = None
             region_scores = None
 
-            if action_strategy == "dual_horizon" and hasattr(
-                planner, "_dual_horizon_planner"
+            if action_strategy in ("mh_dec_mcts", "hierarchical_dec_mcts") and hasattr(
+                planner, "_hierarchical_planner"
             ):
-                if hasattr(planner._dual_horizon_planner, "current_region_metadata"):
-                    region_metadata = (
-                        planner._dual_horizon_planner.current_region_metadata
-                    )
-                    selected_region_id = getattr(
-                        planner._dual_horizon_planner, "current_selected_region", None
-                    )
-                    region_scores = getattr(
-                        planner._dual_horizon_planner, "current_region_scores", None
-                    )
-            elif action_strategy == "threaded_dual_horizon" and hasattr(
-                planner, "_threaded_dual_horizon_planner"
-            ):
-                if hasattr(
-                    planner._threaded_dual_horizon_planner, "current_region_metadata"
-                ):
-                    region_metadata = (
-                        planner._threaded_dual_horizon_planner.current_region_metadata
-                    )
-                    selected_region_id = getattr(
-                        planner._threaded_dual_horizon_planner,
-                        "current_selected_region",
-                        None,
-                    )
-                    region_scores = getattr(
-                        planner._threaded_dual_horizon_planner,
-                        "current_region_scores",
-                        None,
-                    )
+                hp = planner._hierarchical_planner
+                if hasattr(hp, "current_region_metadata"):
+                    region_metadata = hp.current_region_metadata
+                    selected_region_id = getattr(hp, "current_selected_region", None)
+                    region_scores = getattr(hp, "current_region_scores", None)
 
             plot_terrain(
                 f"{results_folder}/{corr_type}_{action_strategy}_e{e_margin}_r{grf_r}/{iter_idx}/steps/step_{step}.png",
@@ -431,6 +408,9 @@ def run_async_multi_agent(
         drop_probability=async_config.get("drop_probability", 0.0),
     )
 
+    # Set coordinator for collision avoidance and belief fusion
+    async_runner.set_coordinator(coordinator)
+
     # Add agents to the async runner
     for agent in agents:
         agent_id = agent["agent_id"]
@@ -443,6 +423,7 @@ def run_async_multi_agent(
             initial_position=agent["uav_pos"].position,
             initial_altitude=agent["uav_pos"].altitude,
             config=config,
+            coordinator=coordinator,
         )
 
     # Checkpoint callback for logging and visualization
@@ -891,8 +872,15 @@ def run_multi_agent_experiment(
                 # Get proposed position for each action
                 best_action = next_action
                 best_score = float("-inf")
+                
+                # Get max IG for normalization
+                valid_scores = [s for s in info_gain_action.values() if isinstance(s, (int, float))]
+                max_ig = max(valid_scores) if valid_scores else 1.0
+                max_ig = max(max_ig, 1.0)  # Ensure minimum scale
 
                 for action, ig_score in info_gain_action.items():
+                    if not isinstance(ig_score, (int, float)):
+                        continue
                     proposed_state = camera.x_future(action)
                     if proposed_state is None:
                         continue
@@ -903,13 +891,15 @@ def run_multi_agent_experiment(
                         camera.grid.center,
                     )
 
-                    # Get collision penalty
+                    # Get collision penalty (0-1 range)
                     penalty = coordinator.get_collision_penalty(
                         agent_id, (proposed_row, proposed_col)
                     )
 
-                    # Adjusted score = IG - collision_penalty
-                    adjusted_score = ig_score - penalty * 0.5
+                    # Adjusted score = IG - collision_penalty * max_ig * weight
+                    # This ensures collision penalty has meaningful impact regardless of IG magnitude
+                    collision_weight = config.get("agents", {}).get("collision_penalty_weight", 1.0)
+                    adjusted_score = ig_score - penalty * max_ig * collision_weight
 
                     if adjusted_score > best_score:
                         best_score = adjusted_score
@@ -969,26 +959,15 @@ def run_multi_agent_experiment(
             region_scores = None
             first_planner = agents[0]["planner"]
 
-            if action_strategy == "threaded_dual_horizon" and hasattr(
-                first_planner, "_threaded_dual_horizon_planner"
+            # Get region data from hierarchical planner (mh_dec_mcts)
+            if action_strategy in ("mh_dec_mcts", "hierarchical_dec_mcts") and hasattr(
+                first_planner, "_hierarchical_planner"
             ):
-                if hasattr(
-                    first_planner._threaded_dual_horizon_planner,
-                    "current_region_metadata",
-                ):
-                    region_metadata = (
-                        first_planner._threaded_dual_horizon_planner.current_region_metadata
-                    )
-                    selected_region_id = getattr(
-                        first_planner._threaded_dual_horizon_planner,
-                        "current_selected_region",
-                        None,
-                    )
-                    region_scores = getattr(
-                        first_planner._threaded_dual_horizon_planner,
-                        "current_region_scores",
-                        None,
-                    )
+                hp = first_planner._hierarchical_planner
+                if hasattr(hp, "current_region_metadata"):
+                    region_metadata = hp.current_region_metadata
+                    selected_region_id = getattr(hp, "current_selected_region", None)
+                    region_scores = getattr(hp, "current_region_scores", None)
 
             # Get observation data from first agent for plotting
             first_agent_obs = agent_observations.get(0, {})
@@ -1009,33 +988,10 @@ def run_multi_agent_experiment(
                 agent_selected_region = None
                 agent_region_scores = None
 
-                if action_strategy == "dual_horizon" and hasattr(
-                    agent_planner, "_dual_horizon_planner"
-                ):
-                    dhp = agent_planner._dual_horizon_planner
-                    if hasattr(dhp, "current_region_metadata"):
-                        agent_region_metadata = dhp.current_region_metadata
-                        agent_selected_region = getattr(
-                            dhp, "current_selected_region", None
-                        )
-                        agent_region_scores = getattr(
-                            dhp, "current_region_scores", None
-                        )
-                elif action_strategy == "threaded_dual_horizon" and hasattr(
-                    agent_planner, "_threaded_dual_horizon_planner"
-                ):
-                    tdhp = agent_planner._threaded_dual_horizon_planner
-                    if hasattr(tdhp, "current_region_metadata"):
-                        agent_region_metadata = tdhp.current_region_metadata
-                        agent_selected_region = getattr(
-                            tdhp, "current_selected_region", None
-                        )
-                        agent_region_scores = getattr(
-                            tdhp, "current_region_scores", None
-                        )
-                elif action_strategy == "hierarchical_dec_mcts" and hasattr(
-                    agent_planner, "_hierarchical_planner"
-                ):
+                if action_strategy in (
+                    "mh_dec_mcts",
+                    "hierarchical_dec_mcts",
+                ) and hasattr(agent_planner, "_hierarchical_planner"):
                     hdp = agent_planner._hierarchical_planner
                     if hasattr(hdp, "current_region_metadata"):
                         agent_region_metadata = hdp.current_region_metadata
