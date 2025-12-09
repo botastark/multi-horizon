@@ -27,11 +27,23 @@ from multi_agent_coordinator import (
 )
 from async_runner import AsyncMultiAgentRunner, create_async_runner_from_config
 
-# from new_camera import Camera  # Updated import for new camera model
-from viewer import plot_metrics, plot_terrain, plot_terrain_2d
+from viewer import plot_metrics, plot_terrain
 
 from helper import create_run_folder, make_param_tag
 from config_loader import load_config  # Use new config loader with backward compat
+from experiment_utils import (
+    initialize_agent,
+    compute_agent_metrics,
+    update_agent_observation,
+    compute_multi_agent_fused_metrics,
+    finalize_planners,
+    get_results_folder,
+    process_agent_observations,
+    perform_belief_fusion,
+    select_agent_actions,
+    update_agent_positions,
+    extract_region_metadata,
+)
 
 import matplotlib
 
@@ -227,7 +239,8 @@ def run_single_agent_experiment(
             grid=grid_info,
             init_x=uav_pos,
             r=grf_r,
-            n_agent=iter_idx,
+            iteration=iter_idx,
+            num_agents=1,
             e=e_margin,
             conf_dict=conf_dict,
             header_extras=[("mcts_params", json.dumps(mcts_params, sort_keys=True))],
@@ -308,18 +321,9 @@ def run_single_agent_experiment(
 
         if ENABLE_STEPWISE_PLOTTING:
             # Get region metadata from hierarchical planners
-            region_metadata = None
-            selected_region_id = None
-            region_scores = None
-
-            if action_strategy in ("mh_dec_mcts", "hierarchical_dec_mcts") and hasattr(
-                planner, "_hierarchical_planner"
-            ):
-                hp = planner._hierarchical_planner
-                if hasattr(hp, "current_region_metadata"):
-                    region_metadata = hp.current_region_metadata
-                    selected_region_id = getattr(hp, "current_selected_region", None)
-                    region_scores = getattr(hp, "current_region_scores", None)
+            region_metadata, selected_region_id, region_scores = (
+                extract_region_metadata(planner, action_strategy)
+            )
 
             plot_terrain(
                 f"{results_folder}/{corr_type}_{action_strategy}_e{e_margin}_r{grf_r}/{iter_idx}/steps/step_{step}.png",
@@ -564,7 +568,7 @@ def run_multi_agent_experiment(
     Agents coordinate through the MultiAgentCoordinator.
     """
     ma_config = config.get("multi_agent", {})
-    num_agents = ma_config.get("num_agents", 1)
+    num_agents = config.get("num_agents", ma_config.get("num_agents", 1))
     start_position = config.get("start_position", "corner")
 
     print(f"\n{'='*60}")
@@ -592,58 +596,27 @@ def run_multi_agent_experiment(
     # Initialize per-agent state
     agents = []
     for agent_id in range(num_agents):
-        # Create camera for this agent
-        camera = Camera(
-            grid_info,
-            60,
-            rng=np.random.default_rng(seed + agent_id),
-            camera_altitude=min_alt,
-            f_overlap=overlap,
-            s_overlap=overlap,
-        )
+        start_pos = start_positions[agent_id]
 
-        # Create planner for this agent (with coordinator for decentralized HLP)
-        agent_planner = planning(
-            grid_info,
-            camera,
-            action_strategy,
-            conf_dict=conf_dict,
-            optimal_alt=optimal_alt,
-            mcts_params=mcts_params,
+        agent_state = initialize_agent(
             agent_id=agent_id,
+            grid_info=grid_info,
+            start_position=start_pos,
+            action_strategy=action_strategy,
+            conf_dict=conf_dict,
+            corr_type=corr_type,
+            mcts_params=mcts_params,
+            optimal_alt=optimal_alt,
+            min_alt=min_alt,
+            overlap=overlap,
+            seed=seed,
             coordinator=coordinator,
         )
-
-        # Initialize UAV position
-        start_pos = start_positions[agent_id]
-        uav_pos = uav_position((start_pos, camera.get_hrange()[0]))
-        camera.set_altitude(uav_pos.altitude)
-        camera.set_position(uav_pos.position)
-
-        # Create occupancy map for this agent
-        occupancy_map = OM(
-            grid_info.shape, conf_dict=conf_dict, correlation_type=corr_type
-        )
-
-        agent_state = {
-            "agent_id": agent_id,
-            "camera": camera,
-            "planner": agent_planner,
-            "occupancy_map": occupancy_map,
-            "uav_pos": uav_pos,
-            "uav_positions": [uav_pos],
-            "actions": [],
-            "belief_map": np.full((grid_info.shape[0], grid_info.shape[1], 2), 0.5),
-            "observed_ids": set(),
-            "entropy": [],
-            "mse": [],
-            "coverage": [],
-            "height": [],
-            "info_gain_action": {},
-        }
         agents.append(agent_state)
 
         # Update coordinator with initial position
+        camera = agent_state["camera"]
+        uav_pos = agent_state["uav_pos"]
         current_row, current_col = camera.convert_xy_ij(
             uav_pos.position[0], uav_pos.position[1], camera.grid.center
         )
@@ -670,12 +643,12 @@ def run_multi_agent_experiment(
             grid=grid_info,
             init_x=init_positions,
             r=grf_r,
-            n_agent=num_agents,
+            iteration=iter_idx,
+            num_agents=num_agents,
             e=e_margin,
             conf_dict=conf_dict,
             filename=f"multi_agent_iter{iter_idx}.log",
             multi_agent=True,
-            num_agents=num_agents,
             header_extras=[
                 ("mcts_params", json.dumps(mcts_params, sort_keys=True)),
             ],
@@ -734,50 +707,10 @@ def run_multi_agent_experiment(
     ):
         # =====================================================================
         # PHASE 1: All agents observe and update local belief (SYNCHRONOUS)
-        # Each agent:
-        #   1. Gets observation from environment
-        #   2. Updates local OG belief
-        #   3. Runs local LBP propagation (decentralized within their view)
         # =====================================================================
-        agent_observations = {}  # Store observations for Phase 2
-
-        for agent in agents:
-            agent_id = agent["agent_id"]
-            camera = agent["camera"]
-            occupancy_map = agent["occupancy_map"]
-            uav_pos = agent["uav_pos"]
-            belief_map = agent["belief_map"]
-
-            # Process any pending coordination messages from previous step
-            coordinator.process_messages(agent_id)
-
-            # Get observations
-            sigmas = None
-            if conf_dict is not None:
-                s0, s1 = conf_dict[np.round(uav_pos.altitude, decimals=2)]
-                sigmas = [s0, s1]
-
-            fp_vertices_ij, submap = map_obj.get_observations(uav_pos, sigmas)
-
-            # Update local belief with OG (Bayesian update)
-            occupancy_map.update_belief_OG(fp_vertices_ij, submap, uav_pos)
-
-            # Run local LBP propagation (decentralized/async per agent)
-            occupancy_map.propagate_messages(fp_vertices_ij, submap, max_iterations=1)
-
-            # Update agent's belief map
-            belief_map[:, :, 1] = occupancy_map.get_belief().copy()
-            belief_map[:, :, 0] = 1 - belief_map[:, :, 1]
-            agent["belief_map"] = belief_map
-
-            # Store observation info for synchronous fusion
-            agent_observations[agent_id] = {
-                "fp_ij": fp_vertices_ij,
-                "submap": submap,
-                "sigmas": sigmas,
-                "camera": camera,
-                "uav_pos": uav_pos,
-            }
+        agent_observations = process_agent_observations(
+            agents, map_obj, conf_dict, coordinator
+        )
 
         # Log sigmas once at the start (step 0 only)
         if step == 0:
@@ -790,146 +723,17 @@ def run_multi_agent_experiment(
                 print("Sensor model: No sigmas (perfect observations)")
 
         # =====================================================================
-        # PHASE 2: Synchronous News Belief Update + Fusion (Paper-compliant)
-        # Step A: ALL agents update their news beliefs from observations
-        # Step B: ALL agents fuse with their neighbors
-        # This is a CENTRALIZED coordinator pattern where all updates happen
-        # synchronously without message passing. The news_map_beliefs are
-        # shared via coordinator's internal state, not via message bus.
+        # PHASE 2: Synchronous belief fusion across agents
         # =====================================================================
-        if coordinator.lbp_fusion is not None:
-            # Use the coordinator's synchronous fusion method
-            # Step A: Update all news beliefs
-            coordinator.update_all_news(agent_observations)
-
-            # Step B: Fuse all agents with their neighbors
-            coordinator.fuse_all_news()
-
-            # Log fusion stats periodically
-            fusion_stats = coordinator.get_statistics().get("lbp_fusion", {})
-            if step == 0 or step % 20 == 0:
-                print(
-                    f"[Step {step}] Belief Fusion: news_fusions={fusion_stats.get('news_fusions', 0)}, mode={fusion_stats.get('news_mode', 'N/A')}"
-                )
-
-            # IMPORTANT: Feed fused beliefs back to agents for planning
-            # Each agent should use the fused belief (combining info from all agents)
-            # rather than their local belief alone. This enables true belief sharing.
-            for agent in agents:
-                agent_id = agent["agent_id"]
-                fused_belief = coordinator.get_agent_belief(agent_id)
-                if fused_belief is not None:
-                    # Update agent's belief_map with fused version
-                    # belief_map[:, :, 0] = P(free), belief_map[:, :, 1] = P(occupied)
-                    agent["belief_map"][:, :, 1] = fused_belief
-                    agent["belief_map"][:, :, 0] = 1 - fused_belief
-        else:
-            # Fallback to simple belief sharing (weighted averaging)
-            for agent in agents:
-                agent_id = agent["agent_id"]
-                camera = agent["camera"]
-                uav_pos = agent["uav_pos"]
-                belief_map = agent["belief_map"]
-
-                if coordinator.should_coordinate(agent_id):
-                    observed_mask = np.zeros(grid_info.shape, dtype=bool)
-                    [[imin, imax], [jmin, jmax]] = camera.get_range(
-                        position=uav_pos.position,
-                        altitude=uav_pos.altitude,
-                        index_form=True,
-                    )
-                    observed_mask[imin:imax, jmin:jmax] = True
-                    coordinator.share_belief(agent_id, belief_map, observed_mask)
+        perform_belief_fusion(agents, coordinator, agent_observations, grid_info, step)
 
         # =====================================================================
-        # PHASE 3: Compute metrics, select actions, and move (per-agent)
+        # PHASE 3: Compute metrics, select actions, and update positions
         # =====================================================================
-        for agent in agents:
-            agent_id = agent["agent_id"]
-            camera = agent["camera"]
-            planner = agent["planner"]
-            uav_pos = agent["uav_pos"]
-            belief_map = agent["belief_map"]
-
-            # Compute metrics
-            agent["observed_ids"].update(observed_m_ids(camera, uav_pos))
-            entropy_val, mse_val, coverage_val = compute_metrics(
-                ground_truth_map, belief_map, agent["observed_ids"], grid_info
-            )
-            agent["entropy"].append(entropy_val)
-            agent["mse"].append(mse_val)
-            agent["coverage"].append(coverage_val)
-            agent["height"].append(uav_pos.altitude)
-
-            # Select action
-            next_action, info_gain_action = planner.select_action(
-                belief_map, agent["uav_positions"]
-            )
-            agent["info_gain_action"] = info_gain_action
-
-            # Apply collision avoidance penalty
-            if coordinator.collision_distance > 0:
-                # Get proposed position for each action
-                best_action = next_action
-                best_score = float("-inf")
-                
-                # Get max IG for normalization
-                valid_scores = [s for s in info_gain_action.values() if isinstance(s, (int, float))]
-                max_ig = max(valid_scores) if valid_scores else 1.0
-                max_ig = max(max_ig, 1.0)  # Ensure minimum scale
-
-                for action, ig_score in info_gain_action.items():
-                    if not isinstance(ig_score, (int, float)):
-                        continue
-                    proposed_state = camera.x_future(action)
-                    if proposed_state is None:
-                        continue
-                    proposed_pos = uav_position(proposed_state)
-                    proposed_row, proposed_col = camera.convert_xy_ij(
-                        proposed_pos.position[0],
-                        proposed_pos.position[1],
-                        camera.grid.center,
-                    )
-
-                    # Get collision penalty (0-1 range)
-                    penalty = coordinator.get_collision_penalty(
-                        agent_id, (proposed_row, proposed_col)
-                    )
-
-                    # Adjusted score = IG - collision_penalty * max_ig * weight
-                    # This ensures collision penalty has meaningful impact regardless of IG magnitude
-                    collision_weight = config.get("agents", {}).get("collision_penalty_weight", 1.0)
-                    adjusted_score = ig_score - penalty * max_ig * collision_weight
-
-                    if adjusted_score > best_score:
-                        best_score = adjusted_score
-                        best_action = action
-
-                next_action = best_action
-
-            # Log selected action (detailed scoring already logged by planner)
-            print(
-                f"[Agent {agent_id}] Step {step}: action={next_action} | pos=({uav_pos.position[0]:.1f}, {uav_pos.position[1]:.1f})"
-            )
-
-            # Update UAV position
-            uav_pos = uav_position(camera.x_future(next_action))
-            agent["actions"].append(next_action)
-            agent["uav_positions"].append(uav_pos)
-            agent["uav_pos"] = uav_pos
-            camera.set_altitude(uav_pos.altitude)
-            camera.set_position(uav_pos.position)
-
-            # Update coordinator with new position
-            current_row, current_col = camera.convert_xy_ij(
-                uav_pos.position[0], uav_pos.position[1], camera.grid.center
-            )
-            coordinator.update_agent_state(
-                agent_id=agent_id,
-                position=(current_row, current_col),
-                altitude=uav_pos.altitude,
-                coverage=coverage_val,
-            )
+        select_agent_actions(
+            agents, ground_truth_map, grid_info, coordinator, config, step
+        )
+        update_agent_positions(agents, coordinator)
 
         # Stepwise plotting (combines all agents)
         if ENABLE_STEPWISE_PLOTTING:
@@ -954,20 +758,9 @@ def run_multi_agent_experiment(
             display_belief[:, :, 0] = 1 - fused_local
 
             # Get region metadata from first agent's planner
-            region_metadata = None
-            selected_region_id = None
-            region_scores = None
-            first_planner = agents[0]["planner"]
-
-            # Get region data from hierarchical planner (mh_dec_mcts)
-            if action_strategy in ("mh_dec_mcts", "hierarchical_dec_mcts") and hasattr(
-                first_planner, "_hierarchical_planner"
-            ):
-                hp = first_planner._hierarchical_planner
-                if hasattr(hp, "current_region_metadata"):
-                    region_metadata = hp.current_region_metadata
-                    selected_region_id = getattr(hp, "current_selected_region", None)
-                    region_scores = getattr(hp, "current_region_scores", None)
+            region_metadata, selected_region_id, region_scores = (
+                extract_region_metadata(agents[0]["planner"], action_strategy)
+            )
 
             # Get observation data from first agent for plotting
             first_agent_obs = agent_observations.get(0, {})
@@ -984,23 +777,11 @@ def run_multi_agent_experiment(
                 agent_planner = agent["planner"]
 
                 # Get per-agent HLP region data
-                agent_region_metadata = None
-                agent_selected_region = None
-                agent_region_scores = None
-
-                if action_strategy in (
-                    "mh_dec_mcts",
-                    "hierarchical_dec_mcts",
-                ) and hasattr(agent_planner, "_hierarchical_planner"):
-                    hdp = agent_planner._hierarchical_planner
-                    if hasattr(hdp, "current_region_metadata"):
-                        agent_region_metadata = hdp.current_region_metadata
-                        agent_selected_region = getattr(
-                            hdp, "current_selected_region", None
-                        )
-                        agent_region_scores = getattr(
-                            hdp, "current_region_scores", None
-                        )
+                (
+                    agent_region_metadata,
+                    agent_selected_region,
+                    agent_region_scores,
+                ) = extract_region_metadata(agent_planner, action_strategy)
 
                 per_agent_data.append(
                     {
@@ -1108,10 +889,8 @@ def run_multi_agent_experiment(
     # Drain any remaining messages from queues (cleanup old messages)
     coordinator.comm_bus.clear_all_queues()
 
-    # Finalize planners
-    for agent in agents:
-        if hasattr(agent["planner"], "finalize_episode"):
-            agent["planner"].finalize_episode()
+    # Finalize planners using utility function
+    finalize_planners(agents)
 
     # Close logger
     if ENABLE_LOGGING and multi_agent_logger is not None:
@@ -1167,7 +946,7 @@ def main():
     ) = load_global_paths(config)
     # base_dir = create_run_folder(os.path.join(PROJECT_PATH, "results"))
     base_dir = os.path.join(PROJECT_PATH, "trials")
-    run_base = f"{config['field_type'].lower()}_{config['start_position']}"
+    run_base = f"{config['action_strategy']}_{config['field_type'].lower()}_{config['start_position']}"
     if config.get("action_strategy") == "mcts" and config.get("params_in_path", True):
         run_base = run_base + "__" + make_param_tag(config.get("mcts_params", {}))
     results_folder = os.path.join(base_dir, run_base)
@@ -1192,7 +971,7 @@ def main():
 
     # Multi-agent configuration
     ma_config = config.get("multi_agent", {})
-    num_agents = ma_config.get("num_agents", 1)
+    num_agents = config.get("num_agents", ma_config.get("num_agents", 1))
 
     if isinstance(iters, int):
         iters = [0, iters]
@@ -1235,17 +1014,16 @@ def main():
 
         use_sensor_model = True
 
-    seed = 123
-    rng = np.random.default_rng(seed)
+    seed = config.get("seed", 42)
 
     # Create initial camera (for single-agent or field initialization)
     camera1 = Camera(
         grid_info,
         60,
-        rng=rng,
         camera_altitude=min_alt,
         f_overlap=overlap,
         s_overlap=overlap,
+        seed=seed,
     )
     map_obj = Field(
         grid_info,
@@ -1328,6 +1106,7 @@ def main():
                         conf_dict=conf_dict,
                         optimal_alt=optimal_alt,
                         mcts_params=mcts_params,
+                        seed=seed,
                     )
 
                     # Select initial UAV starting position
@@ -1360,6 +1139,12 @@ def main():
                                 (grid_info.x / 2, grid_info.y / 2),
                             ]
                         )
+                    elif start_position == "center":
+                        start_pos = (0.0, 0.0)
+                    else:
+                        raise ValueError(
+                            f"Invalid start_position: {start_position}. Choose from 'edge', 'corner', or 'center'."
+                        )
 
                     uav_pos = uav_position((start_pos, camera1.get_hrange()[0]))
 
@@ -1384,6 +1169,7 @@ def main():
                         mcts_params=mcts_params,
                         action_strategy=action_strategy,
                     )
+                    print("Single-agent experiment completed")
 
                     # Finalize planner
                     if hasattr(planner, "finalize_episode"):

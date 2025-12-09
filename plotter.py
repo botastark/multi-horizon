@@ -20,7 +20,7 @@ def parse_file_to_table(file_path):
     The text file should include metadata (e.g., 'Pairwise', 'Strategy', 'Error margin',
     'Gaussian radius', and optionally a 'confision matrix') as well as a table starting
     with a header that begins with "Step".
-    
+
     Supports multiple experiments in one file separated by timestamp headers [YYYY-MM-DD...].
 
     Parameters:
@@ -34,46 +34,46 @@ def parse_file_to_table(file_path):
     """
     with open(file_path, "r") as file:
         lines = file.readlines()
-    
+
     # Split file into separate experiments based on timestamp markers
     experiments = []
     current_experiment = []
-    
+
     for line in lines:
         # Check if line is a timestamp marker (new experiment)
-        if line.strip().startswith('[') and line.strip().endswith(']') and 'T' in line:
+        if line.strip().startswith("[") and line.strip().endswith("]") and "T" in line:
             if current_experiment:
                 experiments.append(current_experiment)
             current_experiment = [line]
         else:
             current_experiment.append(line)
-    
+
     # Add the last experiment
     if current_experiment:
         experiments.append(current_experiment)
-    
+
     # Parse each experiment separately
     all_dfs = []
     for exp_lines in experiments:
         df = _parse_single_experiment(exp_lines, file_path)
         if df is not None and not df.empty:
             all_dfs.append(df)
-    
+
     # Combine all experiments
     if not all_dfs:
         raise ValueError(f"No valid experiments found in file: {file_path}")
-    
+
     return pd.concat(all_dfs, ignore_index=True)
 
 
 def _parse_single_experiment(lines, file_path):
     """
     Parse a single experiment from lines of text.
-    
+
     Parameters:
     lines (list): Lines of text for one experiment.
     file_path (str): Original file path (for error messages).
-    
+
     Returns:
     pd.DataFrame: Parsed experiment data, or None if parsing fails.
     """
@@ -85,14 +85,20 @@ def _parse_single_experiment(lines, file_path):
     error_margin = None
     confusion_matrix = None
     n_agents = None
-    
+    iteration = None
+
     # Extract metadata from the file lines
     for line in lines:
         if line.startswith("Pairwise:"):
             pairwise = line.split(":")[1].strip()
         elif line.startswith("Strategy:"):
             strategy = line.split(":")[1].strip()
+        elif line.startswith("Num agents:"):
+            n_agents = int(line.split(":")[1].strip())
+        elif line.startswith("Iteration:"):
+            iteration = int(line.split(":")[1].strip())
         elif line.startswith("N agents:"):
+            # Legacy support for old format
             n_agents = int(line.split(":")[1].strip())
         elif line.startswith("Error margin:"):
             error_margin = line.split(":")[1].strip()
@@ -120,7 +126,7 @@ def _parse_single_experiment(lines, file_path):
                 key = float(key.strip())
                 value = [float(x) for x in value.strip(" []").split(",")]
                 confusion_matrix[key] = value
-    
+
     # Ensure necessary metadata exists
     if pairwise is None or gaussian_radius is None:
         # Return None for incomplete experiments instead of raising error
@@ -140,7 +146,7 @@ def _parse_single_experiment(lines, file_path):
     if start_index is None:
         # Return None for experiments without data table
         return None
-    
+
     # Process table rows
     table_data = []
     for line in lines[start_index:]:
@@ -154,11 +160,11 @@ def _parse_single_experiment(lines, file_path):
             [sigma1, sigma2] = get_closest_value(confusion_matrix, height)
 
         table_data.append([int(step), entropy, mse, height, coverage, sigma1, sigma2])
-    
+
     # Return None if no data rows found
     if not table_data:
         return None
-    
+
     # Create DataFrame from the table data
     df = pd.DataFrame(
         table_data,
@@ -169,6 +175,8 @@ def _parse_single_experiment(lines, file_path):
     df["Pairwise"] = pairwise
     df["ErrorMargin"] = error_margin
     df["GaussianRadius"] = gaussian_radius
+    df["NumAgents"] = n_agents if n_agents is not None else 1
+    df["Iteration"] = iteration if iteration is not None else 0
     df["sigma1"] = sigma1
     df["sigma2"] = sigma2
     # Ensure correct data types for consistency
@@ -179,30 +187,42 @@ def _parse_single_experiment(lines, file_path):
     return df
 
 
-def aggregate_data_by_settings(folder_path):
+def aggregate_data_by_settings(path):
     """
-    Aggregate data from all text files in the given folder.
+    Aggregate data from text files.
 
-    This function reads all .txt files from the folder, parses each file into a DataFrame,
+    This function reads .txt and .log files, parses each file into a DataFrame,
     concatenates them, and then groups the data by key settings to compute the mean and
     standard deviation for each metric.
 
+    Multi-agent handling:
+    - Entropy, MSE, Coverage are CUMULATIVE metrics from the fused belief across all agents
+    - Height, Action, IG are per-agent values (logged as lists in multi-agent logs)
+    - The plotter uses the cumulative/fused metrics for comparison
+
     Parameters:
-    folder_path (str): Path to the directory containing text files.
+    path (str): Path to a directory containing text files, or path to a single file.
 
     Returns:
     pd.DataFrame: DataFrame with aggregated statistics.
 
     Raises:
-    FileNotFoundError: If no text files are found in the specified folder.
+    FileNotFoundError: If no text files are found or file doesn't exist.
     """
 
-    # Support both .txt and .log files
-    file_paths = glob.glob(f"{folder_path}/*.txt")
-    file_paths.extend(glob.glob(f"{folder_path}/*.log"))
+    # Support both files and folders
+    file_paths = []
+    if os.path.isfile(path):
+        file_paths = [path]
+    elif os.path.isdir(path):
+        file_paths = glob.glob(f"{path}/*.txt")
+        file_paths.extend(glob.glob(f"{path}/*.log"))
+    else:
+        raise FileNotFoundError(f"Path does not exist: {path}")
+
     assert (
         len(file_paths) != 0
-    ), f"no file found with these settings in the folder:{folder_path}"
+    ), f"no file found with these settings in the path: {path}"
     all_data = [parse_file_to_table(file_path) for file_path in file_paths]
 
     combined_df = pd.concat(all_data)
@@ -278,7 +298,7 @@ def plot_all_settings(stats, radius, save_dir, strategy=None, show=False):
                     & (stats["GaussianRadius"] == radius)
                     & (stats["ErrorMargin"] == error_margin)
                 ]
-                
+
                 if setting_data.empty:
                     print(
                         f"No data for {pairwise_setting} with error margin {error_margin}."
@@ -390,40 +410,40 @@ def plot_all_settings(stats, radius, save_dir, strategy=None, show=False):
         plt.show()
 
 
-def main(directory, show, radius):
+def main(path, show, radius):
     """
     Main function to aggregate data from text files and generate plots.
 
     Parameters:
-    directory (str): Path to the directory containing data files.
+    path (str): Path to a directory containing data files or a single file.
     show (bool): Whether to display the plot interactively.
     radius (str): Gaussian radius setting for filtering the data.
 
     Raises:
-    ValueError: If the directory is not provided.
+    ValueError: If the path is not provided.
     """
-    if directory is None:
-        raise ValueError("Directory must be provided")
+    if path is None:
+        raise ValueError("Path must be provided")
 
     all_stats = pd.DataFrame()
 
     # # Aggregate data
-    stats = aggregate_data_by_settings(directory)
+    stats = aggregate_data_by_settings(path)
     all_stats = pd.concat([all_stats, stats], ignore_index=True)
-    # all_stats = aggregate_data_by_settings(directory)
+    # all_stats = aggregate_data_by_settings(path)
 
     # Print statistics
     print(f"unique strategies: {all_stats['Strategy'].unique()}")
     print(f"unique error margins: {all_stats['ErrorMargin'].unique()}")
     print(f"unique rad: {all_stats['GaussianRadius'].unique()}")
     print(f"unique pairwise: {all_stats['Pairwise'].unique()}")
-    
+
     # Determine strategy name (use first strategy if multiple exist)
     strategy = None
-    if 'Strategy' in all_stats.columns and len(all_stats['Strategy'].unique()) > 0:
-        strategies = all_stats['Strategy'].unique()
+    if "Strategy" in all_stats.columns and len(all_stats["Strategy"].unique()) > 0:
+        strategies = all_stats["Strategy"].unique()
         strategy = strategies[0] if len(strategies) == 1 else "multi_strategy"
-    
+
     # Plot the aggregated statistics and save to the plots folder under the base directory
     save_dir = None
     if save_dir is None:
@@ -437,11 +457,11 @@ if __name__ == "__main__":
         description="Plot statistics from aggregated data."
     )
     parser.add_argument(
-        "directory",
+        "path",
         type=str,
         nargs="?",
         default=None,
-        help="Path to the directory containing data (optional)",
+        help="Path to a directory containing data files or a single file (optional)",
     )
 
     parser.add_argument(
@@ -456,4 +476,4 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-    main(args.directory, args.show, args.radius)
+    main(args.path, args.show, args.radius)

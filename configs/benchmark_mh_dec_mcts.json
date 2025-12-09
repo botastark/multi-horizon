@@ -1,0 +1,71 @@
+{
+  "_comment": "Multi-Horizon Dec-MCTS Benchmark Configuration",
+  "_description": "Hierarchical LLP+HLP with dual-horizon planning",
+  
+  "project_path": "./",
+  "field_type": "Gaussian",
+  "start_position": "corner",
+  "action_strategy": "hierarchical_dec_mcts",
+  "num_agents": 4,
+  "max_steps": 300,
+  "n_steps": 300,
+  "iters": [0, 1],
+  "iterations": [0, 1],
+  "correlation_types": ["equal"],
+  "error_margins": [null],
+  "enable_plotting": false,
+  "enable_logging": true,
+  
+  "hierarchical_dec_mcts": {
+    "llp_horizon": 7,
+    "llp_iterations": 50,
+    "llp_ucb_c": 1.4,
+    "llp_discount_factor": 0.95,
+    
+    "hlp_horizon": 3,
+    "hlp_iterations": 30,
+    "hlp_ucb_c": 1.0,
+    "hlp_discount_factor": 0.98,
+    
+    "tile_size": [50, 50],
+    "hlp_replan_interval": 1.0,
+    
+    "alignment_bonus_weight": 0.2,
+    "region_conflict_penalty": 10.0,
+    
+    "intent_sharing": {
+      "ll_broadcast_interval": 0.1,
+      "hl_broadcast_interval": 0.5,
+      "max_history": 10
+    }
+  },
+  
+  "decentralized": {
+    "communication_range": 150.0,
+    "communication_delay": 0.05,
+    "message_drop_probability": 0.0,
+    "overlap_penalty_weight": 0.3,
+    "d_uct": {
+      "decay_factor": 0.9,
+      "threshold_sec": 2.0
+    }
+  },
+  
+  "experiment": {
+    "name": "mh_dec_mcts_4agents",
+    "log_dir": "logs/mh_dec_mcts",
+    "save_trajectory": true,
+    "save_belief_maps": false,
+    "metrics": [
+      "cumulative_ig",
+      "coverage_ratio",
+      "fragmentation_score",
+      "llp_iterations",
+      "hlp_iterations",
+      "planning_time_ms",
+      "ll_intents_sent",
+      "hl_intents_sent",
+      "messages_sent"
+    ]
+  }
+}
