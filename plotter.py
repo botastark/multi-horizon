@@ -20,6 +20,8 @@ def parse_file_to_table(file_path):
     The text file should include metadata (e.g., 'Pairwise', 'Strategy', 'Error margin',
     'Gaussian radius', and optionally a 'confision matrix') as well as a table starting
     with a header that begins with "Step".
+    
+    Supports multiple experiments in one file separated by timestamp headers [YYYY-MM-DD...].
 
     Parameters:
     file_path (str): The path to the text file.
@@ -32,6 +34,49 @@ def parse_file_to_table(file_path):
     """
     with open(file_path, "r") as file:
         lines = file.readlines()
+    
+    # Split file into separate experiments based on timestamp markers
+    experiments = []
+    current_experiment = []
+    
+    for line in lines:
+        # Check if line is a timestamp marker (new experiment)
+        if line.strip().startswith('[') and line.strip().endswith(']') and 'T' in line:
+            if current_experiment:
+                experiments.append(current_experiment)
+            current_experiment = [line]
+        else:
+            current_experiment.append(line)
+    
+    # Add the last experiment
+    if current_experiment:
+        experiments.append(current_experiment)
+    
+    # Parse each experiment separately
+    all_dfs = []
+    for exp_lines in experiments:
+        df = _parse_single_experiment(exp_lines, file_path)
+        if df is not None and not df.empty:
+            all_dfs.append(df)
+    
+    # Combine all experiments
+    if not all_dfs:
+        raise ValueError(f"No valid experiments found in file: {file_path}")
+    
+    return pd.concat(all_dfs, ignore_index=True)
+
+
+def _parse_single_experiment(lines, file_path):
+    """
+    Parse a single experiment from lines of text.
+    
+    Parameters:
+    lines (list): Lines of text for one experiment.
+    file_path (str): Original file path (for error messages).
+    
+    Returns:
+    pd.DataFrame: Parsed experiment data, or None if parsing fails.
+    """
 
     # Initialize metadata variables
     strategy = None
@@ -39,12 +84,16 @@ def parse_file_to_table(file_path):
     gaussian_radius = None
     error_margin = None
     confusion_matrix = None
+    n_agents = None
+    
     # Extract metadata from the file lines
     for line in lines:
         if line.startswith("Pairwise:"):
             pairwise = line.split(":")[1].strip()
         elif line.startswith("Strategy:"):
             strategy = line.split(":")[1].strip()
+        elif line.startswith("N agents:"):
+            n_agents = int(line.split(":")[1].strip())
         elif line.startswith("Error margin:"):
             error_margin = line.split(":")[1].strip()
             if error_margin == "None":
@@ -71,21 +120,27 @@ def parse_file_to_table(file_path):
                 key = float(key.strip())
                 value = [float(x) for x in value.strip(" []").split(",")]
                 confusion_matrix[key] = value
-        # Ensure necessary metadata exists
+    
+    # Ensure necessary metadata exists
     if pairwise is None or gaussian_radius is None:
-        raise ValueError(
-            f"Required metadata (Pairwise: {pairwise}, Error Margin: {error_margin}, Gaussian radius: {gaussian_radius}) not found in file: {file_path}"
-        )
+        # Return None for incomplete experiments instead of raising error
+        return None
 
     # Locate the starting point of the table
     start_index = None
     for i, line in enumerate(lines):
         if line.strip().startswith("Step"):
-            start_index = i + 2
+            # Check if next line is a separator (dashes)
+            if i + 1 < len(lines) and lines[i + 1].strip().startswith("-"):
+                start_index = i + 2
+            else:
+                start_index = i + 1
             break
 
     if start_index is None:
-        raise ValueError(f"Table header 'Step' not found in the file: {file_path}")
+        # Return None for experiments without data table
+        return None
+    
     # Process table rows
     table_data = []
     for line in lines[start_index:]:
@@ -99,6 +154,11 @@ def parse_file_to_table(file_path):
             [sigma1, sigma2] = get_closest_value(confusion_matrix, height)
 
         table_data.append([int(step), entropy, mse, height, coverage, sigma1, sigma2])
+    
+    # Return None if no data rows found
+    if not table_data:
+        return None
+    
     # Create DataFrame from the table data
     df = pd.DataFrame(
         table_data,
@@ -137,7 +197,9 @@ def aggregate_data_by_settings(folder_path):
     FileNotFoundError: If no text files are found in the specified folder.
     """
 
+    # Support both .txt and .log files
     file_paths = glob.glob(f"{folder_path}/*.txt")
+    file_paths.extend(glob.glob(f"{folder_path}/*.log"))
     assert (
         len(file_paths) != 0
     ), f"no file found with these settings in the folder:{folder_path}"
