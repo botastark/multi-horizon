@@ -1,0 +1,53 @@
+{
+  "_comment": "Dec-MCTS Benchmark Configuration",
+  "_description": "Single-level MCTS with multi-step trajectory planning",
+  
+  "project_path": "./",
+  "field_type": "Gaussian",
+  "start_position": "corner",
+  "action_strategy": "dec_mcts",
+  "num_agents": 4,
+  "max_steps": 300,
+  "n_steps": 300,
+  "iters": [0, 1],
+  "iterations": [0, 1],
+  "correlation_types": ["equal"],
+  "error_margins": [null],
+  "enable_plotting": false,
+  "enable_logging": true,
+  
+  "dec_mcts": {
+    "horizon": 10,
+    "iterations": 100,
+    "ucb_c": 1.4,
+    "discount_factor": 0.95,
+    "timeout": 5.0,
+    "parallel": 1
+  },
+  
+  "decentralized": {
+    "communication_range": 150.0,
+    "communication_delay": 0.05,
+    "message_drop_probability": 0.0,
+    "overlap_penalty_weight": 0.3,
+    "d_uct": {
+      "decay_factor": 0.9,
+      "threshold_sec": 2.0
+    }
+  },
+  
+  "experiment": {
+    "name": "dec_mcts_4agents",
+    "log_dir": "logs/dec_mcts",
+    "save_trajectory": true,
+    "save_belief_maps": false,
+    "metrics": [
+      "cumulative_ig",
+      "coverage_ratio",
+      "fragmentation_score",
+      "mcts_iterations",
+      "planning_time_ms",
+      "messages_sent"
+    ]
+  }
+}

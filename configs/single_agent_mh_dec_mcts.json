@@ -1,0 +1,41 @@
+{
+  "_comment": "Single-Agent Multi-Horizon Dec-MCTS Configuration",
+  "_description": "MH Dec-MCTS in single-agent mode for coverage quality baseline",
+  
+  "project_path": "./",
+  "field_type": "Gaussian",
+  "start_position": "corner",
+  "action_strategy": "hierarchical_dec_mcts",
+  "num_agents": 1,
+
+  "n_steps": 100,
+  "iters": [0, 20],
+  "correlation_types": ["equal"],
+  "error_margins": [null],
+  "enable_plotting": false,
+  "enable_logging": true,
+  
+  "hierarchical_dec_mcts": {
+    "llp_horizon": 10,
+    "llp_iterations": 100,
+    "hlp_horizon": 5,
+    "hlp_iterations": 50,
+    "tile_size": [50, 50],
+    "hlp_replan_interval": 2.0,
+    "alignment_bonus_weight": 0.3
+  },
+  
+  "experiment": {
+    "name": "mh_dec_mcts_single_agent",
+    "log_dir": "logs/mh_dec_mcts_single",
+    "save_trajectory": true,
+    "metrics": [
+      "cumulative_ig",
+      "coverage_ratio",
+      "fragmentation_score",
+      "llp_iterations",
+      "hlp_iterations",
+      "planning_time_ms"
+    ]
+  }
+}

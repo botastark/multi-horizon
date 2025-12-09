@@ -375,6 +375,7 @@ class FastLogger:
         header_extras=None,
         multi_agent=False,
         num_agents=1,
+        iteration=None,
     ):
         os.makedirs(log_folder, exist_ok=True)
         self.path = os.path.join(log_folder, filename)
@@ -386,8 +387,16 @@ class FastLogger:
         self._w(f"[{_dt.datetime.now().isoformat(timespec='seconds')}]\n")
         self._w(f"Strategy: {strategy}\n")
         self._w(f"Pairwise: {pairwise}\n")
-        if n_agent is not None:
-            self._w(f"N agents: {n_agent}\n")
+
+        # Show actual agent count and iteration separately
+        if num_agents is not None and num_agents > 0:
+            self._w(f"Num agents: {num_agents}\n")
+        if iteration is not None:
+            self._w(f"Iteration: {iteration}\n")
+        # Legacy support: if n_agent is provided but num_agents/iteration are not
+        elif n_agent is not None and iteration is None:
+            self._w(f"Iteration: {n_agent}\n")
+
         self._w(f"Error margin: {e}\n")
         self._w(f"Gaussian radius {r} \n")
         if grid is not None:
@@ -442,6 +451,7 @@ class FastLogger:
 
     def _w(self, s: str):
         self._f.write(s)
+        self._f.flush()  # Force immediate write to disk
 
     def log(self, s: str):
         self._w(str(s) + "\n")

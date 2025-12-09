@@ -1,6 +1,4 @@
-import random
 import numpy as np
-import math
 from helper import uav_position, H, cH
 from mcts import MCTSPlanner
 
@@ -17,6 +15,7 @@ class planning:
         mcts_params=None,
         agent_id: int = 0,
         coordinator=None,
+        seed=None,
     ):
         # Initialize belief map (each cell has a default probability of 0.5) and set UAV planning parameters
         self.M = np.full((grid_info.shape[0], grid_info.shape[1], 2), 0.5)
@@ -40,6 +39,10 @@ class planning:
             "discount_factor": mcts_params.get("discount_factor", 1.0),
             "horizon_weights": mcts_params.get("horizon_weights", {}),
         }
+        if seed is not None:
+            self.rng = np.random.default_rng(seed)
+        else:
+            self.rng = np.random.default_rng()
 
         # Logging configuration
         self.log_dir = "logs"
@@ -62,8 +65,8 @@ class planning:
             print(f"  Avg planning time: {stats['avg_planning_time']*1000:.1f}ms")
             print(f"  Intent updates received: {stats['intent_updates_received']}\n")
 
-        # Log Multi-Horizon Dec-MCTS stats (also supports "mh_dec_mcts" alias)
-        if self.strategy in ("hierarchical_dec_mcts", "mh_dec_mcts") and hasattr(
+        # Log Multi-Horizon Dec-MCTS stats
+        if self.strategy == "hierarchical_dec_mcts" and hasattr(
             self, "_hierarchical_planner"
         ):
             stats = self._hierarchical_planner.get_statistics()
@@ -140,7 +143,7 @@ class planning:
                     else "BackFront"
                 )
             else:
-                self.sweep_direction = random.choice(["LeftRight", "BackFront"])
+                self.sweep_direction = self.rng.choice(["LeftRight", "BackFront"])
 
         # self.sweep_direction = "LeftRight"
         if self.sweep_direction == "LeftRight":
@@ -188,14 +191,17 @@ class planning:
             info_gain_action[action] = info_gain_action_a
 
         # Find the maximum information gain
+        eps = 1e-4
+        # Find the maximum information gain
         max_gain = max(info_gain_action.values())
-
-        # Collect actions with the maximum info gain
+        # Collect actions with the maximum info gain + eps tolerance
         max_gain_actions = [
-            action for action, gain in info_gain_action.items() if gain == max_gain
+            action
+            for action, gain in info_gain_action.items()
+            if gain >= max_gain - eps
         ]
 
-        next_action = random.choice(max_gain_actions)
+        next_action = self.rng.choice(max_gain_actions)
         # Update previous action for the next step
         self.last_action = next_action
         return next_action, info_gain_action
@@ -247,7 +253,7 @@ class planning:
                 "intent_discount": greedy_config.get("intent_discount", 0.5),
                 "overlap_penalty_weight": dec_config.get(
                     "overlap_penalty_weight",
-                    greedy_config.get("overlap_penalty_weight", 0.3),
+                    greedy_config.get("overlap_penalty_weight", 0.0),
                 ),
             }
 
@@ -324,11 +330,11 @@ class planning:
         elif self.strategy == "dec_mcts":
             # Use Dec-MCTS planner (single-level MCTS, multi-agent)
             return self.dec_mcts_decision()
-        elif self.strategy in ("mh_dec_mcts", "hierarchical_dec_mcts"):
+        elif self.strategy == "hierarchical_dec_mcts":
             # Use Multi-Horizon Dec-MCTS with LLP/HLP hierarchy
             return self.hierarchical_dec_mcts_decision(visited_x)
         elif self.strategy == "ig":
-            # Legacy single-agent IG (backward compatibility)
+            # Legacy single-agent IG (backward compatibility)compatibility
             return self.ig_based(permitted_actions)
 
         # Default fallback to legacy IG

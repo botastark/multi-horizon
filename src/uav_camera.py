@@ -40,7 +40,7 @@ class Camera:
         s_overlap=0.7,
         camera_altitude=0,
         camera_pos=(0.0, 0.0),
-        rng=np.random.default_rng(123),
+        seed=42,
         a=1,
         b=0.015,
     ):
@@ -63,7 +63,7 @@ class Camera:
         self.grid = grid
         self.altitude = camera_altitude
         self.position = camera_pos
-        self.rng = rng
+        self.rng = np.random.default_rng(seed)
         self.fov = fov_angle
         self.a = a
         self.b = b
