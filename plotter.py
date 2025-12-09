@@ -219,7 +219,7 @@ def aggregate_data_by_settings(folder_path):
     return grouped
 
 
-def plot_all_settings(stats, radius, save_dir, show=False):
+def plot_all_settings(stats, radius, save_dir, strategy=None, show=False):
     """
     Plot aggregated statistics for various settings.
 
@@ -231,6 +231,7 @@ def plot_all_settings(stats, radius, save_dir, show=False):
     stats (pd.DataFrame): Aggregated statistics DataFrame.
     radius (str): Gaussian radius setting to filter the data.
     save_dir (str): Directory to save the generated plot.
+    strategy (str): Strategy name to include in filename (optional).
     show (bool): If True, displays the plot interactively.
     """
     plt.style.use("seaborn-v0_8-paper")
@@ -271,29 +272,13 @@ def plot_all_settings(stats, radius, save_dir, show=False):
             if row == 0:
                 ax.set_title(pairwise_setting, fontsize=20, pad=10)
             for iter, error_margin in enumerate(error_margins):
-                # Filter data based on error margin and strategy/radius settings
-                if error_margin == 0.0:
-                    if radius == "4":
-                        setting_data = stats[
-                            (stats["Pairwise"] == pairwise_setting)
-                            & (stats["Strategy"] == "ig")  # for gaussian
-                            & (stats["GaussianRadius"] == radius)
-                            & (stats["ErrorMargin"] == error_margin)
-                        ]
-                    else:
-                        setting_data = stats[
-                            (stats["Pairwise"] == pairwise_setting)
-                            & (stats["Strategy"] == "sweep")  # for ortomap
-                            & (stats["GaussianRadius"] == radius)
-                            & (stats["ErrorMargin"] == error_margin)
-                        ]
-
-                else:
-                    setting_data = stats[
-                        (stats["Pairwise"] == pairwise_setting)
-                        & (stats["GaussianRadius"] == radius)
-                        & (stats["ErrorMargin"] == error_margin)
-                    ]
+                # Filter data based on error margin and pairwise/radius settings
+                setting_data = stats[
+                    (stats["Pairwise"] == pairwise_setting)
+                    & (stats["GaussianRadius"] == radius)
+                    & (stats["ErrorMargin"] == error_margin)
+                ]
+                
                 if setting_data.empty:
                     print(
                         f"No data for {pairwise_setting} with error margin {error_margin}."
@@ -395,7 +380,10 @@ def plot_all_settings(stats, radius, save_dir, show=False):
     )
 
     os.makedirs(save_dir, exist_ok=True)
-    out_path = os.path.join(save_dir, f"plot_all_settings_r_{radius}.png")
+    filename = f"plot_all_settings_r_{radius}.png"
+    if strategy:
+        filename = f"plot_{strategy}_r_{radius}.png"
+    out_path = os.path.join(save_dir, filename)
     plt.savefig(out_path, dpi=300, bbox_inches="tight")
     print(f"Saving to {out_path}")
     if show:
@@ -425,15 +413,23 @@ def main(directory, show, radius):
     # all_stats = aggregate_data_by_settings(directory)
 
     # Print statistics
+    print(f"unique strategies: {all_stats['Strategy'].unique()}")
     print(f"unique error margins: {all_stats['ErrorMargin'].unique()}")
     print(f"unique rad: {all_stats['GaussianRadius'].unique()}")
     print(f"unique pairwise: {all_stats['Pairwise'].unique()}")
+    
+    # Determine strategy name (use first strategy if multiple exist)
+    strategy = None
+    if 'Strategy' in all_stats.columns and len(all_stats['Strategy'].unique()) > 0:
+        strategies = all_stats['Strategy'].unique()
+        strategy = strategies[0] if len(strategies) == 1 else "multi_strategy"
+    
     # Plot the aggregated statistics and save to the plots folder under the base directory
     save_dir = None
     if save_dir is None:
         script_dir = os.path.dirname(os.path.realpath(__file__))
         save_dir = os.path.join(script_dir, "plots")
-    plot_all_settings(all_stats, radius, save_dir, show=show)
+    plot_all_settings(all_stats, radius, save_dir, strategy=strategy, show=show)
 
 
 if __name__ == "__main__":
