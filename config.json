@@ -6,8 +6,8 @@
         "_comment": "Core simulation settings",
         "field_type": "Gaussian",
         "start_position": "corner",
-        "num_steps": 50,
-        "iterations": [0, 1],
+        "num_steps": 100,
+        "iterations": [0, 20],
         "correlation_types": ["equal"],
         "error_margins": [null],
         "project_path": "./"
@@ -22,7 +22,7 @@
         "_comment": "Multi-agent configuration",
         "num_agents": 2,
         "start_positions": "corner",
-        "communication_range": -1,
+        "communication_range": 5,
         "collision_avoidance_distance": 5.0     
     },
 
@@ -112,7 +112,7 @@
             "comm_delay_ms": 50.0,
             "drop_probability": 0.0,
             "max_intent_age_sec": 5.0,
-            "sync_every_n_steps": 10
+            "sync_every_n_steps": 1
         }
     },
 
