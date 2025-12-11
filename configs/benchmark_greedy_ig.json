@@ -6,7 +6,7 @@
   "field_type": "Gaussian",
   "start_position": "corner",
   "action_strategy": "greedy_ig",
-  "num_agents": 2,
+  "num_agents":4,
   "n_steps": 100,
   "iters": [0,20],
   "correlation_types": ["equal"],

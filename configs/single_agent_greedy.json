@@ -8,14 +8,13 @@
   "action_strategy": "greedy_ig",
   "num_agents": 1,
   "n_steps": 100,
-  "iters": [0, 5],
+  "iters": [0, 20],
   "correlation_types": ["equal", "biased", "adaptive"],
   "error_margins": [null],
   "enable_plotting": false,
   "enable_logging": true,
   
   "greedy_ig": {
-    "intent_discount": 0.0,
     "overlap_penalty_weight": 0.0
   },
   "seed": 1234,
