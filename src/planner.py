@@ -89,9 +89,12 @@ class planning:
         # Log Greedy IG stats
         if self.strategy == "greedy_ig" and hasattr(self, "_greedy_ig_planner"):
             stats = self._greedy_ig_planner.get_statistics()
-            print(f"\n[GREEDY IG] Final Stats for Agent {self.agent_id}:")
+            mode = "IGd" if self._greedy_ig_planner.enable_discounting else "IG"
+            print(f"\n[GREEDY {mode}] Final Stats for Agent {self.agent_id}:")
             print(f"  Plans generated: {stats['plans_generated']}")
             print(f"  Total IG: {stats['total_ig']:.4f}")
+            if self._greedy_ig_planner.enable_discounting:
+                print(f"  Total IGd (discounted): {stats['total_igd']:.4f}")
             print(f"  Intent updates received: {stats['intent_updates_received']}\n")
 
     def reset(self, conf_dict=None):
@@ -216,6 +219,10 @@ class planning:
         - Coordination emerges from Bayesian news fusion
         - Areas observed by teammates have lower entropy -> lower IG
 
+        IGd variant (when enable_discounting=True):
+        - Discount factor α_ij = 1 - IoU(fp(x_i), fp(x_j))
+        - Discounted IG: IG_a^d = IG_a × Π_{j ∈ neighbors} α_ij
+
         Returns:
             Tuple of (selected_action, action_scores_dict)
         """
@@ -233,9 +240,17 @@ class planning:
                 self.conf_dict.get("greedy_ig", {}) if self.conf_dict else {}
             )
 
+            # Auto-detect IGd mode from coordinator's mode attribute
+            enable_discounting = greedy_config.get("enable_discounting", False)
+            if self.coordinator is not None and hasattr(self.coordinator, "mode"):
+                # If mode contains "IGd", enable discounting
+                if "IGd" in self.coordinator.mode:
+                    enable_discounting = True
+
             config = {
                 "intent_discount": 0.0,  # Paper: no intent-based coordination
                 "overlap_penalty_weight": 0.0,  # Paper: no penalty terms
+                "enable_discounting": enable_discounting,
             }
 
             self._greedy_ig_planner = create_greedy_ig_planner(
@@ -246,7 +261,21 @@ class planning:
                 config=config,
             )
 
-            print(f"\n[GREEDY IG] Agent {self.agent_id} initialized")
+            # Create or get coordinator
+            if self.coordinator is not None:
+                if not hasattr(self.coordinator, "_greedy_ig_coordinator"):
+                    num_agents = getattr(self.coordinator, "num_agents", 1)
+                    self.coordinator._greedy_ig_coordinator = GreedyIGCoordinator(
+                        num_agents=num_agents
+                    )
+                self._greedy_ig_coordinator = self.coordinator._greedy_ig_coordinator
+            else:
+                self._greedy_ig_coordinator = None
+
+            mode = (
+                "IGd (footprint discounting)" if config["enable_discounting"] else "IG"
+            )
+            print(f"\n[GREEDY {mode}] Agent {self.agent_id} initialized")
             print(f"  Paper approach: pure belief-based IG (no penalties)\n")
 
         planner = self._greedy_ig_planner
@@ -254,14 +283,27 @@ class planning:
         # Update belief - this should be the FUSED belief from coordinator
         planner.update_belief(self.M.copy())
 
+        # Get teammate intents for discounting (if enabled)
+        if self._greedy_ig_coordinator is not None:
+            teammate_intents = self._greedy_ig_coordinator.get_teammate_intents(
+                self.agent_id
+            )
+            planner.update_teammate_intents(teammate_intents)
+        else:
+            teammate_intents = {}
+
         # Get current position
         uav_pos = self.uav.get_x()
 
-        # Run planning (pure IG, no penalties)
+        # Run planning (pure IG or IGd with discounting)
         intent = planner.plan(
             current_position=uav_pos.position,
             current_altitude=uav_pos.altitude,
         )
+
+        # Share intent with coordinator
+        if self._greedy_ig_coordinator is not None:
+            self._greedy_ig_coordinator.share_intent(intent)
 
         # Log decision
         log_greedy_ig_decision(
@@ -271,7 +313,10 @@ class planning:
             overlap_penalties=planner._overlap_penalties,
             final_scores=planner._action_scores,
             selected_action=intent.action,
-            intents_received={"teammates": []},  # Paper: no intent sharing
+            intents_received={"teammates": list(teammate_intents.keys())},
+            discount_factors=(
+                planner._discount_factors if planner.enable_discounting else None
+            ),
         )
 
         # Get action and scores
@@ -291,6 +336,7 @@ class planning:
             return self.mcts_based()
         elif self.strategy == "greedy_ig":
             # Use greedy IG planner (single-step lookahead, multi-agent)
+            # Supports IGd variant via enable_discounting config
             return self.greedy_ig_decision()
         elif self.strategy == "dec_mcts":
             # Use Dec-MCTS planner (single-level MCTS, multi-agent)

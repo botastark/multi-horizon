@@ -7,24 +7,22 @@
   "start_position": "corner",
   "action_strategy": "greedy_ig",
   "num_agents":4,
-  "n_steps": 100,
+  "n_steps": 50,
   "iters": [0,20],
-  "correlation_types": ["equal"],
+  "correlation_types": ["adaptive"],
   "error_margins": [null],
   "enable_plotting": false,
   "enable_logging": true,
   
   "greedy_ig": {
-    "_comment": "Paper approach: pure belief-based IG, no penalties",
-    "overlap_penalty_weight": 0.0
+    "_comment": "Pure belief-based IG, no penalties: IG=no sharing, IGd=discounted IoU, BS=broadcast single news, BM=per-neighbor news",
+    "overlap_penalty_weight": 0.0,
+    "mode_labels": ["IG", "IG_BS", "IG_BM", "IGd", "IGd_BS", "IGd_BM"]
   },
   
   "decentralized": {
-    "_comment_modes": "IG=no sharing, IG_d=position only, BS=broadcast single news, BM=per-neighbor news",
-    "communication_range": -1,
-    "position_sharing": false,
-    "news_sharing": true,
-    "news_mode": "BM"
+    "_comment_modes": "Communication settings for greedy IG benchmark",
+    "communication_range": -1
   }, 
   
   "experiment": {
