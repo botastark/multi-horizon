@@ -390,7 +390,7 @@ def plot_all_settings(stats, radius, save_dir, strategy=None, show=False):
             elif category == "MSE":
                 # Let matplotlib auto-scale based on data, will be adjusted later
                 # pass
-                num_ticks = 6  # e.g., 8 ticks including 0
+                num_ticks = 6
                 max_mse = 0.275 if radius == "4" or radius == "5" else 0.25
                 yticks = np.linspace(0, max_mse, num_ticks)
                 ax.set_ylim(0, max_mse)
@@ -505,16 +505,58 @@ def plot_information_sharing_comparison(stats, radius, save_dir, show=False):
         }
     )
 
-    # Define news modes and their display properties
+    # Define news modes and their display properties - match paper color scheme
     news_modes = {
-        "IG": {"color": "blue", "linestyle": "-", "label": "IG (no sharing)"},
-        "IG_d": {
-            "color": "blue",
-            "linestyle": "--",
-            "label": "IG_d (position sharing)",
+        "IG": {"color": "#2ca02c", "linestyle": "-", "label": "IG", "linewidth": 2.5},
+        "IG_BS": {
+            "color": "#ff7f0e",
+            "linestyle": "-",
+            "label": "IG + BS",
+            "linewidth": 2.5,
         },
-        "BS": {"color": "red", "linestyle": "-", "label": "BS (single news)"},
-        "BM": {"color": "green", "linestyle": "-", "label": "BM (per-neighbor news)"},
+        "IG_BM": {
+            "color": "#1f77b4",
+            "linestyle": "-",
+            "label": "IG + BM",
+            "linewidth": 2.5,
+        },
+        "IGd": {
+            "color": "#2ca02c",
+            "linestyle": "--",
+            "label": "IG_d",
+            "linewidth": 2.5,
+        },
+        "IGd_BS": {
+            "color": "#ff7f0e",
+            "linestyle": "--",
+            "label": "IG_d + BS",
+            "linewidth": 2.5,
+        },
+        "IGd_BM": {
+            "color": "#1f77b4",
+            "linestyle": "--",
+            "label": "IG_d + BM",
+            "linewidth": 2.5,
+        },
+        # Legacy support
+        "IG_d": {
+            "color": "#2ca02c",
+            "linestyle": "-.",
+            "label": "IG_d (legacy)",
+            "linewidth": 2,
+        },
+        "BS": {
+            "color": "#ff7f0e",
+            "linestyle": "-.",
+            "label": "BS (legacy)",
+            "linewidth": 2,
+        },
+        "BM": {
+            "color": "#1f77b4",
+            "linestyle": "-.",
+            "label": "BM (legacy)",
+            "linewidth": 2,
+        },
     }
 
     # Filter data for specified radius
@@ -528,17 +570,45 @@ def plot_information_sharing_comparison(stats, radius, save_dir, show=False):
     available_modes = data["NewsMode"].unique() if "NewsMode" in data.columns else []
     print(f"Available news modes: {available_modes}")
 
-    # Create figure: 2 columns (IG vs IG_d style), 2 rows (MSE, Coverage)
-    fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(12, 8), constrained_layout=True)
+    # Map legacy mode names to new format
+    # Legacy: IG, IG_d, BS, BM
+    # New: IG, IG_BS, IG_BM, IGd, IGd_BS, IGd_BM
+    legacy_mapping = {
+        "IG_d": "IGd",
+        "BS": "IG_BS",  # Assume BS without prefix means IG+BS
+        "BM": "IG_BM",  # Assume BM without prefix means IG+BM
+    }
+
+    # Apply mapping to normalize mode names
+    if "NewsMode" in data.columns:
+        data["NewsMode"] = data["NewsMode"].replace(legacy_mapping)
+        available_modes = data["NewsMode"].unique()
+        print(f"After legacy mapping: {available_modes}")
+
+    # Verify expected modes are present
+    expected_modes = ["IG", "IG_BS", "IG_BM", "IGd", "IGd_BS", "IGd_BM"]
+    available_modes_list = list(available_modes)
+    missing_modes = [m for m in expected_modes if m not in available_modes_list]
+    present_modes = [m for m in expected_modes if m in available_modes_list]
+    if missing_modes:
+        print(f"Note: Missing modes: {missing_modes}")
+    print(f"Will plot {len(present_modes)}/6 configurations: {present_modes}")
+
+    # Create figure: 2 rows (MSE, Coverage), 2 columns (IG left, IGd right) - like paper
+    fig, axes = plt.subplots(
+        nrows=2, ncols=2, figsize=(14, 10), constrained_layout=True
+    )
 
     # Define what to plot
-    metrics = ["MSE", "Coverage"]
-    column_titles = ["IG (no position sharing)", "IG_d (with position sharing)"]
+    metrics = ["MSE", "Height"]
+    column_titles = ["IG", "IG_d"]
 
-    # Mapping: left column shows IG and BS/BM without intent discount
-    # right column shows IG_d variants
-    left_modes = ["IG", "BS", "BM"]  # No position sharing
-    right_modes = ["IG_d"]  # With position sharing (could add BS_d, BM_d if available)
+    # Group modes: left column = IG variants (3 modes), right column = IGd variants (3 modes)
+    left_modes = ["IG", "IG_BS", "IG_BM"]  # Standard IG: 3 configurations
+    right_modes = ["IGd", "IGd_BS", "IGd_BM"]  # Discounted IGd: 3 configurations
+
+    print(f"Left column (IG): {left_modes}")
+    print(f"Right column (IGd): {right_modes}")
 
     for col, (col_title, modes) in enumerate(
         zip(column_titles, [left_modes, right_modes])
@@ -547,15 +617,34 @@ def plot_information_sharing_comparison(stats, radius, save_dir, show=False):
             ax = axes[row, col]
 
             if row == 0:
-                ax.set_title(col_title, fontsize=14, fontweight="bold")
+                # Reduce font size and weight for column titles to create more space
+                ax.set_title(col_title, fontsize=13, fontweight="normal", pad=10)
+
+            # Track which modes are plotted in this subplot
+            plotted_modes = []
+
+            # DEBUG: Print what we're about to plot
+            if row == 0:
+                print(
+                    f"\n  Processing column {col} ({col_title}), will plot modes: {modes}"
+                )
 
             for mode in modes:
                 if mode not in available_modes:
+                    if row == 0:
+                        print(f"    Skipping {mode} - not in available_modes")
                     continue
 
                 mode_data = data[data["NewsMode"] == mode]
                 if mode_data.empty:
+                    if row == 0:
+                        print(f"    Skipping {mode} - empty data")
                     continue
+
+                if row == 0:
+                    print(f"    ✓ Plotting {mode}")
+
+                plotted_modes.append(mode)
 
                 # Group by step and compute mean/std across iterations
                 grouped = (
@@ -572,17 +661,26 @@ def plot_information_sharing_comparison(stats, radius, save_dir, show=False):
                 std_vals = grouped[(metric, "std")]
 
                 props = news_modes.get(
-                    mode, {"color": "gray", "linestyle": "-", "label": mode}
+                    mode,
+                    {"color": "gray", "linestyle": "-", "label": mode, "linewidth": 2},
                 )
 
-                ax.plot(
+                line = ax.plot(
                     steps,
                     mean_vals,
                     color=props["color"],
                     linestyle=props["linestyle"],
-                    linewidth=2,
+                    linewidth=props.get("linewidth", 2.5),
                     label=props["label"],
+                    marker="o",
+                    markevery=5,
+                    markersize=6,
+                    markeredgewidth=1.2,
+                    markerfacecolor=props["color"],
+                    markeredgecolor="white",
                 )
+                if row == 0:
+                    print(f"      Added line to ax[{row},{col}]: {props['label']}")
 
                 ax.fill_between(
                     steps,
@@ -592,24 +690,62 @@ def plot_information_sharing_comparison(stats, radius, save_dir, show=False):
                     alpha=0.15,
                 )
 
-            # Styling
-            ax.set_ylabel(metric if col == 0 else "")
+            # Print summary of what was plotted
+            if row == 0:
+                print(f"  Column '{col_title}' plotted: {plotted_modes}")
+
+            # Styling - match paper figure
+            ax.set_ylabel(metric if col == 0 else "", fontsize=14, fontweight="bold")
             if row == len(metrics) - 1:
-                ax.set_xlabel("Steps")
-            ax.grid(True, linestyle="--", alpha=0.7)
+                ax.set_xlabel("Step", fontsize=14, fontweight="bold")
+            ax.grid(True, linestyle=":", alpha=0.3, linewidth=0.5)
             ax.minorticks_on()
             for spine in ["top", "right"]:
                 ax.spines[spine].set_visible(False)
+            for spine in ["left", "bottom"]:
+                ax.spines[spine].set_linewidth(1.2)
 
-            if col == 0:
-                ax.legend(loc="best", framealpha=0.9)
+            # Legend on both columns, first row only - to show all 6 configurations clearly
+            if row == 0 and plotted_modes:
+                # Get handles and labels from THIS specific axes only
+                handles, labels = ax.get_legend_handles_labels()
+                print(
+                    f"    Legend for ax[{row},{col}] ({col_title}): {len(handles)} items - {labels}"
+                )
+                ax.legend(
+                    handles,
+                    labels,
+                    loc="upper right",
+                    frameon=True,
+                    fancybox=False,
+                    shadow=False,
+                    fontsize=10,
+                    framealpha=0.95,
+                )
 
     # Synchronize y-axis limits across columns for each metric
-    for row in range(len(metrics)):
+    for row, metric in enumerate(metrics):
         ymin = min(axes[row, 0].get_ylim()[0], axes[row, 1].get_ylim()[0])
         ymax = max(axes[row, 0].get_ylim()[1], axes[row, 1].get_ylim()[1])
+        
+        # For MSE, compute max from data and add padding
+        if metric == "MSE":
+            # Get actual max MSE value from data across all modes
+            max_mse_data = data[(metric, "mean")].max()
+            ymax = max_mse_data * 1.1  # Add 10% padding
+            ymin = 0  # MSE starts at 0
+        
         for col in range(2):
             axes[row, col].set_ylim(ymin, ymax)
+
+    # Add figure title with radius info (R=-1 means unlimited range)
+    radius_label = "R = ∞" if str(radius) in ["-1", "orto"] else f"R = {radius}"
+    fig.suptitle(
+        f"Effect of information sharing in multi-agent scenarios ({radius_label})",
+        fontsize=16,
+        fontweight="normal",
+        y=1.04,
+    )
 
     # Save
     # Include NumAgents in filename when available
@@ -622,7 +758,8 @@ def plot_information_sharing_comparison(stats, radius, save_dir, show=False):
             pass
 
     os.makedirs(save_dir, exist_ok=True)
-    filename = f"info_sharing_comparison_r{radius}_{num_agents_str}.png"
+    radius_str = "inf" if str(radius) in ["-1", "orto"] else str(radius)
+    filename = f"info_sharing_comparison_r{radius_str}_{num_agents_str}.png"
     out_path = os.path.join(save_dir, filename)
     plt.savefig(out_path, dpi=300, bbox_inches="tight")
     print(f"Saved information sharing comparison to {out_path}")
@@ -656,31 +793,71 @@ def plot_news_mode_comparison(stats, radius, save_dir, pairwise="equal", show=Fa
         }
     )
 
-    # News mode display properties
+    # News mode display properties - match paper color scheme
     mode_props = {
         "IG": {
-            "color": "#1f77b4",
+            "color": "#2ca02c",  # Green
             "linestyle": "-",
             "marker": "o",
-            "label": "IG (no sharing)",
+            "label": "IG",
+            "linewidth": 2.5,
         },
-        "IG_d": {
-            "color": "#1f77b4",
-            "linestyle": "--",
+        "IG_BS": {
+            "color": "#ff7f0e",  # Orange/Red
+            "linestyle": "-",
             "marker": "s",
-            "label": "IG_d (position)",
+            "label": "IG + BS",
+            "linewidth": 2.5,
         },
-        "BS": {
-            "color": "#d62728",
+        "IG_BM": {
+            "color": "#1f77b4",  # Blue
             "linestyle": "-",
             "marker": "^",
-            "label": "BS (broadcast)",
+            "label": "IG + BM",
+            "linewidth": 2.5,
+        },
+        "IGd": {
+            "color": "#2ca02c",  # Green (dashed)
+            "linestyle": "--",
+            "marker": "D",
+            "label": "IG_d",
+            "linewidth": 2.5,
+        },
+        "IGd_BS": {
+            "color": "#ff7f0e",  # Orange/Red (dashed)
+            "linestyle": "--",
+            "marker": "v",
+            "label": "IG_d + BS",
+            "linewidth": 2.5,
+        },
+        "IGd_BM": {
+            "color": "#1f77b4",  # Blue (dashed)
+            "linestyle": "--",
+            "marker": "<",
+            "label": "IG_d + BM",
+            "linewidth": 2.5,
+        },
+        # Legacy support
+        "IG_d": {
+            "color": "#2ca02c",
+            "linestyle": "-.",
+            "marker": "x",
+            "label": "IG_d (legacy)",
+            "linewidth": 2,
+        },
+        "BS": {
+            "color": "#ff7f0e",
+            "linestyle": "-.",
+            "marker": "+",
+            "label": "BS (legacy)",
+            "linewidth": 2,
         },
         "BM": {
-            "color": "#2ca02c",
-            "linestyle": "-",
-            "marker": "v",
-            "label": "BM (per-neighbor)",
+            "color": "#1f77b4",
+            "linestyle": "-.",
+            "marker": "*",
+            "label": "BM (legacy)",
+            "linewidth": 2,
         },
     }
 
@@ -702,7 +879,7 @@ def plot_news_mode_comparison(stats, radius, save_dir, pairwise="equal", show=Fa
     print(f"Plotting news modes: {available_modes}")
 
     # Create figure: 1 row, 2 columns (MSE, Coverage)
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5), constrained_layout=True)
+    fig, axes = plt.subplots(1, 2, figsize=(16, 6), constrained_layout=True)
 
     metrics = [("MSE", "MSE"), ("Coverage", "Coverage")]
 
@@ -723,17 +900,20 @@ def plot_news_mode_comparison(stats, radius, save_dir, pairwise="equal", show=Fa
                 mode, {"color": "gray", "linestyle": "-", "marker": "", "label": mode}
             )
 
-            # Plot with markers every 10 steps for visibility
+            # Plot with markers every 5 steps for better visibility
             ax.plot(
                 steps,
                 mean_vals,
                 color=props["color"],
                 linestyle=props["linestyle"],
-                linewidth=2,
+                linewidth=props.get("linewidth", 2.5),
                 label=props["label"],
-                markevery=10,
+                markevery=5,
                 marker=props.get("marker", ""),
-                markersize=6,
+                markersize=8,
+                markeredgewidth=1.5,
+                markerfacecolor=props["color"],
+                markeredgecolor="white",
             )
 
             ax.fill_between(
@@ -744,18 +924,30 @@ def plot_news_mode_comparison(stats, radius, save_dir, pairwise="equal", show=Fa
                 alpha=0.15,
             )
 
-        ax.set_xlabel("Steps")
-        ax.set_ylabel(ylabel)
-        ax.set_title(f"{metric} Evolution")
-        ax.grid(True, linestyle="--", alpha=0.7)
-        ax.legend(loc="best")
+        ax.set_xlabel("Steps", fontsize=14, fontweight="bold")
+        ax.set_ylabel(ylabel, fontsize=14, fontweight="bold")
+        ax.set_title(f"{metric} Evolution", fontsize=16, fontweight="bold")
+        ax.grid(True, linestyle="--", alpha=0.7, linewidth=0.8)
+        ax.legend(
+            loc="upper left",
+            bbox_to_anchor=(0.02, 0.98),
+            ncol=1,
+            frameon=True,
+            fancybox=True,
+            shadow=True,
+            fontsize=11,
+        )
         for spine in ["top", "right"]:
             ax.spines[spine].set_visible(False)
+        # Increase spine width for remaining spines
+        for spine in ["left", "bottom"]:
+            ax.spines[spine].set_linewidth(1.5)
 
     fig.suptitle(
-        f"Information Sharing Comparison (r={radius}, {pairwise})",
-        fontsize=16,
+        f"Multi-Agent Information Gain Comparison (r={radius}, {pairwise})",
+        fontsize=18,
         fontweight="bold",
+        y=0.98,
     )
 
     # Save
@@ -771,7 +963,9 @@ def plot_news_mode_comparison(stats, radius, save_dir, pairwise="equal", show=Fa
     modes_str = "-".join([str(m) for m in modes])
 
     os.makedirs(save_dir, exist_ok=True)
-    filename = f"news_mode_comparison_r{radius}_{pairwise}_{num_agents_str}_{modes_str}.png"
+    filename = (
+        f"news_mode_comparison_r{radius}_{pairwise}_{num_agents_str}_{modes_str}.png"
+    )
     out_path = os.path.join(save_dir, filename)
     plt.savefig(out_path, dpi=300, bbox_inches="tight")
     print(f"Saved news mode comparison to {out_path}")
@@ -918,7 +1112,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--compare-news",
         action="store_true",
-        help="Generate information sharing comparison plots (IG, IG_d, BS, BM)",
+        help="Generate information sharing comparison plots (IG, IGd, IG_BS, IG_BM, IGd_BS, IGd_BM)",
     )
 
     args = parser.parse_args()

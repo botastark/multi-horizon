@@ -78,14 +78,13 @@ def setup_main_logger(log_dir: str = "logs", experiment_name: str = None) -> str
     log_filename = f"main{exp_suffix}_{timestamp}.log"
     log_file = os.path.join(log_dir, log_filename)
 
-    # Configure root logger
+    # Configure root logger. Use force=True to replace existing handlers
+    # so repeated calls (multiple experiment modes) create separate files.
     logging.basicConfig(
         level=logging.INFO,
         format="%(message)s",
-        handlers=[
-            logging.FileHandler(log_file),
-            # Optionally keep console output: logging.StreamHandler()
-        ],
+        handlers=[logging.FileHandler(log_file)],
+        force=True,
     )
 
     # Create a custom stream to redirect print() to logger
@@ -366,6 +365,7 @@ def run_multi_agent_experiment(
     overlap,
     optimal_alt,
     seed,
+    news_mode=None,
 ):
     """
     Run a multi-agent experiment iteration with decentralized coordination.
@@ -388,11 +388,24 @@ def run_multi_agent_experiment(
     # NOTE: pairwise_type (corr_type) is used in:
     # 1. Each agent's local OccupancyMap (for LBP propagation)
     # 2. MultiAgentMapper (for news belief management)
+    
+    # Parse news_mode for coordinator: extract "BS" or "BM" if present
+    coord_news_mode = None
+    if news_mode:
+        if "_BS" in news_mode:
+            coord_news_mode = "BS"
+        elif "_BM" in news_mode:
+            coord_news_mode = "BM"
+        elif news_mode in ["BS", "BM"]:
+            coord_news_mode = news_mode
+    
     coordinator = MultiAgentCoordinator(
         grid_shape=grid_info.shape,
         config=config,
         conf_dict=conf_dict,
         correlation_type=corr_type,
+        news_mode=coord_news_mode,  # Pass "BS" or "BM", not full label
+        mode=news_mode,  # Pass full mode label for IGd detection
     )
 
     # Generate start positions for all agents
@@ -444,13 +457,14 @@ def run_multi_agent_experiment(
     news_sharing = dec_config.get("news_sharing", True)
     position_sharing = dec_config.get("position_sharing", True)
 
-    # Determine actual news_mode based on sharing options
-    if not position_sharing and not news_sharing:
-        news_mode = "IG"  # No sharing
-    elif position_sharing and not news_sharing:
-        news_mode = "IG_d"  # Position only
-    else:
-        news_mode = ma_config.get("news_mode", dec_config.get("news_mode", "BM"))
+    # If caller supplied a news_mode, respect it; otherwise determine based on sharing options
+    if news_mode is None:
+        if not position_sharing and not news_sharing:
+            news_mode = "IG"  # No sharing
+        elif position_sharing and not news_sharing:
+            news_mode = "IG_d"  # Position only
+        else:
+            news_mode = ma_config.get("news_mode", dec_config.get("news_mode", "BM"))
 
     # Setup logging - single unified logger for multi-agent
     multi_agent_logger = None
@@ -770,266 +784,369 @@ def main():
     position_sharing = dec_config.get("position_sharing", True)
     news_sharing = dec_config.get("news_sharing", True)
 
+    # Allow explicit mode label override from strategy-specific config (e.g., greedy_ig.mode_label or mode_labels)
+    strategy_cfg = config.get(config.get("action_strategy", ""), {})
+    explicit_label = strategy_cfg.get("mode_labels", strategy_cfg.get("mode_label"))
+
+    # Compute inferred label from sharing flags and news_mode
+    inferred_label = "IG"
     if num_agents > 1:
         if not position_sharing and not news_sharing:
-            news_mode = "IG"  # No sharing at all
+            inferred_label = "IG"
         elif position_sharing and not news_sharing:
-            news_mode = "IG_d"  # Position sharing only
+            inferred_label = "IGd"
         else:
             # Full sharing: use BS or BM
-            news_mode = ma_config.get("news_mode", dec_config.get("news_mode", "BM"))
+            news_mode_setting = ma_config.get(
+                "news_mode", dec_config.get("news_mode", "BM")
+            )
+            # Map to IG or IGd base plus news mode suffix
+            base = (
+                "IGd"
+                if position_sharing
+                and news_sharing
+                and not (not position_sharing and news_sharing)
+                else "IG"
+            )
+            # If position_sharing is True and news_sharing True, prefer IGd_* label only if requested; otherwise label IG_BM/IG_BS
+            if news_mode_setting in ["BS", "BM"]:
+                inferred_label = (
+                    f"IG_{news_mode_setting}"
+                    if not position_sharing
+                    else f"IGd_{news_mode_setting}"
+                )
+            else:
+                inferred_label = news_mode_setting
     else:
-        # Single agent - always IG (no sharing possible)
-        news_mode = "IG"
+        inferred_label = "IG"
 
     # Get radius (grf_r) - Gaussian field uses 5, Ortomap uses "orto"
     field_type_raw = config.get("field_type", "Gaussian")
     grf_r_for_name = "orto" if field_type_raw == "Ortomap" else 5
 
-    # Build run_base with all parameters: strategy_field_r{radius}_start_N{agents}_{mode}
-    run_base = (
-        f"{config['action_strategy']}_{config['field_type'].lower()}_"
-        f"r{grf_r_for_name}_{config['start_position']}_N{num_agents}_{news_mode}"
-    )
-    if config.get("action_strategy") == "mcts" and config.get("params_in_path", True):
-        run_base = run_base + "__" + make_param_tag(config.get("mcts_params", {}))
-    results_folder = os.path.join(base_dir, run_base)
+    # If strategy-specific `mode_label` is a list, run experiments for each label.
+    # Otherwise resolve a single mode_label and run once.
+    valid_labels = {"IG", "IG_BS", "IG_BM", "IGd", "IGd_BS", "IGd_BM"}
 
-    # Setup logging to file (must be early, before any print statements)
-    log_dir = os.path.join(results_folder, "logs")
-    log_file = setup_main_logger(log_dir=log_dir, experiment_name=run_base)
-    logger = get_main_logger()
-    logger.info(f"Results folder: {results_folder}")
-    logger.info(f"Config loaded from: {args.config}")
-    logger.info(
-        f"Experiment: num_agents={num_agents}, news_mode={news_mode}, radius={grf_r_for_name}"
-    )
-    logger.info(
-        f"Strategy: {config['action_strategy']}, Field: {config['field_type']}, Start: {config['start_position']}"
-    )
-
-    ENABLE_STEPWISE_PLOTTING = config["enable_plotting"]
-    ENABLE_LOGGING = config["enable_logging"]
-    mcts_params = config.get("mcts_params", {})
-
-    field_type = config["field_type"]
-    start_position = config["start_position"]
-    action_strategy = config["action_strategy"]
-    correlation_types = config["correlation_types"]
-    n_steps = config["n_steps"]
-    iters = config["iters"]
-
-    # num_agents and ma_config already defined above for folder naming
-
-    if isinstance(iters, int):
-        iters = [0, iters]
-    error_margins = [None if e == "None" else e for e in config["error_margins"]]
-    if action_strategy == "sweep":
-        error_margins = [None]
-        iters = [0, 1]
-
-    # -----------------------------------------------------------------------------
-    # Setup Grid and Field Parameters Based on Field Type
-    # -----------------------------------------------------------------------------
-
-    if field_type == "Ortomap":
-        grf_r = "orto"
-        min_alt = 19.5
-        overlap = 0.8
-        optimal_alt = min_alt
-
-        class grid_info:
-            x = 60
-            y = 110
-            length = 1
-            shape = (int(y / length), int(x / length))
-            center = True
-
-        use_sensor_model = False
-    else:
-        grf_r = 5
-        field_type = grf_r
-        min_alt = None
-        overlap = None
-        optimal_alt = 21.5
-
-        class grid_info:
-            x = 50
-            y = 50
-            length = 0.125
-            shape = (int(y / length), int(x / length))
-            center = True
-
-        use_sensor_model = True
-
-    seed = config.get("seed", 42)
-
-    # Create initial camera (for single-agent or field initialization)
-    camera1 = Camera(
-        grid_info,
-        60,
-        camera_altitude=min_alt,
-        f_overlap=overlap,
-        s_overlap=overlap,
-        seed=seed,
-    )
-    map_obj = Field(
-        grid_info,
-        field_type,
-        sweep=action_strategy,
-        h_range=camera1.get_hrange(),
-        annotation_path=ANNOTATION_PATH,
-        ortomap_path=ORTHOMAP_PATH,
-        tile_pixel_path=TILE_PIXEL_PATH,
-        model_path=MODEL_PATH,
-        cache_dir=CACHE_DIR,
-        seed=seed,  # Fixed seed for stable map across iterations
-    )
-
-    # -----------------------------------------------------------------------------
-    # Main Experiment Loop
-    # -----------------------------------------------------------------------------
-
-    for corr_type in tqdm(
-        correlation_types, desc="Pairwise", position=0, file=get_tqdm_file()
+    if isinstance(explicit_label, list):
+        # Filter valid labels from the list
+        mode_labels = [
+            l for l in explicit_label if isinstance(l, str) and l in valid_labels
+        ]
+        if not mode_labels:
+            # No valid labels in list, fall back to inferred
+            if inferred_label in valid_labels:
+                mode_labels = [inferred_label]
+            else:
+                mode_labels = ["IG"]
+    elif (
+        explicit_label
+        and isinstance(explicit_label, str)
+        and explicit_label in valid_labels
     ):
-        for e_margin in tqdm(
-            error_margins,
-            desc=f"Error Margins (pairwise = {corr_type})",
-            position=1,
-            file=get_tqdm_file(),
+        # Single explicit label provided
+        mode_labels = [explicit_label]
+    else:
+        # Use inferred label
+        if inferred_label in valid_labels:
+            mode_labels = [inferred_label]
+        else:
+            # try to normalize forms like 'BM' or 'BS'
+            if inferred_label in ["BM", "BS"]:
+                mode_labels = [f"IG_{inferred_label}"]
+            else:
+                mode_labels = [inferred_label]
+
+    # Loop over mode labels (allows batch runs via greedy_ig.mode_label = [...])
+    for news_mode in mode_labels:
+        # Parse the mode label to set config flags for this run
+        # IG = no sharing (position_sharing=False, news_sharing=False)
+        # IGd = position only (position_sharing=True, news_sharing=False)
+        # IG_BS/IG_BM = IG with news sharing (position_sharing=False, news_sharing=True, news_mode=BS/BM)
+        # IGd_BS/IGd_BM = IGd with news sharing (position_sharing=True, news_sharing=True, news_mode=BS/BM)
+
+        if news_mode == "IG":
+            # No sharing
+            config["decentralized"]["position_sharing"] = False
+            config["decentralized"]["news_sharing"] = False
+            actual_news_mode = None
+        elif news_mode == "IGd":
+            # Position sharing only
+            config["decentralized"]["position_sharing"] = True
+            config["decentralized"]["news_sharing"] = False
+            actual_news_mode = None
+        elif news_mode in ["IG_BS", "IG_BM"]:
+            # IG with news sharing
+            config["decentralized"]["position_sharing"] = False
+            config["decentralized"]["news_sharing"] = True
+            actual_news_mode = news_mode.split("_")[1]  # "BS" or "BM"
+            if "multi_agent" not in config:
+                config["multi_agent"] = {}
+            config["multi_agent"]["news_mode"] = actual_news_mode
+        elif news_mode in ["IGd_BS", "IGd_BM"]:
+            # IGd with news sharing
+            config["decentralized"]["position_sharing"] = True
+            config["decentralized"]["news_sharing"] = True
+            actual_news_mode = news_mode.split("_")[1]  # "BS" or "BM"
+            if "multi_agent" not in config:
+                config["multi_agent"] = {}
+            config["multi_agent"]["news_mode"] = actual_news_mode
+        else:
+            # Unknown mode, use defaults
+            actual_news_mode = news_mode
+
+        # Build run_base with all parameters: strategy_field_r{radius}_start_N{agents}_{mode}
+        run_base = (
+            f"{config['action_strategy']}_{config['field_type'].lower()}_"
+            f"r{grf_r_for_name}_{config['start_position']}_N{num_agents}_{news_mode}"
+        )
+        if config.get("action_strategy") == "mcts" and config.get(
+            "params_in_path", True
         ):
-            for iter_idx in tqdm(
-                range(iters[0], iters[-1]),
-                desc=f"Iters (e={e_margin})",
-                position=2,
-                leave=False,
+            run_base = run_base + "__" + make_param_tag(config.get("mcts_params", {}))
+        results_folder = os.path.join(base_dir, run_base)
+
+        # Setup logging to file (must be early, before any print statements)
+        log_dir = os.path.join(results_folder, "logs")
+        log_file = setup_main_logger(log_dir=log_dir, experiment_name=run_base)
+        logger = get_main_logger()
+        logger.info(f"Running experiment mode: {news_mode}")
+        logger.info(f"Results folder: {results_folder}")
+        logger.info(f"Config loaded from: {args.config}")
+        logger.info(
+            f"Experiment: num_agents={num_agents}, news_mode={news_mode}, radius={grf_r_for_name}"
+        )
+        logger.info(
+            f"Strategy: {config['action_strategy']}, Field: {config['field_type']}, Start: {config['start_position']}"
+        )
+
+        ENABLE_STEPWISE_PLOTTING = config["enable_plotting"]
+        ENABLE_LOGGING = config["enable_logging"]
+        mcts_params = config.get("mcts_params", {})
+
+        field_type = config["field_type"]
+        start_position = config["start_position"]
+        action_strategy = config["action_strategy"]
+        correlation_types = config["correlation_types"]
+        n_steps = config["n_steps"]
+        iters = config["iters"]
+
+        # num_agents and ma_config already defined above for folder naming
+
+        if isinstance(iters, int):
+            iters = [0, iters]
+        error_margins = [None if e == "None" else e for e in config["error_margins"]]
+        if action_strategy == "sweep":
+            error_margins = [None]
+            iters = [0, 1]
+
+        # -----------------------------------------------------------------------------
+        # Setup Grid and Field Parameters Based on Field Type
+        # -----------------------------------------------------------------------------
+
+        if field_type == "Ortomap":
+            grf_r = "orto"
+            min_alt = 19.5
+            overlap = 0.8
+            optimal_alt = min_alt
+
+            class grid_info:
+                x = 60
+                y = 110
+                length = 1
+                shape = (int(y / length), int(x / length))
+                center = True
+
+            use_sensor_model = False
+        else:
+            grf_r = 5
+            field_type = grf_r
+            min_alt = None
+            overlap = None
+            optimal_alt = 21.5
+
+            class grid_info:
+                x = 50
+                y = 50
+                length = 0.125
+                shape = (int(y / length), int(x / length))
+                center = True
+
+            use_sensor_model = True
+
+        seed = config.get("seed", 42)
+
+        # Create initial camera (for single-agent or field initialization)
+        camera1 = Camera(
+            grid_info,
+            60,
+            camera_altitude=min_alt,
+            f_overlap=overlap,
+            s_overlap=overlap,
+            seed=seed,
+        )
+        map_obj = Field(
+            grid_info,
+            field_type,
+            sweep=action_strategy,
+            h_range=camera1.get_hrange(),
+            annotation_path=ANNOTATION_PATH,
+            ortomap_path=ORTHOMAP_PATH,
+            tile_pixel_path=TILE_PIXEL_PATH,
+            model_path=MODEL_PATH,
+            cache_dir=CACHE_DIR,
+            seed=seed,  # Fixed seed for stable map across iterations
+        )
+
+        # -----------------------------------------------------------------------------
+        # Main Experiment Loop
+        # -----------------------------------------------------------------------------
+
+        for corr_type in tqdm(
+            correlation_types, desc="Pairwise", position=0, file=get_tqdm_file()
+        ):
+            for e_margin in tqdm(
+                error_margins,
+                desc=f"Error Margins (pairwise = {corr_type})",
+                position=1,
                 file=get_tqdm_file(),
             ):
-                # Generate unique seed for this iteration
-                base_seed = config.get("seed", 42)
-                iteration_seed = base_seed + iter_idx
+                for iter_idx in tqdm(
+                    range(iters[0], iters[-1]),
+                    desc=f"Iters (e={e_margin})",
+                    position=2,
+                    leave=False,
+                    file=get_tqdm_file(),
+                ):
+                    # Generate unique seed for this iteration
+                    base_seed = config.get("seed", 42)
+                    iteration_seed = base_seed + iter_idx
 
-                # map_obj.reset(seed=iteration_seed)
-                map_obj.reset()
-                ground_truth_map = map_obj.get_ground_truth()
+                    # map_obj.reset(seed=iteration_seed)
+                    map_obj.reset()
+                    ground_truth_map = map_obj.get_ground_truth()
 
-                if e_margin is not None:
-                    # sampled sensor model
-                    conf_dict = map_obj.init_s0_s1(
-                        e=e_margin,
-                        sensor=use_sensor_model,
-                    )
-                else:
-                    # theoretical sensor model
-                    conf_dict = camera1.theoretical_conf_dict()
-
-                # Decide between single-agent and multi-agent experiment
-                if num_agents > 1:
-                    # Multi-agent experiment
-                    result = run_multi_agent_experiment(
-                        config=config,
-                        grid_info=grid_info,
-                        map_obj=map_obj,
-                        ground_truth_map=ground_truth_map,
-                        conf_dict=conf_dict,
-                        results_folder=results_folder,
-                        corr_type=corr_type,
-                        e_margin=e_margin,
-                        grf_r=grf_r,
-                        iter_idx=iter_idx,
-                        n_steps=n_steps,
-                        ENABLE_STEPWISE_PLOTTING=ENABLE_STEPWISE_PLOTTING,
-                        ENABLE_LOGGING=ENABLE_LOGGING,
-                        mcts_params=mcts_params,
-                        action_strategy=action_strategy,
-                        min_alt=min_alt,
-                        overlap=overlap,
-                        optimal_alt=optimal_alt,
-                        seed=iteration_seed,
-                    )
-                    print(f"Multi-agent experiment completed with {num_agents} agents")
-                else:
-                    # Single-agent experiment (original behavior)
-                    occupancy_map = OM(
-                        grid_info.shape, conf_dict=conf_dict, correlation_type=corr_type
-                    )
-
-                    planner = planning(
-                        grid_info,
-                        camera1,
-                        action_strategy,
-                        conf_dict=conf_dict,
-                        optimal_alt=optimal_alt,
-                        mcts_params=mcts_params,
-                        seed=iteration_seed,
-                    )
-
-                    # Select initial UAV starting position
-                    if start_position == "edge":
-                        real_border = [
-                            (
-                                -grid_info.x / 2,
-                                random.uniform(-grid_info.y / 2, grid_info.y / 2),
-                            ),
-                            (
-                                grid_info.x / 2,
-                                random.uniform(-grid_info.y / 2, grid_info.y / 2),
-                            ),
-                            (
-                                random.uniform(-grid_info.x / 2, grid_info.x / 2),
-                                grid_info.y / 2,
-                            ),
-                            (
-                                random.uniform(-grid_info.x / 2, grid_info.x / 2),
-                                -grid_info.y / 2,
-                            ),
-                        ]
-                        start_pos = random.choice(real_border)
-                    elif start_position == "corner":
-                        start_pos = random.choice(
-                            [
-                                (-grid_info.x / 2, -grid_info.y / 2),
-                                (-grid_info.x / 2, grid_info.y / 2),
-                                (grid_info.x / 2, -grid_info.y / 2),
-                                (grid_info.x / 2, grid_info.y / 2),
-                            ]
+                    if e_margin is not None:
+                        # sampled sensor model
+                        conf_dict = map_obj.init_s0_s1(
+                            e=e_margin,
+                            sensor=use_sensor_model,
                         )
-                    elif start_position == "center":
-                        start_pos = (0.0, 0.0)
                     else:
-                        raise ValueError(
-                            f"Invalid start_position: {start_position}. Choose from 'edge', 'corner', or 'center'."
+                        # theoretical sensor model
+                        conf_dict = camera1.theoretical_conf_dict()
+
+                    # Decide between single-agent and multi-agent experiment
+                    if num_agents > 1:
+                        # Multi-agent experiment
+                        result = run_multi_agent_experiment(
+                            config=config,
+                            grid_info=grid_info,
+                            map_obj=map_obj,
+                            ground_truth_map=ground_truth_map,
+                            conf_dict=conf_dict,
+                            results_folder=results_folder,
+                            corr_type=corr_type,
+                            e_margin=e_margin,
+                            grf_r=grf_r,
+                            iter_idx=iter_idx,
+                            n_steps=n_steps,
+                            ENABLE_STEPWISE_PLOTTING=ENABLE_STEPWISE_PLOTTING,
+                            ENABLE_LOGGING=ENABLE_LOGGING,
+                            mcts_params=mcts_params,
+                            action_strategy=action_strategy,
+                            min_alt=min_alt,
+                            overlap=overlap,
+                            optimal_alt=optimal_alt,
+                            seed=iteration_seed,
+                            news_mode=news_mode,
+                        )
+                        print(
+                            f"Multi-agent experiment completed with {num_agents} agents"
+                        )
+                    else:
+                        # Single-agent experiment (original behavior)
+                        occupancy_map = OM(
+                            grid_info.shape,
+                            conf_dict=conf_dict,
+                            correlation_type=corr_type,
                         )
 
-                    uav_pos = uav_position((start_pos, camera1.get_hrange()[0]))
+                        planner = planning(
+                            grid_info,
+                            camera1,
+                            action_strategy,
+                            conf_dict=conf_dict,
+                            optimal_alt=optimal_alt,
+                            mcts_params=mcts_params,
+                            seed=iteration_seed,
+                        )
 
-                    result = run_single_agent_experiment(
-                        config=config,
-                        grid_info=grid_info,
-                        camera=camera1,
-                        map_obj=map_obj,
-                        ground_truth_map=ground_truth_map,
-                        conf_dict=conf_dict,
-                        occupancy_map=occupancy_map,
-                        planner=planner,
-                        uav_pos=uav_pos,
-                        results_folder=results_folder,
-                        corr_type=corr_type,
-                        e_margin=e_margin,
-                        grf_r=grf_r,
-                        iter_idx=iter_idx,
-                        n_steps=n_steps,
-                        ENABLE_STEPWISE_PLOTTING=ENABLE_STEPWISE_PLOTTING,
-                        ENABLE_LOGGING=ENABLE_LOGGING,
-                        mcts_params=mcts_params,
-                        action_strategy=action_strategy,
-                    )
-                    print("Single-agent experiment completed")
+                        # Select initial UAV starting position
+                        if start_position == "edge":
+                            real_border = [
+                                (
+                                    -grid_info.x / 2,
+                                    random.uniform(-grid_info.y / 2, grid_info.y / 2),
+                                ),
+                                (
+                                    grid_info.x / 2,
+                                    random.uniform(-grid_info.y / 2, grid_info.y / 2),
+                                ),
+                                (
+                                    random.uniform(-grid_info.x / 2, grid_info.x / 2),
+                                    grid_info.y / 2,
+                                ),
+                                (
+                                    random.uniform(-grid_info.x / 2, grid_info.x / 2),
+                                    -grid_info.y / 2,
+                                ),
+                            ]
+                            start_pos = random.choice(real_border)
+                        elif start_position == "corner":
+                            start_pos = random.choice(
+                                [
+                                    (-grid_info.x / 2, -grid_info.y / 2),
+                                    (-grid_info.x / 2, grid_info.y / 2),
+                                    (grid_info.x / 2, -grid_info.y / 2),
+                                    (grid_info.x / 2, grid_info.y / 2),
+                                ]
+                            )
+                        elif start_position == "center":
+                            start_pos = (0.0, 0.0)
+                        else:
+                            raise ValueError(
+                                f"Invalid start_position: {start_position}. Choose from 'edge', 'corner', or 'center'."
+                            )
 
-                    # Finalize planner
-                    if hasattr(planner, "finalize_episode"):
-                        planner.finalize_episode()
+                        uav_pos = uav_position((start_pos, camera1.get_hrange()[0]))
+
+                        result = run_single_agent_experiment(
+                            config=config,
+                            grid_info=grid_info,
+                            camera=camera1,
+                            map_obj=map_obj,
+                            ground_truth_map=ground_truth_map,
+                            conf_dict=conf_dict,
+                            occupancy_map=occupancy_map,
+                            planner=planner,
+                            uav_pos=uav_pos,
+                            results_folder=results_folder,
+                            corr_type=corr_type,
+                            e_margin=e_margin,
+                            grf_r=grf_r,
+                            iter_idx=iter_idx,
+                            n_steps=n_steps,
+                            ENABLE_STEPWISE_PLOTTING=ENABLE_STEPWISE_PLOTTING,
+                            ENABLE_LOGGING=ENABLE_LOGGING,
+                            mcts_params=mcts_params,
+                            action_strategy=action_strategy,
+                        )
+                        print("Single-agent experiment completed")
+
+                        # Finalize planner
+                        if hasattr(planner, "finalize_episode"):
+                            planner.finalize_episode()
 
 
 if __name__ == "__main__":

@@ -90,6 +90,47 @@ def cH(p: np.ndarray, s0: float, s1: float) -> np.ndarray:
     return pz1 * H_m_z1 + pz0 * H_m_z0
 
 
+def compute_footprint_iou(
+    footprint1: Tuple[int, int, int, int],
+    footprint2: Tuple[int, int, int, int],
+) -> float:
+    """
+    Compute Intersection over Union (IoU) of two footprints.
+
+    Args:
+        footprint1: (imin, imax, jmin, jmax) for agent 1
+        footprint2: (imin, imax, jmin, jmax) for agent 2
+
+    Returns:
+        IoU value in [0, 1]
+    """
+    imin1, imax1, jmin1, jmax1 = footprint1
+    imin2, imax2, jmin2, jmax2 = footprint2
+
+    # Compute intersection
+    inter_imin = max(imin1, imin2)
+    inter_imax = min(imax1, imax2)
+    inter_jmin = max(jmin1, jmin2)
+    inter_jmax = min(jmax1, jmax2)
+
+    # Check if there's any intersection
+    if inter_imax <= inter_imin or inter_jmax <= inter_jmin:
+        return 0.0
+
+    # Compute areas
+    intersection_area = (inter_imax - inter_imin) * (inter_jmax - inter_jmin)
+    area1 = (imax1 - imin1) * (jmax1 - jmin1)
+    area2 = (imax2 - imin2) * (jmax2 - jmin2)
+    union_area = area1 + area2 - intersection_area
+
+    # Avoid division by zero
+    if union_area <= 0:
+        return 0.0
+
+    iou = intersection_area / union_area
+    return float(np.clip(iou, 0.0, 1.0))
+
+
 # =============================================================================
 # Intent Data Structures (compatible with async runner)
 # =============================================================================
@@ -166,6 +207,7 @@ class GreedyIGPlanner:
         conf_dict: Optional[Dict] = None,
         intent_discount: float = 0.0,
         overlap_penalty_weight: float = 0.0,
+        enable_discounting: bool = False,
     ):
         """
         Initialize greedy IG planner.
@@ -177,6 +219,7 @@ class GreedyIGPlanner:
             conf_dict: Sensor model parameters by altitude
             intent_discount: DEPRECATED - kept for compatibility, not used
             overlap_penalty_weight: DEPRECATED - kept for compatibility, should be 0.0
+            enable_discounting: If True, use IGd (footprint-based IoU discounting)
         """
         self.agent_id = agent_id
         self.camera = camera
@@ -186,6 +229,8 @@ class GreedyIGPlanner:
         # These are kept for backward compatibility but should be 0.0
         self.intent_discount = intent_discount
         self.overlap_penalty_weight = overlap_penalty_weight
+        # IGd option: footprint-based discounting
+        self.enable_discounting = enable_discounting
 
         # Available actions
         self.actions = ["front", "back", "left", "right", "up", "down", "hover"]
@@ -203,6 +248,7 @@ class GreedyIGPlanner:
         self._stats = {
             "plans_generated": 0,
             "total_ig": 0.0,
+            "total_igd": 0.0,
             "intent_updates_received": 0,
         }
 
@@ -210,6 +256,7 @@ class GreedyIGPlanner:
         self._action_scores: Dict[str, float] = {}
         self._raw_ig_scores: Dict[str, float] = {}
         self._overlap_penalties: Dict[str, float] = {}
+        self._discount_factors: Dict[str, float] = {}
 
     def update_belief(self, belief: np.ndarray) -> None:
         """Update local belief map."""
@@ -290,6 +337,43 @@ class GreedyIGPlanner:
         ig = prior_entropy - conditional_entropy
 
         return float(np.sum(ig))
+
+    def _compute_discount_factor(
+        self,
+        my_footprint: Tuple[int, int, int, int],
+    ) -> float:
+        """
+        Compute discount factor based on footprint overlap with neighbors.
+
+        For each neighbor j:
+            α_ij = 1 - IoU(fp(x_i), fp(x_j))
+
+        Total discount: Π_{j ∈ neighbors} α_ij
+
+        Args:
+            my_footprint: (imin, imax, jmin, jmax) proposed footprint
+
+        Returns:
+            Discount factor in [0, 1]
+        """
+        if not self.enable_discounting or not self._teammate_intents:
+            return 1.0
+
+        discount = 1.0
+        for teammate_id, intent in self._teammate_intents.items():
+            if intent.is_stale():
+                continue
+
+            # Compute IoU with teammate's footprint
+            iou = compute_footprint_iou(my_footprint, intent.footprint)
+
+            # α_ij = 1 - IoU
+            alpha_ij = 1.0 - iou
+
+            # Multiply discount factors
+            discount *= alpha_ij
+
+        return discount
 
     def _compute_teammate_overlap(
         self,
@@ -373,6 +457,7 @@ class GreedyIGPlanner:
         self._action_scores = {}
         self._raw_ig_scores = {}
         self._overlap_penalties = {}
+        self._discount_factors = {}
 
         best_action = "hover"
         best_score = float("-inf")
@@ -380,6 +465,7 @@ class GreedyIGPlanner:
         best_next_alt = current_altitude
         best_footprint = (0, 0, 0, 0)
         best_ig = 0.0
+        best_igd = 0.0
 
         # Set camera state for x_future computation
         self.camera.set_position(current_position)
@@ -400,7 +486,7 @@ class GreedyIGPlanner:
             ig = self._compute_ig(next_pos, next_alt)
             self._raw_ig_scores[action] = ig
 
-            # Get footprint (for logging only)
+            # Get footprint
             try:
                 [[imin, imax], [jmin, jmax]] = self.camera.get_range(
                     position=next_pos,
@@ -411,12 +497,17 @@ class GreedyIGPlanner:
             except Exception:
                 footprint = (0, 0, 0, 0)
 
+            # Compute discount factor (IGd approach)
+            discount = self._compute_discount_factor(footprint)
+            self._discount_factors[action] = discount
+
             # Paper approach: NO overlap penalty
             # Coordination emerges from fused belief, not penalties
             self._overlap_penalties[action] = 0.0
 
-            # Score = pure IG (no penalties)
-            score = ig
+            # Score = IG * discount (if discounting enabled, otherwise discount=1.0)
+            igd = ig * discount
+            score = igd
             self._action_scores[action] = score
 
             if score > best_score:
@@ -426,6 +517,7 @@ class GreedyIGPlanner:
                 best_next_alt = next_alt
                 best_footprint = footprint
                 best_ig = ig
+                best_igd = igd
 
         # Create intent
         self.current_intent = GreedyIGIntent(
@@ -441,6 +533,7 @@ class GreedyIGPlanner:
 
         self._stats["plans_generated"] += 1
         self._stats["total_ig"] += best_ig
+        self._stats["total_igd"] += best_igd
 
         return self.current_intent
 
@@ -472,6 +565,7 @@ def log_greedy_ig_decision(
     final_scores: Dict[str, float],
     selected_action: str,
     intents_received: Dict[str, Any],
+    discount_factors: Optional[Dict[str, float]] = None,
 ):
     """
     Log greedy IG planning decision.
@@ -481,13 +575,19 @@ def log_greedy_ig_decision(
         step: Current step
         raw_ig_scores: Raw IG per action
         overlap_penalties: Overlap penalty per action
-        final_scores: Final scores (IG - penalty)
+        final_scores: Final scores (IG * discount or IG - penalty)
         selected_action: Selected action
         intents_received: Summary of teammate intents
+        discount_factors: Optional discount factors per action (for IGd)
     """
     logger.info("")
     logger.info(f"{'='*60}")
-    logger.info(f"[Agent {agent_id}] GREEDY IG DECISION (Step {step})")
+    mode = (
+        "IGd"
+        if discount_factors and any(d < 1.0 for d in discount_factors.values())
+        else "IG"
+    )
+    logger.info(f"[Agent {agent_id}] GREEDY {mode} DECISION (Step {step})")
     logger.info(f"{'='*60}")
 
     logger.info("")
@@ -495,6 +595,12 @@ def log_greedy_ig_decision(
     sorted_ig = sorted(raw_ig_scores.items(), key=lambda x: x[1], reverse=True)
     for action, ig in sorted_ig:
         logger.info(f"  {action:8s}: {ig:10.2f}")
+
+    if discount_factors and any(d < 1.0 for d in discount_factors.values()):
+        logger.info("")
+        logger.info("DISCOUNT FACTORS (footprint overlap with neighbors):")
+        for action, discount in sorted(discount_factors.items(), key=lambda x: x[1]):
+            logger.info(f"  {action:8s}: {discount:10.4f}")
 
     if any(p > 0 for p in overlap_penalties.values()):
         logger.info("")
@@ -506,7 +612,12 @@ def log_greedy_ig_decision(
                 logger.info(f"  {action:8s}: -{penalty:10.2f}")
 
     logger.info("")
-    logger.info("FINAL SCORES (IG - Overlap Penalty):")
+    score_label = (
+        "DISCOUNTED IG (IG × discount)"
+        if discount_factors and any(d < 1.0 for d in discount_factors.values())
+        else "FINAL SCORES (IG - Overlap Penalty)"
+    )
+    logger.info(f"{score_label}:")
     sorted_final = sorted(final_scores.items(), key=lambda x: x[1], reverse=True)
     for action, score in sorted_final:
         marker = " <-- SELECTED" if action == selected_action else ""
@@ -636,4 +747,5 @@ def create_greedy_ig_planner(
         conf_dict=conf_dict,
         intent_discount=config.get("intent_discount", 0.5),
         overlap_penalty_weight=config.get("overlap_penalty_weight", 0.3),
+        enable_discounting=config.get("enable_discounting", False),
     )

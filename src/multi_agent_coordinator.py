@@ -272,6 +272,8 @@ class MultiAgentCoordinator:
         config: Dict[str, Any],
         conf_dict: Dict[str, Any],
         correlation_type: str = "equal",
+        news_mode: Optional[str] = None,
+        mode: Optional[str] = None,
     ):
         """
         Initialize multi-agent coordinator.
@@ -281,14 +283,20 @@ class MultiAgentCoordinator:
             config: Configuration dict with multi_agent settings
             conf_dict: Confidence dictionary - sensor model parameters
             correlation_type: Pairwise correlation type ('equal', 'biased', 'adaptive')
+            news_mode: News sharing mode ('BS' or 'BM')
+            mode: Full mode label (e.g., 'IG', 'IGd', 'IG_BS', 'IGd_BM')
         """
         self.grid_shape = grid_shape
         self.config = config
         self.conf_dict = conf_dict
         self.num_agents = self.config.get("num_agents", 1)
 
+        # Store full mode label for planner access
+        self.mode = mode if mode is not None else "IG"
+
         # Extract configuration
         ma_config = config.get("multi_agent", {})
+        dec_config = config.get("decentralized", {})
         # Use explicit correlation_type parameter, fallback to config, then default
         self.correlation_type = correlation_type or ma_config.get(
             "correlation_type", ""
@@ -297,12 +305,20 @@ class MultiAgentCoordinator:
             print(f"Warning: correlation_type not specified, defaulting to 'equal'")
             breakpoint()
 
-        self.news_mode = ma_config.get("news_mode", "BM")
+        # Prefer provided `news_mode` override, otherwise `multi_agent.news_mode`, fall back to `decentralized.news_mode`, default to BM
+        if news_mode is not None:
+            self.news_mode = news_mode
+        else:
+            self.news_mode = ma_config.get(
+                "news_mode", dec_config.get("news_mode", "BM")
+            )
         self.lbp_iterations = ma_config.get("lbp_iterations", 1)
 
         self.enable_coordination = ma_config.get("enable_coordination", True)
+        # communication_range can be specified under `multi_agent` or `decentralized`
         self.communication_range = ma_config.get(
-            "communication_range", -1
+            "communication_range",
+            config.get("decentralized", {}).get("communication_range", -1),
         )  # -1 = unlimited
         self.collision_distance = ma_config.get("collision_avoidance_distance", 5.0)
 
