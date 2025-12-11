@@ -93,6 +93,8 @@ cache
 
 # ignore temp result folders
 results_*
+trials/
+plots/
 
 # ignore not relavant files
 src/tile_class.py
