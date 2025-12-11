@@ -324,12 +324,18 @@ def process_agent_observations(
         occupancy_map.update_belief_OG(fp_vertices_ij, submap, uav_pos)
 
         # Run local LBP propagation (decentralized per agent)
-        occupancy_map.propagate_messages(fp_vertices_ij, submap, max_iterations=1)
+        occupancy_map.propagate_messages(
+            fp_vertices_ij,
+            submap,
+        )
 
-        # Update agent's belief map
+        # Update agent's belief map (this is the LOCAL belief before any fusion)
         belief_map[:, :, 1] = occupancy_map.get_belief().copy()
         belief_map[:, :, 0] = 1 - belief_map[:, :, 1]
         agent["belief_map"] = belief_map
+
+        # Store a copy of the pure local belief (before fusion with other agents)
+        agent["local_belief_map"] = belief_map.copy()
 
         # Store observation info
         agent_observations[agent_id] = {
@@ -349,54 +355,70 @@ def perform_belief_fusion(
     agent_observations: Dict,
     grid_info,
     step: int = 0,
+    news_sharing: bool = True,
 ) -> None:
     """
     Phase 2: Perform synchronous belief fusion across agents.
 
+    Uses MultiAgentMapper (via coordinator.map) for news belief fusion.
+    Architecture:
+    - Each agent's local OccupancyMap handles OG + LBP (with pairwise factors)
+    - MultiAgentMapper handles per-agent maps and news/fusion
+    - MultiAgentCoordinator only orchestrates communication/collision
+
+    Critical: Local beliefs must be synced from agent["occupancy_map"] to
+    coordinator.map.maps[agent_id] before fusion, since Phase 1 updates
+    a separate OccupancyMap instance.
+
     Args:
         agents: List of agent state dictionaries
-        coordinator: Coordinator object
+        coordinator: Coordinator object (with coordinator.map as MultiAgentMapper)
         agent_observations: Observation data from Phase 1
         grid_info: Grid information
         step: Current step number
+        news_sharing: If False, skip news fusion (IG_d mode - position sharing only)
     """
-    if coordinator.lbp_fusion is not None:
-        # Synchronous news belief fusion
-        coordinator.update_all_news(agent_observations)
-        coordinator.fuse_all_news()
+    # Access the MultiAgentMapper through coordinator
+    mapper = coordinator.map
+
+    # CRITICAL: Sync local beliefs from agent["occupancy_map"] to mapper.maps[]
+    # Phase 1 updates agent["occupancy_map"], but fusion uses mapper.maps[].
+    # Without this sync, fusion would use stale (0.5) beliefs.
+    for agent in agents:
+        agent_id = agent["agent_id"]
+        local_belief = agent["occupancy_map"].get_belief()
+        mapper.maps[agent_id].map_beliefs = local_belief.copy()
+
+    # Only perform news fusion if news_sharing is enabled
+    if news_sharing:
+        # Phase 2a: Update all agents' news beliefs (synchronous)
+        mapper.update_all_news(agent_observations)
+
+        # Phase 2b: Get neighbor lists from coordinator and fuse news
+        for agent_id in range(coordinator.num_agents):
+            neighbor_ids = coordinator.get_neighbors_in_range(agent_id)
+            if neighbor_ids:
+                mapper.fuse_news_with_neighbors(agent_id, neighbor_ids)
 
         # Log fusion stats periodically
         if step == 0 or step % 20 == 0:
-            fusion_stats = coordinator.get_statistics().get("lbp_fusion", {})
+            fusion_stats = mapper.get_stats()
             print(
                 f"[Step {step}] Belief Fusion: news_fusions={fusion_stats.get('news_fusions', 0)}, "
                 f"mode={fusion_stats.get('news_mode', 'N/A')}"
             )
-
-        # Feed fused beliefs back to agents
-        for agent in agents:
-            agent_id = agent["agent_id"]
-            fused_belief = coordinator.get_agent_belief(agent_id)
-            if fused_belief is not None:
-                agent["belief_map"][:, :, 1] = fused_belief
-                agent["belief_map"][:, :, 0] = 1 - fused_belief
     else:
-        # Fallback: simple belief sharing (weighted averaging)
-        for agent in agents:
-            agent_id = agent["agent_id"]
-            camera = agent["camera"]
-            uav_pos = agent["uav_pos"]
-            belief_map = agent["belief_map"]
+        # IG_d mode: No news sharing, just use local beliefs
+        if step == 0:
+            print(f"[Step {step}] News sharing disabled (IG_d mode)")
 
-            if coordinator.should_coordinate(agent_id):
-                observed_mask = np.zeros(grid_info.shape, dtype=bool)
-                [[imin, imax], [jmin, jmax]] = camera.get_range(
-                    position=uav_pos.position,
-                    altitude=uav_pos.altitude,
-                    index_form=True,
-                )
-                observed_mask[imin:imax, jmin:jmax] = True
-                coordinator.share_belief(agent_id, belief_map, observed_mask)
+    # Feed fused beliefs back to agents
+    for agent in agents:
+        agent_id = agent["agent_id"]
+        fused_belief = mapper.get_agent_belief(agent_id)
+        if fused_belief is not None:
+            agent["belief_map"][:, :, 1] = fused_belief
+            agent["belief_map"][:, :, 0] = 1 - fused_belief
 
 
 def select_agent_actions(
@@ -543,17 +565,15 @@ def update_agent_positions(
         camera.set_altitude(uav_pos.altitude)
         camera.set_position(uav_pos.position)
 
-        # Update coordinator
+        # Update coordinator with new position
         if coordinator:
             current_row, current_col = camera.convert_xy_ij(
                 uav_pos.position[0], uav_pos.position[1], camera.grid.center
             )
-            coverage_val = agent["coverage"][-1] if agent["coverage"] else 0.0
             coordinator.update_agent_state(
                 agent_id=agent_id,
                 position=(current_row, current_col),
                 altitude=uav_pos.altitude,
-                coverage=coverage_val,
             )
 
         # Clean up temporary action

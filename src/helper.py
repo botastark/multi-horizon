@@ -1,6 +1,5 @@
 # pairwise_factor_weights: equal, biased, adaptive
 import numpy as np
-from sklearn.metrics import confusion_matrix
 import os
 from datetime import datetime
 
@@ -234,117 +233,6 @@ def compute_metrics(ground_truth_map, belief, ms_set, grid):
     return (entropy, mse, coverage)
 
 
-# class FastLogger:
-#     HEADER = "step\tentropy\tmse\theight\tcoverage\n"
-
-#     def __init__(
-#         self,
-#         dir,
-#         strategy="ig",
-#         pairwise="equal",
-#         n_agent=1,
-#         e=0.3,
-#         grid=None,
-#         r=None,
-#         init_x=None,
-#         conf_dict=None,
-#     ):
-
-#         self.strategy = strategy
-#         self.pairwise = pairwise
-#         self.n = n_agent
-#         self.grid = grid
-#         self.init_x = init_x
-#         self.step = 0
-#         self.r = r
-#         self.e = e
-
-#         self.filename = (
-#             dir
-#             + "/"
-#             + self.strategy
-#             + "_"
-#             + self.pairwise
-#             + "_e"
-#             + str(self.e)
-#             + "_r"
-#             + str(self.r)
-#             + "_"
-#             + str(self.n)
-#             + ".txt"
-#         )
-
-#         os.makedirs(dir, exist_ok=True)
-
-#         with open(self.filename, "w") as f:
-#             f.write(f"Strategy: {self.strategy}\n")
-#             f.write(f"Pairwise: {self.pairwise}\n")
-#             f.write(f"N agents: {self.n}\n")
-#             f.write(f"Error margin: {self.e}\n")
-#             if conf_dict is not None:
-#                 f.write("confision matrix: {")
-
-#                 for key, value in conf_dict.items():
-#                     value_str = ", ".join(map(str, value))
-#                     f.write(f"{key}: [{value_str}] ")
-#                 f.write("}\n")
-#             if isinstance(self.r, str):
-#                 f.write(f"using {self.r} \n")
-#             else:
-#                 f.write(f"Gaussian radius {self.r} \n")
-#             f.write(
-#                 f"Grid info: range: 0-{self.grid.x}-{self.grid.y}, cell_size:{self.grid.length}, map shape: {self.grid.shape}, center:{self.grid.center}\n"
-#             )
-
-#             f.write(
-#                 f"init UAV position: {self.init_x.position} - {self.init_x.altitude} \n"
-#             )
-#             # Print table header with aligned columns
-#             f.write(
-#                 f"{'Step':<6} {'Entropy':<10} {'MSE':<8} {'Height':<8} {'Coverage':<10}\n"
-#             )
-#             f.write("-" * 48)  # Divider line
-#             f.write("\n")
-
-#     def log_data(self, entropy, mse, height, coverage):
-#         with open(self.filename, "a") as f:
-#             f.write(
-#                 f"{self.step:<6} {round(entropy, 2):<10} {round(mse, 4):<8} {round(height, 1):<8} {round(coverage, 4):<10}\n"
-#             )
-
-#             f.flush()
-#         self.step += 1
-
-#     def log(self, text):
-#         with open(self.filename, "a") as f:
-#             f.write(text + "\n")
-#             f.flush()
-
-#     def collect_data(self, filename=None):
-#         filename = filename or self.filename
-#         info = {"strategy": None, "pairwise": None, "agents": None}
-#         entropy, mse, height, coverage = [], [], [], []
-
-#         try:
-#             with open(filename, "r") as f:
-#                 lines = f.readlines()
-
-#             info["strategy"] = lines[0].strip()
-#             info["pairwise"] = lines[1].strip()
-#             info["agents"] = lines[2].strip()
-
-#             for line in lines[3:]:
-#                 raw = line.split("\t")
-#                 entropy.append(float(raw[1]))
-#                 mse.append(float(raw[2]))
-#                 height.append(float(raw[3]))
-#                 coverage.append(float(raw[4]))
-
-#         except (IOError, IndexError, ValueError) as e:
-#             print(f"Error reading or parsing data: {e}")
-
-#         return info, (entropy, mse, height, coverage)
-
 import os
 import datetime as _dt
 
@@ -376,6 +264,7 @@ class FastLogger:
         multi_agent=False,
         num_agents=1,
         iteration=None,
+        news_mode=None,
     ):
         os.makedirs(log_folder, exist_ok=True)
         self.path = os.path.join(log_folder, filename)
@@ -387,6 +276,10 @@ class FastLogger:
         self._w(f"[{_dt.datetime.now().isoformat(timespec='seconds')}]\n")
         self._w(f"Strategy: {strategy}\n")
         self._w(f"Pairwise: {pairwise}\n")
+
+        # Information sharing mode (IG, IG_d, BS, BM)
+        if news_mode is not None:
+            self._w(f"News mode: {news_mode}\n")
 
         # Show actual agent count and iteration separately
         if num_agents is not None and num_agents > 0:
@@ -439,10 +332,8 @@ class FastLogger:
 
         # Table header - different format for multi-agent
         if multi_agent:
-            self._w(
-                "Step   Entropy      MSE        Coverage   Heights              Actions                   IGs\n"
-            )
-            self._w("-" * 110 + "\n")
+            self._w("Step\tEntropy\tMSE\tCoverage\tHeights\tActions\tIGs\n")
+            self._w("-" * 120 + "\n")
         else:
             self._w("Step   Entropy      MSE        Height   Coverage   Action    IG\n")
             self._w(
@@ -505,9 +396,9 @@ class FastLogger:
             step_s = f"{step:<5d}" if step is not None else "-    "
         except Exception:
             step_s = f"{str(step):<5}"
-        ent_s = f"{float(entropy):<11.2f}"
-        mse_s = f"{float(mse):<10.3f}"
-        cov_s = f"{float(coverage):<9.4f}"
+        ent_s = f"{float(entropy):<12.2f}"
+        mse_s = f"{float(mse):<8.3f}"
+        cov_s = f"{float(coverage):<8.4f}"
 
         # Format per-agent lists
         h_list = "[" + ", ".join(f"{h:.1f}" for h in heights) + "]"
@@ -515,7 +406,7 @@ class FastLogger:
         ig_list = "[" + ", ".join(f"{ig:.4f}" if ig else "-" for ig in igs) + "]"
 
         self._w(
-            f"{step_s} {ent_s} {mse_s} {cov_s} {h_list:<20} {act_list:<25} {ig_list}\n"
+            f"{step_s}\t{ent_s}\t{mse_s}\t{cov_s}\t{h_list}\t{act_list}\t{ig_list}\n"
         )
 
     def close(self):
@@ -529,13 +420,14 @@ import os
 import pickle
 
 
-def gaussian_random_field(cluster_radius, n_cell):
+def gaussian_random_field(cluster_radius, n_cell, seed=None):
     """
     Generate a 2D Gaussian random field and cache the results for reuse.
      https://andrewwalker.github.io/statefultransitions/post/gaussian-fields/
     Parameters:
     - cluster_radius: Correlation radius for the Gaussian field.
     - n_cell: Size of the field (n_cell_x x n_cell_y).
+    - seed: Random seed for reproducibility (default: None).
 
     - cache_dir: Directory to store cached fields (default: "cache").
 
@@ -560,7 +452,7 @@ def gaussian_random_field(cluster_radius, n_cell):
         return val
 
     # Generate amplitude for the given cluster_radius
-    map_rng = np.random.default_rng(123)
+    map_rng = np.random.default_rng(seed)
     amplitude = np.zeros((n_cell_x, n_cell_y))
     fft_indices_x = _fft_indices(n_cell_x)
     fft_indices_y = _fft_indices(n_cell_y)
