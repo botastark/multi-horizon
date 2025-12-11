@@ -391,7 +391,7 @@ def plot_all_settings(stats, radius, save_dir, strategy=None, show=False):
                 # Let matplotlib auto-scale based on data, will be adjusted later
                 # pass
                 num_ticks = 6  # e.g., 8 ticks including 0
-                max_mse = 0.25 if radius == "4" or radius == "5" else 0.25
+                max_mse = 0.275 if radius == "4" or radius == "5" else 0.25
                 yticks = np.linspace(0, max_mse, num_ticks)
                 ax.set_ylim(0, max_mse)
                 ax.set_yticks(yticks)
@@ -446,10 +446,26 @@ def plot_all_settings(stats, radius, save_dir, strategy=None, show=False):
         fontsize=17,
     )
 
+    # Build informative filename including number of agents and news modes when available
+    num_agents_str = "N1"
+    news_modes_str = "IG"
+    if "NumAgents" in stats.columns:
+        try:
+            nas = sorted(stats["NumAgents"].unique())
+            num_agents_str = f"N{nas[0]}" if len(nas) == 1 else f"N{nas[0]}-N{nas[-1]}"
+        except Exception:
+            pass
+    if "NewsMode" in stats.columns:
+        try:
+            modes = sorted([str(m) for m in stats["NewsMode"].unique()])
+            news_modes_str = "-".join(modes)
+        except Exception:
+            pass
+
     os.makedirs(save_dir, exist_ok=True)
-    filename = f"plot_all_settings_r_{radius}.png"
+    filename = f"plot_all_settings_r_{radius}_{num_agents_str}_{news_modes_str}.png"
     if strategy:
-        filename = f"plot_{strategy}_r_{radius}.png"
+        filename = f"plot_{strategy}_r_{radius}_{num_agents_str}_{news_modes_str}.png"
     out_path = os.path.join(save_dir, filename)
     plt.savefig(out_path, dpi=300, bbox_inches="tight")
     print(f"Saving to {out_path}")
@@ -596,8 +612,17 @@ def plot_information_sharing_comparison(stats, radius, save_dir, show=False):
             axes[row, col].set_ylim(ymin, ymax)
 
     # Save
+    # Include NumAgents in filename when available
+    num_agents_str = "N1"
+    if "NumAgents" in data.columns:
+        try:
+            nas = sorted(data["NumAgents"].unique())
+            num_agents_str = f"N{nas[0]}" if len(nas) == 1 else f"N{nas[0]}-N{nas[-1]}"
+        except Exception:
+            pass
+
     os.makedirs(save_dir, exist_ok=True)
-    filename = f"info_sharing_comparison_r{radius}.png"
+    filename = f"info_sharing_comparison_r{radius}_{num_agents_str}.png"
     out_path = os.path.join(save_dir, filename)
     plt.savefig(out_path, dpi=300, bbox_inches="tight")
     print(f"Saved information sharing comparison to {out_path}")
@@ -734,8 +759,19 @@ def plot_news_mode_comparison(stats, radius, save_dir, pairwise="equal", show=Fa
     )
 
     # Save
+    # Include NumAgents and available news modes in filename
+    num_agents_str = "N1"
+    if "NumAgents" in data.columns:
+        try:
+            nas = sorted(data["NumAgents"].unique())
+            num_agents_str = f"N{nas[0]}" if len(nas) == 1 else f"N{nas[0]}-N{nas[-1]}"
+        except Exception:
+            pass
+    modes = sorted(data["NewsMode"].unique()) if "NewsMode" in data.columns else ["IG"]
+    modes_str = "-".join([str(m) for m in modes])
+
     os.makedirs(save_dir, exist_ok=True)
-    filename = f"news_mode_comparison_r{radius}_{pairwise}.png"
+    filename = f"news_mode_comparison_r{radius}_{pairwise}_{num_agents_str}_{modes_str}.png"
     out_path = os.path.join(save_dir, filename)
     plt.savefig(out_path, dpi=300, bbox_inches="tight")
     print(f"Saved news mode comparison to {out_path}")
