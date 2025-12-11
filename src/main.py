@@ -443,7 +443,7 @@ def run_multi_agent_experiment(
     dec_config = config.get("decentralized", {})
     news_sharing = dec_config.get("news_sharing", True)
     position_sharing = dec_config.get("position_sharing", True)
-    
+
     # Determine actual news_mode based on sharing options
     if not position_sharing and not news_sharing:
         news_mode = "IG"  # No sharing
@@ -509,8 +509,12 @@ def run_multi_agent_experiment(
         # PHASE 2: Synchronous belief fusion across agents
         # =====================================================================
         perform_belief_fusion(
-            agents, coordinator, agent_observations, grid_info, step,
-            news_sharing=news_sharing
+            agents,
+            coordinator,
+            agent_observations,
+            grid_info,
+            step,
+            news_sharing=news_sharing,
         )
 
         # =====================================================================
@@ -539,15 +543,24 @@ def run_multi_agent_experiment(
                     flush=True,
                 )
 
-        # Compute fused belief from all agents' local beliefs (product-of-experts)
-        all_beliefs = np.stack(
-            [agent["belief_map"][:, :, 1] for agent in agents], axis=-1
+        # Compute fused belief from all agents' local beliefs (simple average)
+        fused_local = np.mean(
+            [agent["belief_map"][:, :, 1] for agent in agents], axis=0
         )
-        prod_occupied = np.prod(all_beliefs, axis=-1)
-        prod_free = np.prod(1.0 - all_beliefs, axis=-1)
-        epsilon = 1e-20
-        fused_local = prod_occupied / (prod_occupied + prod_free + epsilon)
         fused_local = np.clip(fused_local, 0.001, 0.999)
+
+        # Debug: print fused belief statistics to diagnose unexpected MSE
+        if step == 0 or step % 10 == 0:
+            flat = fused_local.ravel()
+            counts, edges = np.histogram(flat, bins=np.linspace(0.0, 1.0, 11))
+            print(
+                f"[DEBUG] step={step} fused_mean={flat.mean():.4f} min={flat.min():.4f} max={flat.max():.4f}",
+                flush=True,
+            )
+            print(
+                f"[DEBUG] fused_hist_counts={counts.tolist()} bins={edges.tolist()}",
+                flush=True,
+            )
 
         display_belief = np.zeros((grid_info.shape[0], grid_info.shape[1], 2))
         display_belief[:, :, 1] = fused_local
@@ -744,19 +757,19 @@ def main():
     ) = load_global_paths(config)
     # base_dir = create_run_folder(os.path.join(PROJECT_PATH, "results"))
     base_dir = os.path.join(PROJECT_PATH, "trials")
-    
+
     # Get multi-agent and news mode configuration for folder naming
     ma_config = config.get("multi_agent", {})
     dec_config = config.get("decentralized", {})
     num_agents = config.get("num_agents", ma_config.get("num_agents", 1))
-    
+
     # Determine news mode based on sharing options:
     # - IG: No sharing (position_sharing=false, news_sharing=false)
     # - IG_d: Position sharing only (position_sharing=true, news_sharing=false)
     # - BS/BM: Position + news sharing (position_sharing=true, news_sharing=true)
     position_sharing = dec_config.get("position_sharing", True)
     news_sharing = dec_config.get("news_sharing", True)
-    
+
     if num_agents > 1:
         if not position_sharing and not news_sharing:
             news_mode = "IG"  # No sharing at all
@@ -768,11 +781,11 @@ def main():
     else:
         # Single agent - always IG (no sharing possible)
         news_mode = "IG"
-    
+
     # Get radius (grf_r) - Gaussian field uses 5, Ortomap uses "orto"
     field_type_raw = config.get("field_type", "Gaussian")
     grf_r_for_name = "orto" if field_type_raw == "Ortomap" else 5
-    
+
     # Build run_base with all parameters: strategy_field_r{radius}_start_N{agents}_{mode}
     run_base = (
         f"{config['action_strategy']}_{config['field_type'].lower()}_"
@@ -788,8 +801,12 @@ def main():
     logger = get_main_logger()
     logger.info(f"Results folder: {results_folder}")
     logger.info(f"Config loaded from: {args.config}")
-    logger.info(f"Experiment: num_agents={num_agents}, news_mode={news_mode}, radius={grf_r_for_name}")
-    logger.info(f"Strategy: {config['action_strategy']}, Field: {config['field_type']}, Start: {config['start_position']}")
+    logger.info(
+        f"Experiment: num_agents={num_agents}, news_mode={news_mode}, radius={grf_r_for_name}"
+    )
+    logger.info(
+        f"Strategy: {config['action_strategy']}, Field: {config['field_type']}, Start: {config['start_position']}"
+    )
 
     ENABLE_STEPWISE_PLOTTING = config["enable_plotting"]
     ENABLE_LOGGING = config["enable_logging"]

@@ -374,7 +374,7 @@ def plot_all_settings(stats, radius, save_dir, strategy=None, show=False):
 
             # Only the leftmost column gets y-axis labels and tick labels
             if category == "Height":
-                if radius == "4":
+                if radius == "4" or radius == "5":
                     yticks = np.linspace(0, 5.4126 * 6, 7)
                 else:
                     yticks = np.linspace(19.5, 19.5 + 7.79 * 5, 6)
@@ -382,14 +382,19 @@ def plot_all_settings(stats, radius, save_dir, strategy=None, show=False):
 
             elif category == "Entropy":
                 num_ticks = 6  # e.g., 8 ticks including 0
-                max_entropy = 175000 if radius == "4" else 7500
+                max_entropy = 175000 if radius == "4" or radius == "5" else 7500
                 yticks = np.linspace(0, max_entropy, num_ticks)
                 ax.set_ylim(0, max_entropy)
                 ax.set_yticks(yticks)
 
             elif category == "MSE":
                 # Let matplotlib auto-scale based on data, will be adjusted later
-                pass
+                # pass
+                num_ticks = 6  # e.g., 8 ticks including 0
+                max_mse = 0.25 if radius == "4" or radius == "5" else 0.25
+                yticks = np.linspace(0, max_mse, num_ticks)
+                ax.set_ylim(0, max_mse)
+                ax.set_yticks(yticks)
 
             if col == 0:
 

@@ -222,11 +222,12 @@ def compute_entropy(belief):
 
 
 def compute_metrics(ground_truth_map, belief, ms_set, grid):
+    # Use probabilistic MSE: compare ground truth (0/1) to P(m=1) directly
     if belief.ndim == 3:
-        estimated_map = (belief[..., 1] >= 0.5).astype(np.uint8)
+        estimated_probs = belief[..., 1]
     else:
-        estimated_map = (belief >= 0.5).astype(np.uint8)
-    mse = compute_mse(ground_truth_map, estimated_map)
+        estimated_probs = belief
+    mse = compute_mse(ground_truth_map, estimated_probs)
     entropy = compute_entropy(belief)
     coverage = compute_coverage(ms_set, grid)
 
