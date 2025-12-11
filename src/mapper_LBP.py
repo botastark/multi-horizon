@@ -183,24 +183,16 @@ class OccupancyMap:
             uav_pos (object): UAV (xy_position, altitude).
         """
         I, J = 0, 1
-        a, b = (
-            1,
-            0.015,
-        )  # Empirically chosen constants for sensor model when its not given
-        sigma = a * (
-            1 - np.exp(-b * uav_pos.altitude)
-        )  # Error parameter based on altitude
-
-        if self.conf_dict is not None:
-            s0, s1 = self.conf_dict[np.round(uav_pos.altitude, decimals=2)]
-        else:
-            s0, s1 = sigma, sigma
-        self.sigma0 = s0
-        self.sigma1 = s1
+        if self.conf_dict is None:
+            raise ValueError(
+                "conf_dict must be provided with altitude->(sigma0, sigma1) mapping."
+            )
+        alt = np.round(uav_pos.altitude, decimals=2)
+        self.sigma0, self.sigma1 = self.conf_dict[alt]
 
         # Likelihood of each state (0 or 1)
-        likelihood_m_zero = np.where(z == 0, 1 - s0, s0)
-        likelihood_m_one = np.where(z == 0, s1, 1 - s1)
+        likelihood_m_zero = np.where(z == 0, 1 - self.sigma0, self.sigma0)
+        likelihood_m_one = np.where(z == 0, self.sigma1, 1 - self.sigma1)
 
         assert np.all(np.greater_equal(likelihood_m_one, 0.0)) and np.all(
             np.less_equal(likelihood_m_one, 1.0)
@@ -234,7 +226,7 @@ class OccupancyMap:
         ] = posterior_m_one_norm
 
     def propagate_messages(
-        self, fp_vertices_ij, z, max_iterations=5, correlation_type=None
+        self, fp_vertices_ij, z, max_iterations=1, correlation_type=None
     ):
         """
         Run Loopy Belief Propagation (LBP) to propagate local evidence spatially.

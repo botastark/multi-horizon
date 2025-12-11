@@ -22,28 +22,6 @@ from osgeo import gdal
 gdal.UseExceptions()  # Enable GDAL exceptions
 
 
-# desktop = "/home/bota/Desktop/active_sensing"
-# annotation_path = desktop + "/src/annotation.txt"
-# dataset_path = "/media/bota/BOTA/wheat/example-run-001_20241014T1739_ortho_dsm.tif"
-# tile_ortomappixel_path = desktop + "/data/tomatotiles.txt"
-# model_path = (
-#     desktop + "/binary_classifier/models/best_model_auc91_lr1_-05_bs128_wd_2.5-04.pth"
-# )
-# cache_dir = desktop + "/data/predictions_cache/"
-
-
-# Global paths and configuration
-# DESKTOP_PATH = "/home/bota/Desktop/active_sensing"
-# ANNOTATION_PATH = os.path.join(DESKTOP_PATH, "src/annotation.txt")
-# DATASET_PATH = "/media/bota/BOTA/wheat/example-run-001_20241014T1739_ortho_dsm.tif"
-# TILE_PIXEL_PATH = os.path.join(DESKTOP_PATH, "data/tomatotiles.txt")
-# MODEL_PATH = os.path.join(
-#     DESKTOP_PATH,
-#     "binary_classifier/models/best_model_auc91_lr1_-05_bs128_wd_2.5-04.pth",
-# )
-# CACHE_DIR = os.path.join(DESKTOP_PATH, "data/predictions_cache/")
-
-
 class ImageSampler:
     """Class to perform various image sampling and simulation operations based on altitude."""
 
@@ -199,7 +177,7 @@ class Field:
             self.field_type = "Gaussian"
             self.field_radius = field_type
             self.ground_truth_map = gaussian_random_field(
-                self.field_radius, grid_info.shape
+                self.field_radius, grid_info.shape, seed
             )
         elif field_type == "Ortomap":
             self.field_type = field_type
@@ -264,14 +242,17 @@ class Field:
             self.predictions_cache[alt] = pred_map
         self._save_cache()
 
-    def reset(self):
+    def reset(self, seed=None):
         """Reset the Gaussian field and random generator."""
         if self.field_type == "Gaussian":
             try:
+                # Use new seed if provided, otherwise use original seed
+                current_seed = seed if seed is not None else self.seed
+                self.seed = current_seed
                 self.ground_truth_map = gaussian_random_field(
-                    self.field_radius, self.grid_info.shape
+                    self.field_radius, self.grid_info.shape, current_seed
                 )
-                self.rng = np.random.default_rng(self.seed)
+                self.rng = np.random.default_rng(current_seed)
             except Exception as e:
                 raise ValueError(
                     f"Couldn't reset Gaussian field with radius {self.field_radius}: {e}"

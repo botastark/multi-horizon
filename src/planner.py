@@ -210,14 +210,11 @@ class planning:
         """
         Run greedy IG planning with multi-agent support.
 
-        This is the paper's baseline: single-step lookahead IG with
-        teammate overlap avoidance. Used as benchmark against MH methods.
-
-        Features:
-        - Single-step IG computation
-        - Teammate intent sharing via coordinator
-        - Overlap penalty for coordination
-        - Compatible with async execution
+        Paper's approach (pure belief-based coordination):
+        - Single-step IG computation using FUSED belief
+        - No overlap penalties or intent-based coordination
+        - Coordination emerges from Bayesian news fusion
+        - Areas observed by teammates have lower entropy -> lower IG
 
         Returns:
             Tuple of (selected_action, action_scores_dict)
@@ -231,30 +228,14 @@ class planning:
 
         # Create or get greedy IG planner
         if not hasattr(self, "_greedy_ig_planner"):
-            # Check if coordinator has a shared greedy IG coordinator
-            greedy_coordinator = None
-            if self.coordinator is not None:
-                if not hasattr(self.coordinator, "_greedy_ig_coordinator"):
-                    num_agents = getattr(self.coordinator, "num_agents", 1)
-                    self.coordinator._greedy_ig_coordinator = GreedyIGCoordinator(
-                        num_agents=num_agents
-                    )
-                greedy_coordinator = self.coordinator._greedy_ig_coordinator
-
-            # Extract config
+            # Extract config - paper approach uses 0.0 for penalties
             greedy_config = (
                 self.conf_dict.get("greedy_ig", {}) if self.conf_dict else {}
             )
-            dec_config = (
-                self.conf_dict.get("decentralized", {}) if self.conf_dict else {}
-            )
 
             config = {
-                "intent_discount": greedy_config.get("intent_discount", 0.5),
-                "overlap_penalty_weight": dec_config.get(
-                    "overlap_penalty_weight",
-                    greedy_config.get("overlap_penalty_weight", 0.0),
-                ),
+                "intent_discount": 0.0,  # Paper: no intent-based coordination
+                "overlap_penalty_weight": 0.0,  # Paper: no penalty terms
             }
 
             self._greedy_ig_planner = create_greedy_ig_planner(
@@ -264,37 +245,23 @@ class planning:
                 conf_dict=self.conf_dict,
                 config=config,
             )
-            self._greedy_ig_coordinator = greedy_coordinator
 
             print(f"\n[GREEDY IG] Agent {self.agent_id} initialized")
-            print(f"  Overlap penalty weight: {config['overlap_penalty_weight']}\n")
+            print(f"  Paper approach: pure belief-based IG (no penalties)\n")
 
         planner = self._greedy_ig_planner
 
-        # Update belief
+        # Update belief - this should be the FUSED belief from coordinator
         planner.update_belief(self.M.copy())
-
-        # Get teammate intents
-        if self._greedy_ig_coordinator is not None:
-            teammate_intents = self._greedy_ig_coordinator.get_teammate_intents(
-                self.agent_id
-            )
-            planner.update_teammate_intents(teammate_intents)
-        else:
-            teammate_intents = {}
 
         # Get current position
         uav_pos = self.uav.get_x()
 
-        # Run planning
+        # Run planning (pure IG, no penalties)
         intent = planner.plan(
             current_position=uav_pos.position,
             current_altitude=uav_pos.altitude,
         )
-
-        # Share intent with coordinator
-        if self._greedy_ig_coordinator is not None:
-            self._greedy_ig_coordinator.share_intent(intent)
 
         # Log decision
         log_greedy_ig_decision(
@@ -304,9 +271,7 @@ class planning:
             overlap_penalties=planner._overlap_penalties,
             final_scores=planner._action_scores,
             selected_action=intent.action,
-            intents_received={
-                "teammates": list(teammate_intents.keys()),
-            },
+            intents_received={"teammates": []},  # Paper: no intent sharing
         )
 
         # Get action and scores

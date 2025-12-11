@@ -86,6 +86,7 @@ def _parse_single_experiment(lines, file_path):
     confusion_matrix = None
     n_agents = None
     iteration = None
+    news_mode = None  # IG, IG_d, BS, BM
 
     # Extract metadata from the file lines
     for line in lines:
@@ -93,6 +94,8 @@ def _parse_single_experiment(lines, file_path):
             pairwise = line.split(":")[1].strip()
         elif line.startswith("Strategy:"):
             strategy = line.split(":")[1].strip()
+        elif line.startswith("News mode:"):
+            news_mode = line.split(":")[1].strip()
         elif line.startswith("Num agents:"):
             n_agents = int(line.split(":")[1].strip())
         elif line.startswith("Iteration:"):
@@ -134,8 +137,12 @@ def _parse_single_experiment(lines, file_path):
 
     # Locate the starting point of the table
     start_index = None
+    is_multi_agent = False
     for i, line in enumerate(lines):
         if line.strip().startswith("Step"):
+            # Check if it's multi-agent format by looking for "Heights" in header
+            if "Heights" in line and "Actions" in line:
+                is_multi_agent = True
             # Check if next line is a separator (dashes)
             if i + 1 < len(lines) and lines[i + 1].strip().startswith("-"):
                 start_index = i + 2
@@ -153,13 +160,46 @@ def _parse_single_experiment(lines, file_path):
         if not line.strip() or not line[0].isdigit():
             continue
         parts = line.split()
-        step, entropy, mse, height, coverage = map(float, parts[:5])
-        sigma1, sigma2 = None, None
-        # If a confusion matrix is available, obtain the closest sigma values for the current height
-        if confusion_matrix is not None:
-            [sigma1, sigma2] = get_closest_value(confusion_matrix, height)
 
-        table_data.append([int(step), entropy, mse, height, coverage, sigma1, sigma2])
+        if is_multi_agent:
+            # Multi-agent format: Step Entropy MSE Coverage Heights[...] Actions[...] IGs[...]
+            # Extract step, entropy, mse, coverage
+            step = float(parts[0])
+            entropy = float(parts[1])
+            mse = float(parts[2])
+            coverage = float(parts[3])
+
+            # For multi-agent, we'll use average height from the list
+            # Find the Heights list in the line
+            heights_start = line.find("[", line.find(str(coverage)))
+            if heights_start != -1:
+                heights_end = line.find("]", heights_start)
+                heights_str = line[heights_start + 1 : heights_end]
+                heights = [
+                    float(h.strip()) for h in heights_str.split(",") if h.strip()
+                ]
+                avg_height = sum(heights) / len(heights) if heights else 0.0
+            else:
+                avg_height = 0.0
+
+            sigma1, sigma2 = None, None
+            if confusion_matrix is not None:
+                [sigma1, sigma2] = get_closest_value(confusion_matrix, avg_height)
+
+            table_data.append(
+                [int(step), entropy, mse, avg_height, coverage, sigma1, sigma2]
+            )
+        else:
+            # Single-agent format: Step Entropy MSE Height Coverage Action IG
+            step, entropy, mse, height, coverage = map(float, parts[:5])
+            sigma1, sigma2 = None, None
+            # If a confusion matrix is available, obtain the closest sigma values for the current height
+            if confusion_matrix is not None:
+                [sigma1, sigma2] = get_closest_value(confusion_matrix, height)
+
+            table_data.append(
+                [int(step), entropy, mse, height, coverage, sigma1, sigma2]
+            )
 
     # Return None if no data rows found
     if not table_data:
@@ -177,12 +217,16 @@ def _parse_single_experiment(lines, file_path):
     df["GaussianRadius"] = gaussian_radius
     df["NumAgents"] = n_agents if n_agents is not None else 1
     df["Iteration"] = iteration if iteration is not None else 0
+    df["NewsMode"] = (
+        news_mode if news_mode is not None else "IG"
+    )  # Default to IG (no sharing)
     df["sigma1"] = sigma1
     df["sigma2"] = sigma2
     # Ensure correct data types for consistency
     df["Pairwise"] = df["Pairwise"].astype(str)
     df["GaussianRadius"] = df["GaussianRadius"].astype(str)
     df["ErrorMargin"] = df["ErrorMargin"].astype(float)
+    df["NewsMode"] = df["NewsMode"].astype(str)
 
     return df
 
@@ -227,14 +271,15 @@ def aggregate_data_by_settings(path):
 
     combined_df = pd.concat(all_data)
 
+    # Determine grouping columns (include NewsMode and NumAgents if present)
+    group_cols = ["Strategy", "Pairwise", "GaussianRadius", "ErrorMargin", "Step"]
+    if "NewsMode" in combined_df.columns:
+        group_cols.insert(4, "NewsMode")  # Add NewsMode before Step
+    if "NumAgents" in combined_df.columns:
+        group_cols.insert(1, "NumAgents")  # Add NumAgents after Strategy
+
     # Group data by settings and compute mean and standard deviation
-    grouped = (
-        combined_df.groupby(
-            ["Strategy", "Pairwise", "GaussianRadius", "ErrorMargin", "Step"]
-        )
-        .agg(["mean", "std"])
-        .reset_index()
-    )
+    grouped = combined_df.groupby(group_cols).agg(["mean", "std"]).reset_index()
 
     return grouped
 
@@ -343,11 +388,8 @@ def plot_all_settings(stats, radius, save_dir, strategy=None, show=False):
                 ax.set_yticks(yticks)
 
             elif category == "MSE":
-                num_ticks = 5  # e.g., 5 ticks including 0
-                max_mse = 0.32 if radius == "4" else 0.25
-                yticks = np.round(np.linspace(0, max_mse, num_ticks), decimals=2)
-                ax.set_ylim(0, max_mse)
-                ax.set_yticks(yticks)
+                # Let matplotlib auto-scale based on data, will be adjusted later
+                pass
 
             if col == 0:
 
@@ -410,6 +452,293 @@ def plot_all_settings(stats, radius, save_dir, strategy=None, show=False):
         plt.show()
 
 
+def plot_information_sharing_comparison(stats, radius, save_dir, show=False):
+    """
+    Plot comparison of information sharing modes (IG, IG_d, BS, BM) as in the paper.
+
+    Creates a 2x2 or 3x2 grid:
+    - Columns: IG (left) vs IG_d (right)
+    - Rows: MSE evolution (R=∞), MSE evolution (R=5), local beliefs misalignment
+
+    Paper reference: "Effect of information sharing in multi-agent scenarios"
+    - IG: No information sharing (baseline)
+    - IG_d: With position sharing (discounted)
+    - BS: Single news belief shared to all neighbors
+    - BM: Per-neighbor private news beliefs
+
+    Parameters:
+    stats (pd.DataFrame): Aggregated statistics DataFrame with NewsMode column.
+    radius (str): Gaussian radius setting ('5' or 'orto').
+    save_dir (str): Directory to save the generated plot.
+    show (bool): If True, displays the plot interactively.
+    """
+    plt.style.use("seaborn-v0_8-paper")
+    plt.rcParams.update(
+        {
+            "font.size": 14,
+            "axes.titlesize": 16,
+            "axes.labelsize": 14,
+            "xtick.labelsize": 12,
+            "ytick.labelsize": 12,
+            "legend.fontsize": 11,
+        }
+    )
+
+    # Define news modes and their display properties
+    news_modes = {
+        "IG": {"color": "blue", "linestyle": "-", "label": "IG (no sharing)"},
+        "IG_d": {
+            "color": "blue",
+            "linestyle": "--",
+            "label": "IG_d (position sharing)",
+        },
+        "BS": {"color": "red", "linestyle": "-", "label": "BS (single news)"},
+        "BM": {"color": "green", "linestyle": "-", "label": "BM (per-neighbor news)"},
+    }
+
+    # Filter data for specified radius
+    data = stats[stats["GaussianRadius"] == radius].copy()
+
+    if data.empty:
+        print(f"No data found for radius={radius}")
+        return
+
+    # Check available news modes
+    available_modes = data["NewsMode"].unique() if "NewsMode" in data.columns else []
+    print(f"Available news modes: {available_modes}")
+
+    # Create figure: 2 columns (IG vs IG_d style), 2 rows (MSE, Coverage)
+    fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(12, 8), constrained_layout=True)
+
+    # Define what to plot
+    metrics = ["MSE", "Coverage"]
+    column_titles = ["IG (no position sharing)", "IG_d (with position sharing)"]
+
+    # Mapping: left column shows IG and BS/BM without intent discount
+    # right column shows IG_d variants
+    left_modes = ["IG", "BS", "BM"]  # No position sharing
+    right_modes = ["IG_d"]  # With position sharing (could add BS_d, BM_d if available)
+
+    for col, (col_title, modes) in enumerate(
+        zip(column_titles, [left_modes, right_modes])
+    ):
+        for row, metric in enumerate(metrics):
+            ax = axes[row, col]
+
+            if row == 0:
+                ax.set_title(col_title, fontsize=14, fontweight="bold")
+
+            for mode in modes:
+                if mode not in available_modes:
+                    continue
+
+                mode_data = data[data["NewsMode"] == mode]
+                if mode_data.empty:
+                    continue
+
+                # Group by step and compute mean/std across iterations
+                grouped = (
+                    mode_data.groupby("Step")
+                    .agg({(metric, "mean"): "mean", (metric, "std"): "mean"})
+                    .reset_index()
+                )
+
+                if grouped.empty:
+                    continue
+
+                steps = grouped["Step"]
+                mean_vals = grouped[(metric, "mean")]
+                std_vals = grouped[(metric, "std")]
+
+                props = news_modes.get(
+                    mode, {"color": "gray", "linestyle": "-", "label": mode}
+                )
+
+                ax.plot(
+                    steps,
+                    mean_vals,
+                    color=props["color"],
+                    linestyle=props["linestyle"],
+                    linewidth=2,
+                    label=props["label"],
+                )
+
+                ax.fill_between(
+                    steps,
+                    mean_vals - std_vals,
+                    mean_vals + std_vals,
+                    color=props["color"],
+                    alpha=0.15,
+                )
+
+            # Styling
+            ax.set_ylabel(metric if col == 0 else "")
+            if row == len(metrics) - 1:
+                ax.set_xlabel("Steps")
+            ax.grid(True, linestyle="--", alpha=0.7)
+            ax.minorticks_on()
+            for spine in ["top", "right"]:
+                ax.spines[spine].set_visible(False)
+
+            if col == 0:
+                ax.legend(loc="best", framealpha=0.9)
+
+    # Synchronize y-axis limits across columns for each metric
+    for row in range(len(metrics)):
+        ymin = min(axes[row, 0].get_ylim()[0], axes[row, 1].get_ylim()[0])
+        ymax = max(axes[row, 0].get_ylim()[1], axes[row, 1].get_ylim()[1])
+        for col in range(2):
+            axes[row, col].set_ylim(ymin, ymax)
+
+    # Save
+    os.makedirs(save_dir, exist_ok=True)
+    filename = f"info_sharing_comparison_r{radius}.png"
+    out_path = os.path.join(save_dir, filename)
+    plt.savefig(out_path, dpi=300, bbox_inches="tight")
+    print(f"Saved information sharing comparison to {out_path}")
+
+    if show:
+        plt.show()
+
+
+def plot_news_mode_comparison(stats, radius, save_dir, pairwise="equal", show=False):
+    """
+    Plot all news modes (IG, IG_d, BS, BM) on a single figure for comparison.
+
+    This creates a simpler comparison showing MSE and Coverage evolution
+    for all available information sharing modes.
+
+    Parameters:
+    stats (pd.DataFrame): Aggregated statistics DataFrame.
+    radius (str): Gaussian radius setting.
+    save_dir (str): Directory to save the plot.
+    pairwise (str): Pairwise correlation type to filter by.
+    show (bool): If True, displays the plot.
+    """
+    plt.style.use("seaborn-v0_8-paper")
+    plt.rcParams.update(
+        {
+            "font.size": 14,
+            "axes.titlesize": 16,
+            "axes.labelsize": 14,
+            "xtick.labelsize": 12,
+            "ytick.labelsize": 12,
+        }
+    )
+
+    # News mode display properties
+    mode_props = {
+        "IG": {
+            "color": "#1f77b4",
+            "linestyle": "-",
+            "marker": "o",
+            "label": "IG (no sharing)",
+        },
+        "IG_d": {
+            "color": "#1f77b4",
+            "linestyle": "--",
+            "marker": "s",
+            "label": "IG_d (position)",
+        },
+        "BS": {
+            "color": "#d62728",
+            "linestyle": "-",
+            "marker": "^",
+            "label": "BS (broadcast)",
+        },
+        "BM": {
+            "color": "#2ca02c",
+            "linestyle": "-",
+            "marker": "v",
+            "label": "BM (per-neighbor)",
+        },
+    }
+
+    # Filter data
+    data = stats[
+        (stats["GaussianRadius"] == radius) & (stats["Pairwise"] == pairwise)
+    ].copy()
+
+    if data.empty:
+        print(f"No data for radius={radius}, pairwise={pairwise}")
+        return
+
+    # Get available news modes
+    if "NewsMode" not in data.columns:
+        print("NewsMode column not found in data")
+        return
+
+    available_modes = sorted(data["NewsMode"].unique())
+    print(f"Plotting news modes: {available_modes}")
+
+    # Create figure: 1 row, 2 columns (MSE, Coverage)
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5), constrained_layout=True)
+
+    metrics = [("MSE", "MSE"), ("Coverage", "Coverage")]
+
+    for ax, (metric, ylabel) in zip(axes, metrics):
+        for mode in available_modes:
+            mode_data = data[data["NewsMode"] == mode]
+            if mode_data.empty:
+                continue
+
+            # Limit to 100 steps
+            mode_data = mode_data[mode_data["Step"] <= 100]
+
+            steps = mode_data["Step"]
+            mean_vals = mode_data[(metric, "mean")]
+            std_vals = mode_data[(metric, "std")]
+
+            props = mode_props.get(
+                mode, {"color": "gray", "linestyle": "-", "marker": "", "label": mode}
+            )
+
+            # Plot with markers every 10 steps for visibility
+            ax.plot(
+                steps,
+                mean_vals,
+                color=props["color"],
+                linestyle=props["linestyle"],
+                linewidth=2,
+                label=props["label"],
+                markevery=10,
+                marker=props.get("marker", ""),
+                markersize=6,
+            )
+
+            ax.fill_between(
+                steps,
+                mean_vals - std_vals,
+                mean_vals + std_vals,
+                color=props["color"],
+                alpha=0.15,
+            )
+
+        ax.set_xlabel("Steps")
+        ax.set_ylabel(ylabel)
+        ax.set_title(f"{metric} Evolution")
+        ax.grid(True, linestyle="--", alpha=0.7)
+        ax.legend(loc="best")
+        for spine in ["top", "right"]:
+            ax.spines[spine].set_visible(False)
+
+    fig.suptitle(
+        f"Information Sharing Comparison (r={radius}, {pairwise})",
+        fontsize=16,
+        fontweight="bold",
+    )
+
+    # Save
+    os.makedirs(save_dir, exist_ok=True)
+    filename = f"news_mode_comparison_r{radius}_{pairwise}.png"
+    out_path = os.path.join(save_dir, filename)
+    plt.savefig(out_path, dpi=300, bbox_inches="tight")
+    print(f"Saved news mode comparison to {out_path}")
+
+    if show:
+        plt.show()
+
+
 def main(path, show, radius):
     """
     Main function to aggregate data from text files and generate plots.
@@ -437,6 +766,8 @@ def main(path, show, radius):
     print(f"unique error margins: {all_stats['ErrorMargin'].unique()}")
     print(f"unique rad: {all_stats['GaussianRadius'].unique()}")
     print(f"unique pairwise: {all_stats['Pairwise'].unique()}")
+    if "NewsMode" in all_stats.columns:
+        print(f"unique news modes: {all_stats['NewsMode'].unique()}")
 
     # Determine strategy name (use first strategy if multiple exist)
     strategy = None
@@ -452,6 +783,59 @@ def main(path, show, radius):
     plot_all_settings(all_stats, radius, save_dir, strategy=strategy, show=show)
 
 
+def main_news_comparison(paths, show, radius, pairwise="equal"):
+    """
+    Main function to compare different news modes (IG, IG_d, BS, BM).
+
+    Parameters:
+    paths (list): List of paths to data directories for different news modes.
+    show (bool): Whether to display the plot interactively.
+    radius (str): Gaussian radius setting.
+    pairwise (str): Pairwise correlation type.
+    """
+    all_stats = pd.DataFrame()
+
+    for path in paths:
+        if not os.path.exists(path):
+            print(f"Warning: Path does not exist: {path}")
+            continue
+        try:
+            stats = aggregate_data_by_settings(path)
+            all_stats = pd.concat([all_stats, stats], ignore_index=True)
+        except Exception as e:
+            print(f"Error processing {path}: {e}")
+
+    if all_stats.empty:
+        print("No data found!")
+        return
+
+    # Print available data - handle MultiIndex columns from aggregation
+    print(f"\n=== Data Summary ===")
+    print(f"Strategies: {all_stats['Strategy'].unique()}")
+    print(
+        f"News modes: {all_stats['NewsMode'].unique() if 'NewsMode' in all_stats.columns else 'N/A'}"
+    )
+    print(f"Pairwise: {all_stats['Pairwise'].unique()}")
+    print(f"Radius: {all_stats['GaussianRadius'].unique()}")
+    # NumAgents may not be in grouping columns, so check if it exists
+    if "NumAgents" in all_stats.columns:
+        print(f"Num agents: {all_stats['NumAgents'].unique()}")
+
+    # Save directory
+    script_dir = os.path.dirname(os.path.realpath(__file__))
+    save_dir = os.path.join(script_dir, "plots")
+
+    # Generate comparison plots
+    if "NewsMode" in all_stats.columns:
+        plot_news_mode_comparison(
+            all_stats, radius, save_dir, pairwise=pairwise, show=show
+        )
+        plot_information_sharing_comparison(all_stats, radius, save_dir, show=show)
+    else:
+        print("NewsMode column not found - using standard plotting")
+        plot_all_settings(all_stats, radius, save_dir, show=show)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Plot statistics from aggregated data."
@@ -465,6 +849,14 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
+        "--paths",
+        type=str,
+        nargs="+",
+        default=None,
+        help="Multiple paths for news mode comparison (e.g., --paths dir1 dir2 dir3)",
+    )
+
+    parser.add_argument(
         "--show", action="store_true", help="Whether to display the plots"
     )
 
@@ -475,5 +867,27 @@ if __name__ == "__main__":
         help="Specify the radius setting (integer or 'orto')",
     )
 
+    parser.add_argument(
+        "--pairwise",
+        type=str,
+        default="equal",
+        help="Pairwise correlation type for comparison plots",
+    )
+
+    parser.add_argument(
+        "--compare-news",
+        action="store_true",
+        help="Generate information sharing comparison plots (IG, IG_d, BS, BM)",
+    )
+
     args = parser.parse_args()
-    main(args.path, args.show, args.radius)
+
+    if args.compare_news and args.paths:
+        # Use multiple paths for news mode comparison
+        main_news_comparison(args.paths, args.show, args.radius, args.pairwise)
+    elif args.compare_news and args.path:
+        # Use single path but generate news comparison plots
+        main_news_comparison([args.path], args.show, args.radius, args.pairwise)
+    else:
+        # Standard plotting
+        main(args.path, args.show, args.radius)

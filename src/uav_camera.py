@@ -159,6 +159,20 @@ class Camera:
         """
         return uav_position((self.position, self.altitude))
 
+    def theoretical_conf_dict(self):
+
+        alt_min, alt_max = self.get_hrange()
+        alt_step = self.get_hstep()
+
+        altitudes = np.arange(alt_min, alt_max + alt_step, alt_step)
+
+        self.conf_dict = {
+            np.round(alt, 2): (sigma, sigma)
+            for alt in altitudes
+            for sigma in [self.a * (1 - np.exp(-self.b * alt))]
+        }
+        return self.conf_dict
+
     def ij_to_xy(self, i, j):
         """
         Convert grid indices (i, j) to real-world (x, y) coordinates.
