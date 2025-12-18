@@ -27,13 +27,13 @@ MH-Dec-MCTS is a **hierarchical** planner with two levels:
 │  ┌──────────────────────────────────────────────────────┐   │
 │  │          HierarchicalDecMCTSPlanner                  │   │
 │  │                                                      │   │
-│  │   ┌───────────────┐      ┌────────────────┐         │   │
-│  │   │     HLP       │      │      LLP       │         │   │
-│  │   │  (Regions)    │─────▶│   (Actions)    │         │   │
-│  │   │               │ guid │               │          │   │
-│  │   │  horizon: 3   │ ance │  horizon: 5   │          │   │
-│  │   │  regions      │      │  steps        │          │   │
-│  │   └───────┬───────┘      └───────┬───────┘          │   │
+│  │   ┌───────────────┐      ┌────────────────┐          │   │
+│  │   │     HLP       │      │      LLP       │          │   │
+│  │   │  (Regions)    │─────▶│   (Actions)    │          │   │
+│  │   │               │ guid │                │          │   │
+│  │   │  horizon: 3   │ ance │  horizon: 5    │          │   │
+│  │   │  regions      │      │  steps         │          │   │
+│  │   └───────┬───────┘      └───────┬────────┘          │   │
 │  │           │                      │                   │   │
 │  │           ▼                      ▼                   │   │
 │  │     HL-Intent               LL-Intent                │   │
@@ -235,6 +235,8 @@ def _compute_region_score(self, region_id, agent_position, teammate_targets):
 
 ### 5.3 HLP Planning
 
+**Current Implementation: MCTS Region Search**
+
 ```python
 def plan(self, current_position) -> HLIntent:
     if not self._should_replan():
@@ -243,25 +245,44 @@ def plan(self, current_position) -> HLIntent:
     # Get teammate target regions
     teammate_targets = self._get_teammate_target_regions()
     
-    # Score all regions
-    region_scores = {}
-    for region_id in self.regions:
-        region_scores[region_id] = self._compute_region_score(
-            region_id, current_position, teammate_targets
-        )
+    # Run MCTS over region sequences
+    best_sequence = self._run_mcts_region_search(current_position, teammate_targets)
     
-    # Select top regions (greedy)
-    sorted_regions = sorted(region_scores.items(), key=lambda x: -x[1])
-    region_sequence = [r for r, s in sorted_regions[:self.horizon] if s > 0]
+    # Build intent from best sequence
+    region_sequence = best_sequence
+    eta_sequence = []
+    completion_sequence = []
+    score_sequence = []
+    
+    cumulative_time = 0.0
+    pos = current_position
+    
+    for region_id in region_sequence:
+        # Compute marginal score
+        score = self._compute_region_score(region_id, pos, teammate_targets)
+        
+        # Estimate completion time
+        eta = self._estimate_region_completion_time(region_id, pos)
+        cumulative_time += eta
+        
+        eta_sequence.append(cumulative_time)
+        completion_sequence.append(cumulative_time + eta)
+        score_sequence.append(score)
+        
+        pos = self.regions[region_id]["center"]
     
     return HLIntent(
         agent_id=self.agent_id,
         region_sequence=region_sequence,
         current_target_region=region_sequence[0] if region_sequence else None,
         target_center=self.regions[region_sequence[0]]["center"],
+        value=sum(score_sequence),
+        iterations=self.num_iterations,
         ...
     )
 ```
+
+**Note:** HLP now uses **full MCTS tree search** over region sequences, making it symmetric with LLP. The MCTS search explores different region orderings using UCB selection, random rollout policies, and marginal g₂ evaluation for complete sequences.
 
 ---
 
@@ -404,17 +425,69 @@ class HierarchicalDecMCTSPlanner:
 
 ## 8. Reward Decomposition
 
-The total reward follows the paper's formulation:
+The total reward follows the paper's formulation (Seiler et al., 2024):
 
 ```
 g = g1(LL intents) + g2(all intents)
-
-g1 = Σ_t γ^t * [IG(t) + alignment(t) - teammate_overlap(t)]
-     └── LLP computes this
-
-g2 = Σ_r [region_uncertainty(r) - distance(r) - teammate_conflict(r)]
-     └── HLP computes this
 ```
+
+### Paper-Correct Implementation (Current)
+
+**LLP Reward:**
+```
+r_LLP = g1 + g2
+
+g1 = Σ_t γ^t * IG(t)
+     └── Immediate information gain (discounted)
+
+g2 = remaining_uncovered_area / nominal_coverage_rate
+     └── Mission completion time estimate
+```
+
+**HLP Reward:**
+```
+r_HLP = g2(with my HL intent) - g2(with null HL intent)
+        └── Marginal contribution only
+```
+
+### Key Properties
+
+✅ **No alignment bonus**: LLP reward is IG-only (g1), alignment emerges via g2
+✅ **Centralized g2**: Single g2() function in `g2_evaluator.py` used by both planners
+✅ **Time-like g2**: Lower values = better (faster mission completion)
+✅ **Marginal HLP**: HLP evaluates its contribution, not absolute region value
+
+### g2 Implementation
+
+Located in `src/g2_evaluator.py`:
+
+**Two-Phase Evaluation** (Algorithm 2 from paper):
+
+```python
+def g2(ll_intents, hl_intents, env_state, agent_id=None):
+    """
+    Phase 1: Execute LL intents (fixed)
+        - Compute LL execution time
+        - Get cells covered by LL footprints
+        - Compute LL overlap penalty
+        - Get agent end positions after LL
+    
+    Phase 2: Estimate HL completion
+        - Remaining area = total uncertain - LL covered
+        - Estimate time to complete using HL intents
+        - Starting from LL end positions
+    
+    Return: g2 = LL_time + HL_time + overlap_penalty
+    """
+```
+
+**Key Properties:**
+- ✅ Time-like (units: coverage time)
+- ✅ Conditioned on LL intents (Phase 1 → Phase 2)
+- ✅ g2 decreases as LL progresses
+- ✅ HL naturally avoids LL-covered regions
+- ✅ Bottom-up information flow (LL → HL)
+- ✅ Alignment emerges without explicit bonus
 
 ---
 
@@ -432,22 +505,38 @@ MH-Dec-MCTS uses the same belief fusion as other strategies:
 
 ## 10. Configuration
 
+### Benchmark Configuration (`configs/benchmark_mh_dec_mcts.json`)
+
 ```json
 {
-  "action_strategy": "mh_dec_mcts",
-  "num_agents": 2,
+  "action_strategy": "hierarchical_dec_mcts",
+  "num_agents": 4,
+  "n_steps": 300,
   
-  "hierarchical_mcts": {
-    "llp_horizon": 5,
-    "llp_iterations": 100,
+  "hierarchical_dec_mcts": {
+    "llp_horizon": 7,
+    "llp_iterations": 50,
+    "llp_ucb_c": 1.4,
+    "llp_discount_factor": 0.95,
+    
     "hlp_horizon": 3,
-    "hlp_iterations": 50,
-    "tile_size": [100, 100],
-    "hlp_replan_interval": 1.0
+    "hlp_iterations": 30,
+    "hlp_ucb_c": 1.0,
+    "hlp_discount_factor": 0.98,
+    
+    "tile_size": [50, 50],
+    "hlp_replan_interval": 1.0,
+    
+    "intent_sharing": {
+      "ll_broadcast_interval": 0.1,
+      "hl_broadcast_interval": 0.5,
+      "max_history": 10
+    }
   },
   
   "decentralized": {
     "communication_range": 150.0,
+    "overlap_penalty_weight": 0.3,
     "d_uct": {
       "decay_factor": 0.9,
       "threshold_sec": 2.0
@@ -456,29 +545,118 @@ MH-Dec-MCTS uses the same belief fusion as other strategies:
 }
 ```
 
+**Key Parameters:**
+- **LLP**: `llp_horizon=7` steps, `llp_iterations=50`, MCTS with UCB_c=1.4
+- **HLP**: `hlp_horizon=3` regions, `hlp_iterations=30`, greedy region selection
+- **tile_size**: `[50, 50]` defines region grid (50×50 tiles per region)
+- **Communication**: Direct meters (`communication_range=150.0`), D-UCT staleness discounting
+- **Intent sharing**: LL broadcasts every 0.1s, HL every 0.5s
+
+**Removed Parameters** (obsolete as of paper-correct implementation):
+- ❌ `alignment_bonus_weight`: Removed—alignment now emerges via g2 conditioning
+- ❌ `region_conflict_penalty`: Removed—coordination handled by marginal g2 evaluation
+
 ---
 
-## 11. Comparison: Greedy vs Dec-MCTS vs MH-Dec-MCTS
+## 11. Full MCTS for HLP (Step 7)
+
+**Status:** ✅ Implemented
+
+The HLP now uses **full MCTS tree search** over region sequences, making it symmetric with LLP:
+
+### MCTS Components
+
+| Component | Implementation |
+|-----------|----------------|
+| **State** | `frozenset` of visited regions |
+| **Action** | Next region ID to visit |
+| **Planning** | UCB tree search with random rollout |
+| **Horizon** | Tree depth = `hlp_horizon` regions |
+| **Rollout** | Random region ordering to complete sequence |
+| **Reward** | Marginal g₂ (full sequence evaluation) |
+| **Selection** | UCB with exploration constant = 1.0 |
+| **Expansion** | Add random unexplored region |
+| **Backpropagation** | Update visit counts and cumulative values |
+
+### Key Features
+
+✅ **Symmetric with LLP**: Both levels use MCTS tree search  
+✅ **Marginal g₂**: Evaluates complete sequence's contribution  
+✅ **Exploration**: UCB balances known-good vs unexplored regions  
+✅ **Coordination**: Bottom-up LL→HL flow via g₂ conditioning  
+
+### Algorithm Flow
+
+```python
+def _run_mcts_region_search(start_position, teammate_targets):
+    tree = {frozenset(): {'visits': 0, 'value': 0.0, 'children': {}}}
+    
+    for iteration in range(num_iterations):
+        # 1. Selection: traverse tree using UCB
+        state = frozenset()  # root
+        sequence = []
+        path = []
+        
+        while len(sequence) < horizon:
+            available_regions = get_unvisited(state)
+            
+            if has_unexplored_children(state):
+                # 2. Expansion: pick random unexplored region
+                action = random.choice(unexplored)
+                sequence.append(action)
+                path.append((state, action))
+                
+                # 3. Simulation: random rollout to complete sequence
+                value = rollout_and_evaluate(sequence, start_position)
+                
+                # 4. Backpropagation: update tree
+                backpropagate(tree, path, value)
+                break
+            else:
+                # Selection: UCB to pick best child
+                action = select_best_ucb(state, available_regions)
+                sequence.append(action)
+                path.append((state, action))
+                state = frozenset(sequence)
+        
+    return best_sequence_found
+```
+
+### Benefits Over Greedy
+
+✅ **Better exploration**: Discovers non-obvious region orderings  
+✅ **Sequence optimization**: Considers full trajectory, not just individual regions  
+✅ **Adaptivity**: Adjusts to teammate conflicts through marginal g₂  
+✅ **Consistency**: Both planning levels use same algorithmic approach
+
+---
+
+## 12. Comparison: Greedy vs Dec-MCTS vs MH-Dec-MCTS
 
 | Aspect | Greedy IG | Dec-MCTS | MH-Dec-MCTS |
 |--------|-----------|----------|-------------|
 | Levels | 1 | 1 | 2 (HLP + LLP) |
-| Lookahead | 1 step | N steps | HLP: regions, LLP: steps |
+| Lookahead | 1 step | N steps | HLP: regions (MCTS), LLP: steps (MCTS) |
+| Search method | Enumerate actions | MCTS tree | MCTS tree (both levels) |
 | Intent | Footprint | Trajectory | LL + HL intents |
-| Region allocation | None | None | Yes (HLP) |
-| Guidance | None | None | HLP → LLP |
-| Computation | Lowest | Medium | Highest |
+| Region allocation | None | None | Yes (HLP with MCTS) |
+| Guidance | None | None | HLP → LLP (soft) |
+| Reward | IG only | IG + overlap | g1 (IG) + g2 (time) |
+| Computation | Lowest | Medium | Highest (dual MCTS) |
 
 ---
 
-## 12. Debugging Tips
+## 13. Debugging Tips
 
-### Check HLP Decisions
+### Check HLP Decisions (MCTS)
 ```python
 # In HierarchicalDecMCTSPlanner.plan():
 print(f"Agent {self.agent_id} HLP:")
 print(f"  Target region: {hl_intent.current_target_region}")
-print(f"  Region scores: {dict(self.hlp._region_coverage)}")
+print(f"  Best sequence: {hl_intent.region_sequence}")
+print(f"  Sequence value: {hl_intent.value}")
+print(f"  MCTS iterations: {hl_intent.iterations}")
+print(f"  Region coverage: {dict(self.hlp._region_coverage)}")
 print(f"  Teammate targets: {self.hlp._get_teammate_target_regions()}")
 ```
 
@@ -519,7 +697,7 @@ for step_idx, action in enumerate(actions):
 
 ---
 
-## 13. File References
+## 14. File References
 
 | File | Purpose |
 |------|---------|
@@ -533,7 +711,7 @@ for step_idx, action in enumerate(actions):
 
 ---
 
-## 14. Visualization Support
+## 15. Visualization Support
 
 The planner exposes metadata for visualization:
 
