@@ -44,7 +44,7 @@ class Predicter(nn.Module):
                 )
             )
         # Set device to CPU (update if GPU support is desired)
-        self.device = torch.device("cpu")
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = self.model.to(self.device)
         # Define the image transformation pipeline
         self.transform = transforms.Compose(
