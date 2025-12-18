@@ -793,7 +793,7 @@ def plot_information_sharing_comparison(
     if strategy:
         strategy_display = strategy.replace("_", " ").title()
         strategy_label = f"{strategy_display} - "
-    
+
     fig.suptitle(
         f"{strategy_label}Effect of information sharing in multi-agent scenarios ({radius_label}{comm_label})",
         fontsize=16,
@@ -1157,7 +1157,7 @@ def main_news_comparison(paths, show, radius, pairwise="equal", comm_range=None)
     if "Strategy" in all_stats.columns and len(all_stats["Strategy"].unique()) > 0:
         strategies = all_stats["Strategy"].unique()
         strategy = strategies[0] if len(strategies) == 1 else "multi_strategy"
-    
+
     # Generate comparison plots
     if "NewsMode" in all_stats.columns:
         plot_news_mode_comparison(
@@ -1169,7 +1169,12 @@ def main_news_comparison(paths, show, radius, pairwise="equal", comm_range=None)
             comm_range=comm_range,
         )
         plot_information_sharing_comparison(
-            all_stats, radius, save_dir, show=show, comm_range=comm_range, strategy=strategy
+            all_stats,
+            radius,
+            save_dir,
+            show=show,
+            comm_range=comm_range,
+            strategy=strategy,
         )
     else:
         print("NewsMode column not found - using standard plotting")

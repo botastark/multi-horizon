@@ -13,6 +13,13 @@ In the paper's decentralized multi-UAV framework, each agent maintains its own l
 1. **Position sharing** — determines communication neighbors (proximity-based)
 2. **News belief sharing** — only newly acquired information since last exchange
 
+**Communication Range:**
+- Controlled by `radius_multiplier` in config
+- Actual range = `radius_multiplier × h_displacement`
+- Where `h_displacement = (field_len/2) / n_h_act`
+- For 8 agents: `n_h_act=8`, `h_displacement=3.125m`
+- Example: `radius_multiplier=5` → `15.625m`, `-1` → unlimited
+
 Key properties:
 - **Incremental updates** — agents share "news" not full belief maps
 - **Product-of-experts fusion** — shared evidence strengthens common beliefs
@@ -325,31 +332,41 @@ next_action, info_gain_action = planner.select_action(
 
 ## 7. Configuration
 
-**From `benchmark_greedy_ig.json`:**
+**Current Benchmark:** `configs/benchmark_greedy_ig.json`
 
 ```json
 {
   "action_strategy": "greedy_ig",
-  "num_agents": 2,
-  "n_steps": 70,
-  "correlation_types": ["equal", "biased", "adaptive"],
+  "num_agents": 8,
+  "n_steps": 100,
+  "iters": [0, 5],
+  "correlation_types": ["adaptive"],
   
   "greedy_ig": {
-    "overlap_penalty_weight": 0.0
+    "overlap_penalty_weight": 0.0,
+    "mode_labels": ["IG_BM", "IG_BS", "IG", "IGd_BM", "IGd_BS", "IGd"]
   },
   
   "decentralized": {
-    "communication_range": 150.0,
-    "news_mode": "BM"
+    "radius_multiplier": 5
   }
 }
 ```
 
-**Configuration Notes:**
-- `overlap_penalty_weight: 0.0` — required for paper-compliant behavior (pure belief-based IG)
-- `news_mode: "BM"` or `"BS"` — controls news buffer management
-- `communication_range` — determines which agents are neighbors
-- `correlation_types` — pairwise potential type for local LBP (not fusion)
+**Key Parameters:**
+- **num_agents**: 8 agents for comprehensive multi-agent testing
+- **overlap_penalty_weight**: 0.0 (pure belief-based IG, paper-compliant)
+- **mode_labels**: 6 news modes tested:
+  - `IG`: No information sharing (baseline)
+  - `IG_BS`: Broadcast single news belief
+  - `IG_BM`: Per-neighbor private news beliefs
+  - `IGd`: With position sharing (discounted IoU)
+  - `IGd_BS`: Position + broadcast news
+  - `IGd_BM`: Position + per-neighbor news
+- **radius_multiplier**: 5 → 15.625m range (calculated as `radius_multiplier × h_displacement`)
+  - For 8 agents: `h_displacement = (field_len/2) / n_h_act = 25/8 = 3.125m`
+  - Set to `-1` for unlimited range
+- **correlation_types**: `["adaptive"]` for dynamic pairwise potentials in local LBP
 
 ---
 

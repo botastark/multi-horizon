@@ -30,6 +30,7 @@ import time
 import threading
 import queue
 import logging
+import random
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, List, Optional, Tuple, Any, Set
@@ -50,22 +51,18 @@ def log_planning_decision(
     step: int,
     llp_action_scores: Dict[str, float],
     hlp_region_scores: Dict[int, float],
-    alignment_adjustments: Dict[str, float],
-    final_action_scores: Dict[str, float],
     selected_action: str,
     target_region: Optional[int],
     intents_received: Dict[str, Any],
 ):
     """
-    Log detailed planning decision with LLP scores, HLP scores, and alignment.
+    Log detailed planning decision with LLP scores and HLP scores.
 
     Args:
         agent_id: Agent ID
         step: Current step number
-        llp_action_scores: Raw LLP action scores (IG-based)
+        llp_action_scores: LLP action scores (IG-only, g1)
         hlp_region_scores: HLP region scores
-        alignment_adjustments: Alignment bonus per action toward HLP target
-        final_action_scores: Final scores after alignment adjustment
         selected_action: The action selected
         target_region: HLP target region
         intents_received: Summary of teammate intents received
@@ -93,23 +90,8 @@ def log_planning_decision(
         marker = " <-- TARGET" if region_id == target_region else ""
         logger.info(f"  Region {region_id:2d}: {score:.4f}{marker}")
 
-    # Alignment Adjustments
-    if alignment_adjustments:
-        logger.info("")
-        logger.info("ALIGNMENT ADJUSTMENTS (toward HLP target):")
-        for action, adj in sorted(
-            alignment_adjustments.items(), key=lambda x: x[1], reverse=True
-        ):
-            if adj != 0:
-                logger.info(f"  {action:8s}: +{adj:.2f}")
-
-    # Final Scores
     logger.info("")
-    logger.info("FINAL ACTION SCORES (LLP + Alignment):")
-    sorted_final = sorted(final_action_scores.items(), key=lambda x: x[1], reverse=True)
-    for action, score in sorted_final:
-        marker = " <-- SELECTED" if action == selected_action else ""
-        logger.info(f"  {action:8s}: {score:10.2f}{marker}")
+    logger.info(f"SELECTED ACTION: {selected_action}")
 
     # Intents received
     if intents_received:
@@ -576,17 +558,71 @@ class LowLevelPlanner:
 
         return float(np.sum(discounted_entropy))
 
+    def _compute_g2_for_trajectory(
+        self,
+        state_sequence: List[Tuple[float, float, float]],
+        footprint_sequence: List[Tuple[int, int, int, int]],
+        ig_sequence: List[float],
+    ) -> float:
+        """
+        Compute g2 (mission time estimate) for a candidate trajectory.
+
+        Uses the centralized g2() function from g2_evaluator with:
+        - This agent's trajectory as LL intent
+        - Own HLP intent
+        - Teammate LL and HL intents
+
+        Args:
+            state_sequence: Predicted states from trajectory
+            footprint_sequence: Predicted footprints from trajectory
+            ig_sequence: Predicted IG values from trajectory
+
+        Returns:
+            g2_value: Mission time estimate (lower is better)
+        """
+        from g2_evaluator import g2
+
+        # Build temporary LL intent for this trajectory
+        temp_ll_intent = LLIntent(
+            agent_id=self.agent_id,
+            action_sequence=[],  # Not needed for g2
+            state_sequence=state_sequence,
+            footprint_sequence=footprint_sequence,
+            ig_sequence=ig_sequence,
+            total_expected_ig=sum(ig_sequence) if ig_sequence else 0.0,
+        )
+
+        # Combine own trajectory with teammate LL intents
+        all_ll_intents = dict(self._teammate_ll_intents)
+        all_ll_intents[self.agent_id] = temp_ll_intent
+
+        # Combine own HL guidance with teammate HL intents
+        all_hl_intents = dict(self._teammate_hl_intents)
+        if self._hl_guidance is not None:
+            all_hl_intents[self.agent_id] = self._hl_guidance
+
+        # Build env_state for g2
+        env_state = {
+            "belief": self.belief,
+            "grid_info": self.grid_info,
+        }
+
+        # Compute g2
+        g2_value = g2(all_ll_intents, all_hl_intents, env_state, agent_id=self.agent_id)
+
+        return g2_value
+
     def _evaluate_single_action(
         self,
         current_state: Tuple[float, float, float],
         action: str,
         coverage_discount: np.ndarray,
-    ) -> Tuple[float, float]:
+    ) -> float:
         """
         Evaluate a single action for logging purposes.
 
         Returns:
-            (ig_score, alignment_bonus)
+            ig_score (IG-only, no alignment bonus)
         """
         # Get current state
         current_pos = current_state[:2]
@@ -604,7 +640,7 @@ class LowLevelPlanner:
         if future_state is None:
             self.camera.set_position(original_pos)
             self.camera.set_altitude(original_alt)
-            return 0.0, 0.0
+            return 0.0
 
         next_pos = future_state[0]
         next_alt = future_state[1]
@@ -612,14 +648,11 @@ class LowLevelPlanner:
         # Compute IG
         ig = self._compute_ig(next_pos, next_alt, coverage_discount)
 
-        # Compute alignment
-        alignment = self._compute_alignment_bonus(next_pos, current_pos)
-
         # Restore camera state
         self.camera.set_position(original_pos)
         self.camera.set_altitude(original_alt)
 
-        return ig, alignment
+        return ig
 
     def _compute_alignment_bonus(
         self,
@@ -667,12 +700,20 @@ class LowLevelPlanner:
         List[float],
     ]:
         """
-        Simulate a trajectory and compute total reward (g1).
+        Simulate a trajectory and compute total reward (g1 + g2).
+
+        Paper-correct reward decomposition:
+            r_LLP = g1(LL prefix) + g2(LL prefix, HL intents, teammate intents)
+
+        Where:
+        - g1: Immediate task quality (sum of discounted IG)
+        - g2: Mission completion time estimate (from g2_evaluator)
 
         Returns:
             (total_reward, state_sequence, footprint_sequence, ig_sequence)
         """
-        total_reward = 0.0
+        # Compute g1: immediate IG-based reward
+        g1_reward = 0.0
         state_sequence = [start_state]
         footprint_sequence = []
         ig_sequence = []
@@ -697,15 +738,10 @@ class LowLevelPlanner:
             next_pos = future_state[0]  # This is (x, y) tuple
             next_alt = future_state[1]  # This is altitude
 
-            # Compute IG for this step
+            # Compute IG for this step (g1)
             ig = self._compute_ig(next_pos, next_alt, coverage_discount)
-
-            # Alignment bonus with HLP
-            alignment = self._compute_alignment_bonus(next_pos, current_pos)
-
-            # Discounted reward
-            step_reward = (self.discount**step_idx) * (ig + alignment)
-            total_reward += step_reward
+            step_reward = (self.discount**step_idx) * ig
+            g1_reward += step_reward
 
             # Record trajectory
             state_sequence.append((next_pos[0], next_pos[1], next_alt))
@@ -730,6 +766,15 @@ class LowLevelPlanner:
         self.camera.set_position(original_pos)
         self.camera.set_altitude(original_alt)
 
+        # Compute g2: mission completion time estimate
+        # Use this trajectory as the LL intent for g2 evaluation
+        g2_value = self._compute_g2_for_trajectory(
+            state_sequence, footprint_sequence, ig_sequence
+        )
+
+        # Total LLP reward = g1 + g2
+        total_reward = g1_reward + g2_value
+
         return total_reward, state_sequence, footprint_sequence, ig_sequence
 
     def plan(self, current_state: Tuple[float, float, float]) -> LLIntent:
@@ -750,9 +795,7 @@ class LowLevelPlanner:
         coverage_discount = self._compute_teammate_coverage_mask()
 
         # Track per-action scores for logging
-        self._action_scores = {}  # Raw IG scores (single-step)
-        self._alignment_adjustments = {}  # Alignment bonus per action
-        self._final_action_scores = {}  # Combined scores
+        self._action_scores = {}  # IG scores (single-step)
         self._mcts_action_values = {
             action: float("-inf") for action in self.actions
         }  # Best rollout value per first action
@@ -766,12 +809,8 @@ class LowLevelPlanner:
 
         # First, compute single-step scores for each action (for reference)
         for action in self.actions:
-            ig, alignment = self._evaluate_single_action(
-                current_state, action, coverage_discount
-            )
+            ig = self._evaluate_single_action(current_state, action, coverage_discount)
             self._action_scores[action] = ig
-            self._alignment_adjustments[action] = alignment
-            self._final_action_scores[action] = ig + alignment
 
         for _ in range(self.num_iterations):
             # Random action sequence
@@ -1004,37 +1043,64 @@ class HighLevelPlanner:
         teammate_targets: Dict[int, Tuple[Set[int], float]],
     ) -> float:
         """
-        Compute score for a region (g2 component).
+        Compute marginal g2 score for a region.
 
-        Considers:
-        - Region entropy (uncertainty)
-        - Distance from agent
-        - Whether teammates are already targeting it (with D-UCT discount)
+        Paper-correct HLP reward (Eq. 7):
+            r_HLP = g2(with my HL intent) - g2(with null HL intent)
+
+        Where null HL intent = no regions allocated to this agent.
+
+        Args:
+            region_id: Region to evaluate
+            agent_position: Current agent position
+            teammate_targets: Dict of teammate HL intents
+
+        Returns:
+            Marginal contribution score (positive = helpful, negative = harmful)
         """
-        region = self.regions[region_id]
+        from g2_evaluator import g2
 
-        # Base score: remaining uncertainty
-        remaining_uncertainty = 1.0 - self._region_coverage[region_id]
-
-        # Distance penalty
-        center = region["center"]
-        distance = np.sqrt(
-            (agent_position[0] - center[0]) ** 2 + (agent_position[1] - center[1]) ** 2
+        # Build HL intent WITH this region
+        hl_with = HLIntent(
+            agent_id=self.agent_id,
+            region_sequence=[region_id],
+            current_target_region=region_id,
+            target_center=self.regions[region_id]["center"],
         )
-        max_dist = np.sqrt(self.grid_shape[0] ** 2 + self.grid_shape[1] ** 2)
-        distance_penalty = distance / max_dist
 
-        # Teammate conflict penalty with D-UCT staleness discount
-        conflict_penalty = 0.0
-        for teammate_id, (targets, staleness_discount) in teammate_targets.items():
-            if region_id in targets:
-                # Reduce conflict penalty for stale intents
-                conflict_penalty += 0.5 * staleness_discount
+        # Build HL intent WITHOUT any regions (null intent)
+        hl_null = HLIntent(
+            agent_id=self.agent_id,
+            region_sequence=[],
+            current_target_region=None,
+            target_center=None,
+        )
 
-        # Combined score
-        score = remaining_uncertainty - 0.3 * distance_penalty - conflict_penalty
+        # Prepare env_state for g2
+        env_state = {
+            "belief": self.belief,
+            "grid_info": None,  # g2 doesn't need grid_info for minimal implementation
+        }
 
-        return max(0.0, score)
+        # Get teammate HL intents
+        all_hl_with = dict(self._teammate_hl_intents)
+        all_hl_with[self.agent_id] = hl_with
+
+        all_hl_null = dict(self._teammate_hl_intents)
+        all_hl_null[self.agent_id] = hl_null
+
+        # Get LL intents (same for both scenarios)
+        all_ll = dict(self._teammate_ll_intents)
+
+        # Compute g2 with and without this region
+        g2_with = g2(all_ll, all_hl_with, env_state, agent_id=self.agent_id)
+        g2_null = g2(all_ll, all_hl_null, env_state, agent_id=self.agent_id)
+
+        # Marginal contribution: g2_null - g2_with
+        # (Lower g2 is better, so positive marginal score means this region helps)
+        marginal_score = g2_null - g2_with
+
+        return marginal_score
 
     def _should_replan(self) -> bool:
         """Check if we should replan."""
@@ -1056,7 +1122,13 @@ class HighLevelPlanner:
 
     def plan(self, current_position: Tuple[float, float]) -> HLIntent:
         """
-        Run HLP planning and generate HL intent.
+        Run HLP planning with MCTS and generate HL intent.
+
+        Uses MCTS tree search over region sequences:
+        - State: visited regions so far
+        - Action: next region to visit
+        - Reward: marginal g2 contribution
+        - Rollout: random region selection
 
         Args:
             current_position: (row, col) current position
@@ -1072,18 +1144,29 @@ class HighLevelPlanner:
         # Get teammate targets
         teammate_targets = self._get_teammate_target_regions()
 
-        # Score all regions
-        region_scores = {}
-        for region_id in self.regions:
-            score = self._compute_region_score(
-                region_id, current_position, teammate_targets
+        # Run MCTS over region sequences
+        best_sequence = self._run_mcts_region_search(current_position, teammate_targets)
+
+        if not best_sequence:
+            # Fallback: no valid regions found
+            intent = HLIntent(
+                agent_id=self.agent_id,
+                region_sequence=[],
+                eta_sequence=[],
+                completion_sequence=[],
+                score_sequence=[],
+                current_target_region=None,
+                target_center=None,
+                horizon=self.horizon,
+                value=0.0,
+                iterations=self.num_iterations,
             )
-            region_scores[region_id] = score
+            self.current_intent = intent
+            self._stats["plans_generated"] += 1
+            return intent
 
-        # Select top regions (greedy for now, could use MCTS)
-        sorted_regions = sorted(region_scores.items(), key=lambda x: x[1], reverse=True)
-
-        region_sequence = []
+        # Build intent from best sequence
+        region_sequence = best_sequence
         eta_sequence = []
         completion_sequence = []
         score_sequence = []
@@ -1091,14 +1174,14 @@ class HighLevelPlanner:
         cumulative_time = 0.0
         pos = current_position
 
-        for region_id, score in sorted_regions[: self.horizon]:
-            if score <= 0:
-                break
+        for region_id in region_sequence:
+            # Compute marginal score for this region
+            score = self._compute_region_score(region_id, pos, teammate_targets)
 
+            # Estimate completion time
             eta = self._estimate_region_completion_time(region_id, pos)
             cumulative_time += eta
 
-            region_sequence.append(region_id)
             eta_sequence.append(cumulative_time)
             completion_sequence.append(cumulative_time + eta)
             score_sequence.append(score)
@@ -1127,8 +1210,276 @@ class HighLevelPlanner:
 
         self.current_intent = intent
         self._stats["plans_generated"] += 1
+        self._stats["total_iterations"] += self.num_iterations
 
         return intent
+
+    def _run_mcts_region_search(
+        self,
+        start_position: Tuple[float, float],
+        teammate_targets: Dict[int, Tuple[Set[int], float]],
+    ) -> List[int]:
+        """
+        Run MCTS tree search over region sequences.
+
+        State: frozenset of visited regions
+        Action: next region to visit
+        Reward: cumulative marginal g2
+
+        Args:
+            start_position: Starting position
+            teammate_targets: Teammate region targets
+
+        Returns:
+            Best region sequence found
+        """
+        # MCTS tree: {state_key: {'visits': int, 'value': float, 'children': dict}}
+        tree = {}
+        root_state = frozenset()  # No regions visited yet
+        tree[root_state] = {"visits": 0, "value": 0.0, "children": {}}
+
+        best_sequence = []
+        best_value = float("-inf")
+
+        for iteration in range(self.num_iterations):
+            # Selection + Expansion + Simulation
+            sequence, value = self._mcts_iteration(
+                tree, root_state, start_position, teammate_targets
+            )
+
+            # Track best sequence found
+            if value > best_value:
+                best_value = value
+                best_sequence = sequence
+
+        return best_sequence
+
+    def _mcts_iteration(
+        self,
+        tree: Dict,
+        root_state: frozenset,
+        start_position: Tuple[float, float],
+        teammate_targets: Dict[int, Tuple[Set[int], float]],
+    ) -> Tuple[List[int], float]:
+        """
+        Single MCTS iteration: selection, expansion, simulation, backpropagation.
+
+        Returns:
+            (sequence, value) tuple
+        """
+        # Selection phase: traverse tree using UCB
+        state = root_state
+        position = start_position
+        path = []  # List of (state, action) tuples
+        sequence = []  # List of region IDs
+
+        while len(sequence) < self.horizon:
+            if state not in tree:
+                tree[state] = {"visits": 0, "value": 0.0, "children": {}}
+
+            node = tree[state]
+            node["visits"] += 1
+
+            # Get available actions (unvisited regions)
+            available_regions = self._get_available_regions(state)
+
+            if not available_regions:
+                break
+
+            # Check if this is a leaf node (unexpanded)
+            unexplored = [r for r in available_regions if r not in node["children"]]
+
+            if unexplored:
+                # Expansion: pick random unexplored action
+                action = random.choice(unexplored)
+                node["children"][action] = {"visits": 0, "value": 0.0}
+
+                # Simulate from this new node
+                sequence.append(action)
+                path.append((state, action))
+
+                # Rollout to get value estimate
+                value = self._rollout_region_sequence(
+                    sequence, position, start_position, teammate_targets
+                )
+
+                # Backpropagate
+                self._backpropagate(tree, path, value)
+
+                return sequence, value
+            else:
+                # Selection: use UCB to pick best child
+                action = self._select_best_region_ucb(node, available_regions)
+                sequence.append(action)
+                path.append((state, action))
+
+                # Transition to next state
+                state = frozenset(sequence)
+                position = self.regions[action]["center"]
+
+        # Terminal node reached (horizon limit or no more regions)
+        value = self._evaluate_region_sequence(
+            sequence, start_position, teammate_targets
+        )
+        self._backpropagate(tree, path, value)
+
+        return sequence, value
+
+    def _get_available_regions(self, visited: frozenset) -> List[int]:
+        """Get regions not yet visited in current path."""
+        return [r for r in self.regions.keys() if r not in visited]
+
+    def _select_best_region_ucb(self, node: Dict, available_regions: List[int]) -> int:
+        """Select region using UCB formula."""
+        parent_visits = node["visits"]
+        ucb_c = 1.0  # Exploration constant for HLP
+
+        best_score = float("-inf")
+        best_region = available_regions[0]
+
+        for region_id in available_regions:
+            if region_id not in node["children"]:
+                continue
+
+            child = node["children"][region_id]
+            child_visits = child["visits"]
+            child_value = child["value"]
+
+            if child_visits == 0:
+                ucb_score = float("inf")
+            else:
+                exploitation = child_value / child_visits
+                exploration = ucb_c * np.sqrt(np.log(parent_visits) / child_visits)
+                ucb_score = exploitation + exploration
+
+            if ucb_score > best_score:
+                best_score = ucb_score
+                best_region = region_id
+
+        return best_region
+
+    def _rollout_region_sequence(
+        self,
+        current_sequence: List[int],
+        current_position: Tuple[float, float],
+        start_position: Tuple[float, float],
+        teammate_targets: Dict[int, Tuple[Set[int], float]],
+    ) -> float:
+        """
+        Rollout policy: randomly complete region sequence to horizon.
+
+        Args:
+            current_sequence: Regions selected so far
+            current_position: Current position after current_sequence
+            start_position: Initial starting position
+            teammate_targets: Teammate region targets
+
+        Returns:
+            Total value estimate
+        """
+        sequence = list(current_sequence)
+        position = current_position
+        visited = set(sequence)
+
+        # Random completion to horizon
+        while len(sequence) < self.horizon:
+            available = [r for r in self.regions.keys() if r not in visited]
+            if not available:
+                break
+
+            # Pick random region (simple rollout policy)
+            region_id = random.choice(available)
+            sequence.append(region_id)
+            visited.add(region_id)
+            position = self.regions[region_id]["center"]
+
+        # Evaluate complete sequence
+        return self._evaluate_region_sequence(
+            sequence, start_position, teammate_targets
+        )
+
+    def _evaluate_region_sequence(
+        self,
+        sequence: List[int],
+        start_position: Tuple[float, float],
+        teammate_targets: Dict[int, Tuple[Set[int], float]],
+    ) -> float:
+        """
+        Evaluate cumulative marginal g2 for a region sequence.
+
+        Args:
+            sequence: Region sequence to evaluate
+            start_position: Starting position
+            teammate_targets: Teammate region targets
+
+        Returns:
+            Total marginal g2 value (higher is better)
+        """
+        if not sequence:
+            return 0.0
+
+        from g2_evaluator import g2
+
+        # Build HL intent with full sequence
+        hl_with_sequence = HLIntent(
+            agent_id=self.agent_id,
+            region_sequence=sequence,
+            current_target_region=sequence[0],
+            target_center=self.regions[sequence[0]]["center"],
+        )
+
+        # Build null intent (no regions)
+        hl_null = HLIntent(
+            agent_id=self.agent_id,
+            region_sequence=[],
+            current_target_region=None,
+            target_center=None,
+        )
+
+        # Prepare env_state
+        env_state = {
+            "belief": self.belief,
+            "grid_info": None,
+        }
+
+        # Get teammate HL intents
+        all_hl_with = dict(self._teammate_hl_intents)
+        all_hl_with[self.agent_id] = hl_with_sequence
+
+        all_hl_null = dict(self._teammate_hl_intents)
+        all_hl_null[self.agent_id] = hl_null
+
+        # Get LL intents
+        all_ll = dict(self._teammate_ll_intents)
+
+        # Compute marginal g2
+        g2_with = g2(all_ll, all_hl_with, env_state, agent_id=self.agent_id)
+        g2_null = g2(all_ll, all_hl_null, env_state, agent_id=self.agent_id)
+
+        # Marginal value (positive = helpful)
+        marginal_value = g2_null - g2_with
+
+        return marginal_value
+
+    def _backpropagate(
+        self, tree: Dict, path: List[Tuple[frozenset, int]], value: float
+    ) -> None:
+        """
+        Backpropagate value up the tree.
+
+        Args:
+            tree: MCTS tree
+            path: List of (state, action) tuples traversed
+            value: Value to backpropagate
+        """
+        for state, action in path:
+            if state not in tree:
+                continue
+            node = tree[state]
+            if action in node["children"]:
+                child = node["children"][action]
+                child["visits"] += 1
+                child["value"] += value
 
     def get_statistics(self) -> Dict[str, Any]:
         """Get planner statistics."""
@@ -1336,8 +1687,6 @@ class HierarchicalDecMCTSPlanner:
 
         # Collect detailed scoring info for logging
         llp_action_scores = getattr(self.llp, "_action_scores", {})
-        alignment_adjustments = getattr(self.llp, "_alignment_adjustments", {})
-        final_action_scores = getattr(self.llp, "_final_action_scores", {})
         mcts_action_values = getattr(self.llp, "_mcts_action_values", {})
         hlp_region_scores = dict(self.hlp._region_coverage)
 
@@ -1361,10 +1710,8 @@ class HierarchicalDecMCTSPlanner:
             "target_region": hl_intent.current_target_region,
             "expected_ig": ll_intent.total_expected_ig,
             # Detailed scoring for logging
-            "llp_action_scores": llp_action_scores,  # Single-step IG (for reference)
+            "llp_action_scores": llp_action_scores,  # Single-step IG (g1 only)
             "mcts_action_values": mcts_action_values,  # MCTS rollout values (actual decision basis)
-            "alignment_adjustments": alignment_adjustments,
-            "final_action_scores": final_action_scores,
             "hlp_region_scores": hlp_region_scores,
             "intents_received": intents_received,
         }

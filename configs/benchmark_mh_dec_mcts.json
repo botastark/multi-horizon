@@ -5,33 +5,28 @@
   "project_path": "./",
   "field_type": "Gaussian",
   "start_position": "corner",
-  "action_strategy": "hierarchical_dec_mcts",
+  "action_strategy": "mh_dec_mcts",
   "num_agents": 4,
-  "max_steps": 300,
-  "n_steps": 300,
-  "iters": [0, 1],
-  "iterations": [0, 1],
-  "correlation_types": ["equal"],
+  "n_steps": 50,
+  "iters": [0, 3],
+  "correlation_types": ["adaptive"],
   "error_margins": [null],
   "enable_plotting": false,
   "enable_logging": true,
   
   "hierarchical_dec_mcts": {
-    "llp_horizon": 7,
+    "llp_horizon": 3,
     "llp_iterations": 50,
     "llp_ucb_c": 1.4,
     "llp_discount_factor": 0.95,
     
-    "hlp_horizon": 3,
+    "hlp_horizon": 10,
     "hlp_iterations": 30,
     "hlp_ucb_c": 1.0,
     "hlp_discount_factor": 0.98,
     
     "tile_size": [50, 50],
     "hlp_replan_interval": 1.0,
-    
-    "alignment_bonus_weight": 0.2,
-    "region_conflict_penalty": 10.0,
     
     "intent_sharing": {
       "ll_broadcast_interval": 0.1,

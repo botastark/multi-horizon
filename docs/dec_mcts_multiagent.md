@@ -326,22 +326,25 @@ def select_agent_actions(agents, ...):
 
 ## 9. Configuration
 
+**Current Benchmark:** `configs/benchmark_dec_mcts.json`
+
 ```json
 {
   "action_strategy": "dec_mcts",
-  "num_agents": 2,
+  "num_agents": 4,
+  "n_steps": 100,
+  "iters": [0, 5],
+  "correlation_types": ["equal", "biased", "adaptive"],
   
-  "mcts_params": {
+  "dec_mcts": {
     "horizon": 10,
     "iterations": 100,
     "ucb_c": 1.4,
-    "discount_factor": 0.95,
-    "timeout": 5.0,
-    "parallel": 1
+    "discount_factor": 0.95
   },
   
   "decentralized": {
-    "communication_range": 150.0,
+    "communication_range": 15.0,
     "overlap_penalty_weight": 0.3,
     "d_uct": {
       "decay_factor": 0.9,
@@ -351,8 +354,16 @@ def select_agent_actions(agents, ...):
 }
 ```
 
----
+**Key Parameters:**
+- **Planning**: `horizon=10` steps, `iterations=100` MCTS rollouts per cycle
+- **UCB exploration**: `ucb_c=1.4` balances exploration vs exploitation
+- **Reward**: `discount_factor=0.95` for future trajectory value
+- **Coordination**: `overlap_penalty_weight=0.3` penalizes teammate trajectory overlap
+- **Communication**: `communication_range=15.0m` (direct specification)
+- **D-UCT**: `decay_factor=0.9`, `threshold_sec=2.0` for staleness discounting
+- **Testing**: 5 iterations across 3 correlation types (equal, biased, adaptive)
 
+---
 ## 10. Comparison: Greedy vs Dec-MCTS
 
 | Aspect | Greedy IG | Dec-MCTS |

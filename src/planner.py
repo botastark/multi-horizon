@@ -610,8 +610,6 @@ class planning:
             step=stats["hierarchical"]["planning_cycles"],
             llp_action_scores=metrics.get("llp_action_scores", {}),
             hlp_region_scores=metrics.get("hlp_region_scores", {}),
-            alignment_adjustments=metrics.get("alignment_adjustments", {}),
-            final_action_scores=metrics.get("final_action_scores", {}),
             selected_action=action,
             target_region=metrics.get("target_region"),
             intents_received=metrics.get("intents_received", {}),

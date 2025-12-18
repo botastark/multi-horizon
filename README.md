@@ -63,9 +63,72 @@ python plotter.py --compare-news --paths trials/*_commRinf/txt/ --radius 5 --com
 - **Results directory**: `trials/`
 - **Plots directory**: `plots/`
 
-## System Parameters
+## Strategy Comparison
 
-- Grid: 400×400 cells, 50m×50m field, cell_size=0.125m
-- Agents: N=8, corner start positions
-- Gaussian field radius: 5m (for map generation)
-- Communication range: Calculated from radius_multiplier × h_displacement
+| Aspect | Greedy IG | Dec-MCTS | MH-Dec-MCTS |
+|--------|-----------|----------|-------------|
+| **Planning levels** | 1 | 1 | 2 (LLP + HLP) |
+| **Lookahead** | 1 step | 10 steps | 3-7 steps + 3-10 regions |
+| **Search method** | Enumerate | MCTS | MCTS (both levels) |
+| **Agents** | 8 | 4 | 4 |
+| **Comm range** | 15.625m | 15.0m | 150.0m |
+| **What's shared** | Footprint + news | LL trajectory | LL + HL intents |
+| **Coordination** | Overlap avoidance | Trajectory penalty | g₂-based coupling |
+| **Reward** | IG only | IG + overlap | g₁(IG) + g₂(time) |
+# multi-horizon — Run & Plot Quick Reference
+
+Minimal instructions to run each benchmark and plot results. For detailed design and algorithm notes see the linked docs for each benchmark.
+
+Prerequisites
+- Activate your Python environment (example):
+
+```bash
+conda activate active_sensing
+pip install -r requirements.txt
+```
+
+Greedy IG (single-step IG baseline)
+- Run:
+
+```bash
+python src/main.py --config configs/benchmark_greedy_ig.json
+```
+- Plot results (example):
+
+```bash
+python plotter.py trials/greedy_ig_gaussian_r5_corner_N8_IG*/txt/ --radius 5
+```
+- Docs: [Greedy IG Benchmark](docs/greedy_ig_multiagent.md)
+
+Decentralized MCTS (single-level Dec-MCTS)
+- Run:
+
+```bash
+python src/main.py --config configs/benchmark_dec_mcts.json
+```
+- Plot results (example):
+
+```bash
+python plotter.py trials/dec_mcts_gaussian_*_N4_*/txt/ --radius 5
+```
+- Docs: [Dec-MCTS Benchmark](docs/dec_mcts_multiagent.md)
+
+MH-Dec-MCTS (Multi-Horizon hierarchical planner)
+- Run:
+
+```bash
+python src/main.py --config configs/benchmark_mh_dec_mcts.json
+```
+- Plot results (example):
+
+```bash
+python plotter.py trials/mh_dec_mcts_gaussian_*_N4_*/txt/ --radius 5
+```
+- Docs: [MH-Dec-MCTS Benchmark](docs/mh_dec_mcts_multiagent.md)
+
+Notes
+- The `plotter.py` script expects trial `txt/` output directories created by `src/main.py`.
+- `--paths` and `--compare-news` in `plotter.py` are used for multi-run/news-mode comparisons (mostly for Greedy IG).
+
+That's it — these commands are all you need to run experiments and produce plots. See the linked docs for implementation details and algorithmic descriptions.
+**Status:** ✅ Paper-correct implementation (Seiler et al., 2024)
