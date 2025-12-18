@@ -84,6 +84,24 @@ def cH(var, sigma0, sigma1):
 def collect_sample_set(grid):
     # Create an array of central cells for each 3x3 block (using slices)
     rows, cols = grid.shape
+    win_size = 3
+
+    if rows % win_size != 0 or cols % win_size != 0:
+        pad_rows, pad_cols = 0, 0
+        if rows % win_size != 0:
+            current_shape = rows
+            while current_shape % win_size != 0:
+                current_shape += 1
+            pad_rows = current_shape - rows
+        
+        if cols % win_size != 0:
+            current_shape = cols
+            while current_shape % win_size != 0:
+                current_shape += 1
+            pad_cols = current_shape - cols
+            
+        grid = np.pad(grid, ((0, pad_rows), (0, pad_cols)), mode="edge")
+        rows, cols = grid.shape
 
     valid_rows = (rows // 3) * 3
     valid_cols = (cols // 3) * 3

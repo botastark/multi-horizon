@@ -26,6 +26,7 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Any, Dict, List, Optional, Tuple
+from itertools import product
 
 import numpy as np
 
@@ -274,6 +275,7 @@ class MultiAgentCoordinator:
         correlation_type: str = "equal",
         news_mode: Optional[str] = None,
         mode: Optional[str] = None,
+        grid_info=None,
     ):
         """
         Initialize multi-agent coordinator.
@@ -285,11 +287,13 @@ class MultiAgentCoordinator:
             correlation_type: Pairwise correlation type ('equal', 'biased', 'adaptive')
             news_mode: News sharing mode ('BS' or 'BM')
             mode: Full mode label (e.g., 'IG', 'IGd', 'IG_BS', 'IGd_BM')
+            grid_info: Grid information (for calculating h_displacement)
         """
         self.grid_shape = grid_shape
         self.config = config
         self.conf_dict = conf_dict
         self.num_agents = self.config.get("num_agents", 1)
+        self.grid_info = grid_info
 
         # Store full mode label for planner access
         self.mode = mode if mode is not None else "IG"
@@ -315,17 +319,50 @@ class MultiAgentCoordinator:
         self.lbp_iterations = ma_config.get("lbp_iterations", 1)
 
         self.enable_coordination = ma_config.get("enable_coordination", True)
-        # communication_range can be specified under `multi_agent` or `decentralized`
-        self.communication_range = ma_config.get(
-            "communication_range",
-            config.get("decentralized", {}).get("communication_range", -1),
-        )  # -1 = unlimited
+
+        # Communication range calculation (matching reference paper)
+        # Can be specified as:
+        # 1. radius_multiplier: multiplied by h_displacement (field_len/2/n_h_act), -1 = unlimited
+        # 2. communication_range: direct value in meters (-1 = unlimited)
+        radius_multiplier = ma_config.get(
+            "radius_multiplier",
+            dec_config.get("radius_multiplier", None),
+        )
+
+        if radius_multiplier is not None:
+            if radius_multiplier == -1:
+                # Unlimited range
+                self.communication_range = -1
+                print(f"Communication range: unlimited (radius_multiplier=-1)")
+            else:
+                # Calculate h_displacement (matches reference: (field_len/2) / n_h_act)
+                n_h_act = 8 if self.num_agents == 8 else 5
+                h_displacement = (grid_info.x / 2) / n_h_act
+                self.communication_range = radius_multiplier * h_displacement
+                print(
+                    f"Communication range calculation: radius_multiplier={radius_multiplier}, "
+                    f"n_h_act={n_h_act}, field_len={grid_info.x}, "
+                    f"h_displacement={h_displacement:.3f}, "
+                    f"comm_range={self.communication_range:.3f}m"
+                )
+        else:
+            # Fallback to direct communication_range specification
+            self.communication_range = ma_config.get(
+                "communication_range",
+                dec_config.get("communication_range", -1),
+            )  # -1 = unlimited
+            print(
+                f"Communication range: {self.communication_range}m (direct specification)"
+            )
+
         self.collision_distance = ma_config.get("collision_avoidance_distance", 5.0)
 
         # Initialize communication bus
         self.comm_bus = CommunicationBus(self.num_agents)
 
         # Initialize multi-agent mapper (handles all belief mapping)
+        # Use LBP news inference by default (matches paper's LBP_single/LBP_multi)
+        news_inference = ma_config.get("news_inference_type", "LBP")
         self.map = MultiAgentMapper(
             self.grid_shape,
             self.num_agents,
@@ -333,6 +370,7 @@ class MultiAgentCoordinator:
             correlation_type=self.correlation_type,
             news_mode=self.news_mode,
             lbp_iterations=self.lbp_iterations,
+            news_inference_type=news_inference,
         )
 
         # Agent states tracking
@@ -389,6 +427,178 @@ class MultiAgentCoordinator:
             )
             self.comm_bus.broadcast(msg)
 
+    def reset_start_position(
+        self,
+        grid_info: Any,
+        start_position: str = "corner",
+        seed: Optional[int] = None,
+        min_distance: float = 10.0,
+        altitude: Optional[float] = None,
+        camera_hrange: Optional[Tuple[float, float]] = None,
+    ) -> List[Tuple[float, float, float]]:
+        """
+        Reset and assign start positions for all agents.
+
+        Args:
+            grid_info: Object with `x` and `y` attributes (field extents).
+            start_position: "corner" | other (only "corner" supported).
+            seed: RNG seed for reproducible assignment.
+            min_distance: Minimum distance between start positions (unused for corner).
+            altitude: Starting altitude for all agents (optional).
+            camera_hrange: Optional tuple `(min_h, max_h)` from a camera; if provided
+                the minimum altitude `min_h` is used as the start altitude.
+
+        Returns:
+            List of assigned (x, y, altitude) tuples for each agent id.
+        """
+
+        # Determine starting altitude. Prefer camera_hrange minimum if provided,
+        # otherwise use explicit altitude argument. If neither provided, raise.
+        if camera_hrange is not None and len(camera_hrange) > 0:
+            try:
+                altitude = float(camera_hrange[0])
+            except Exception:
+                pass
+
+        if altitude is None:
+            raise ValueError(
+                "altitude or camera_hrange must be provided for start positions"
+            )
+
+        # RNG for deterministic placement when seed provided
+        rng = (
+            np.random.default_rng(seed) if seed is not None else np.random.default_rng()
+        )
+
+        positions: List[Tuple[float, float, float]] = []
+
+        if start_position == "corner":
+            # Reference simulator logic (regions)
+
+            # Determine n_h_act based on num_agents to match reference simulator
+            # Reference uses "adhoc" (n_h_act=8) for 8 agents, "normal" (n_h_act=5) otherwise
+            n_h_act = 8 if self.num_agents == 8 else 5
+
+            # Calculate h_displacement
+            h_displacement = (grid_info.x / 2) / n_h_act
+
+            # Region splitted field limits per agent
+            n_agents_to_n_regions = {
+                1: [1, 1],
+                2: [2, 1],
+                4: [2, 2],
+                6: [3, 2],
+                8: [4, 2],
+                10: [5, 2],
+            }
+
+            if self.num_agents in n_agents_to_n_regions:
+                n_regions = n_agents_to_n_regions[self.num_agents]
+
+                min_space_x = -grid_info.x / 2
+                max_space_x = grid_info.x / 2
+                min_space_y = -grid_info.y / 2
+                max_space_y = grid_info.y / 2
+
+                num_points_x = 2 * n_h_act + 1
+                x_positions = np.linspace(min_space_x, max_space_x, num_points_x)
+
+                # Assume square grid for regions as per reference (using h_displacement for Y steps)
+                num_points_y = int((grid_info.y / h_displacement)) + 1
+                y_positions = np.linspace(min_space_y, max_space_y, num_points_y)
+
+                x_intervals = len(x_positions) - 1
+                y_intervals = len(y_positions) - 1
+
+                region_x_limits = []
+                for i in range(n_regions[0]):
+                    idx_start = int(i * x_intervals / n_regions[0])
+                    idx_end = int((i + 1) * x_intervals / n_regions[0])
+                    region_x_limits.append(
+                        [x_positions[idx_start], x_positions[idx_end]]
+                    )
+
+                region_y_limits = []
+                for i in range(n_regions[1]):
+                    idx_start = int(i * y_intervals / n_regions[1])
+                    idx_end = int((i + 1) * y_intervals / n_regions[1])
+                    region_y_limits.append(
+                        [y_positions[idx_start], y_positions[idx_end]]
+                    )
+
+                regions_limits = list(product(region_x_limits, region_y_limits))
+
+                # Assign agents
+                for i in range(self.num_agents):
+                    if i < len(regions_limits):
+                        rl = regions_limits[i]
+                        # Randomly sample within the region (discrete grid points)
+                        # Filter x_positions/y_positions to find those within this region's limits
+                        valid_x = x_positions[
+                            (x_positions >= rl[0][0]) & (x_positions <= rl[0][1])
+                        ]
+                        valid_y = y_positions[
+                            (y_positions >= rl[1][0]) & (y_positions <= rl[1][1])
+                        ]
+
+                        x = rng.choice(valid_x)
+                        y = rng.choice(valid_y)
+                        positions.append((x, y, altitude))
+                    else:
+                        positions.append((0.0, 0.0, altitude))
+            else:
+                corners = [
+                    (-grid_info.x / 2, -grid_info.y / 2),
+                    (grid_info.x / 2, -grid_info.y / 2),
+                    (-grid_info.x / 2, grid_info.y / 2),
+                    (grid_info.x / 2, grid_info.y / 2),
+                ]
+
+                rng.shuffle(corners)
+
+                # Assign corner positions first
+                for i in range(min(self.num_agents, len(corners))):
+                    x, y = corners[i]
+                    positions.append((x, y, altitude))
+
+                # If more agents than corners, add edge positions deterministically
+                if self.num_agents > len(corners):
+                    edges = [
+                        (0, -grid_info.y / 2),
+                        (0, grid_info.y / 2),
+                        (-grid_info.x / 2, 0),
+                        (grid_info.x / 2, 0),
+                    ]
+                    rng.shuffle(edges)
+                    idx = 0
+                    while len(positions) < self.num_agents:
+                        ex, ey = edges[idx % len(edges)]
+                        positions.append((ex, ey, altitude))
+                        idx += 1
+        else:
+            raise NotImplementedError("Only 'corner' start_position is implemented")
+
+        # Update internal agent tracking and broadcast positions
+        now = time.time()
+        with self._states_lock:
+            for agent_id in range(self.num_agents):
+                x, y, z = positions[agent_id]
+                self._agent_states[agent_id] = AgentState(
+                    agent_id=agent_id, position=(x, y), altitude=z, last_update=now
+                )
+
+        # Broadcast position updates
+        for agent_id in range(self.num_agents):
+            pos = positions[agent_id]
+            msg = AgentMessage(
+                msg_type=MessageType.POSITION_UPDATE,
+                sender_id=agent_id,
+                data={"position": (pos[0], pos[1]), "altitude": pos[2]},
+            )
+            self.comm_bus.broadcast(msg, exclude_sender=False)
+
+        return positions
+
     def get_neighbors_in_range(self, agent_id: int) -> List[int]:
         """
         Get IDs of agents within communication range.
@@ -406,19 +616,33 @@ class MultiAgentCoordinator:
         neighbors = []
         agent_state = self._agent_states.get(agent_id)
         if agent_state is None:
+            print(
+                f"[DEBUG] Agent {agent_id} state not found in _agent_states (keys: {list(self._agent_states.keys())})"
+            )
             return neighbors
+
+        # Cell size for converting grid coordinates to meters
+        if self.grid_info is not None:
+            # Calculate cell size: field_length / num_cells
+            cell_size = self.grid_info.x / self.grid_info.shape[1]  # meters per cell
+        else:
+            # Fallback: assume 50m field with 400 cells
+            cell_size = 0.125
 
         with self._states_lock:
             for other_id, state in self._agent_states.items():
                 if other_id == agent_id:
                     continue
 
-                distance = np.sqrt(
+                # Position is stored as (row, col) in grid coordinates
+                # Convert to meters for distance calculation
+                distance_cells = np.sqrt(
                     (agent_state.position[0] - state.position[0]) ** 2
                     + (agent_state.position[1] - state.position[1]) ** 2
                 )
+                distance_meters = distance_cells * cell_size
 
-                if distance <= self.communication_range:
+                if distance_meters <= self.communication_range:
                     neighbors.append(other_id)
 
         return neighbors
@@ -550,123 +774,3 @@ class MultiAgentCoordinator:
     def get_fused_belief(self) -> Optional[np.ndarray]:
         """Get the fused global belief map."""
         return self.map.get_fused_belief()
-
-
-# =============================================================================
-# Utility: Generate Start Positions for Multiple Agents
-# =============================================================================
-
-
-def generate_multi_agent_starts(
-    num_agents: int,
-    grid_info: Any,
-    start_position: str = "corner",
-    min_distance: float = 10.0,
-    seed: int = None,
-) -> List[Tuple[float, float]]:
-    """
-    Generate starting positions for multiple agents.
-
-    Spreads agents across the field to minimize initial overlap.
-
-    Args:
-        num_agents: Number of agents
-        grid_info: Grid configuration object
-        start_position: "corner", "edge", or "spread"
-        min_distance: Minimum distance between start positions
-        seed: Random seed for reproducible random positions
-
-    Returns:
-        List of (x, y) start positions
-    """
-    # Set random seed if provided
-    if seed is not None:
-        rng = np.random.default_rng(seed)
-    else:
-        rng = np.random.default_rng()
-
-    positions = []
-
-    if start_position == "corner":
-        # Use corners, then edges, then interior
-        corners = [
-            (-grid_info.x / 2, -grid_info.y / 2),  # bottom-left
-            (grid_info.x / 2, -grid_info.y / 2),  # bottom-right
-            (-grid_info.x / 2, grid_info.y / 2),  # top-left
-            (grid_info.x / 2, grid_info.y / 2),  # top-right
-        ]
-
-        # Shuffle corners to randomize starting positions
-        corners = list(corners)  # Make a copy
-        rng.shuffle(corners)
-
-        for i in range(min(num_agents, len(corners))):
-            positions.append(corners[i])
-
-        # If more agents than corners, add edge positions
-        if num_agents > len(corners):
-            edges = [
-                (0, -grid_info.y / 2),  # bottom-center
-                (0, grid_info.y / 2),  # top-center
-                (-grid_info.x / 2, 0),  # left-center
-                (grid_info.x / 2, 0),  # right-center
-            ]
-            rng.shuffle(edges)
-            for i in range(min(num_agents - len(corners), len(edges))):
-                positions.append(edges[i])
-
-    elif start_position == "edge":
-        # Distribute along edges
-        total_perimeter = 2 * (grid_info.x + grid_info.y)
-        spacing = total_perimeter / num_agents
-
-        for i in range(num_agents):
-            distance = i * spacing
-
-            if distance < grid_info.x:
-                # Bottom edge
-                positions.append((distance - grid_info.x / 2, -grid_info.y / 2))
-            elif distance < grid_info.x + grid_info.y:
-                # Right edge
-                d = distance - grid_info.x
-                positions.append((grid_info.x / 2, d - grid_info.y / 2))
-            elif distance < 2 * grid_info.x + grid_info.y:
-                # Top edge
-                d = distance - grid_info.x - grid_info.y
-                positions.append((grid_info.x / 2 - d, grid_info.y / 2))
-            else:
-                # Left edge
-                d = distance - 2 * grid_info.x - grid_info.y
-                positions.append((-grid_info.x / 2, grid_info.y / 2 - d))
-
-    elif start_position == "spread":
-        # Grid-based spread across field
-        n_cols = int(np.ceil(np.sqrt(num_agents)))
-        n_rows = int(np.ceil(num_agents / n_cols))
-
-        x_step = grid_info.x / (n_cols + 1)
-        y_step = grid_info.y / (n_rows + 1)
-
-        for i in range(num_agents):
-            row = i // n_cols
-            col = i % n_cols
-            x = -grid_info.x / 2 + (col + 1) * x_step
-            y = -grid_info.y / 2 + (row + 1) * y_step
-            positions.append((x, y))
-
-    # Fill remaining positions randomly if needed
-    while len(positions) < num_agents:
-        x = rng.uniform(-grid_info.x / 2, grid_info.x / 2)
-        y = rng.uniform(-grid_info.y / 2, grid_info.y / 2)
-
-        # Check minimum distance from existing positions
-        valid = True
-        for pos in positions:
-            if np.sqrt((x - pos[0]) ** 2 + (y - pos[1]) ** 2) < min_distance:
-                valid = False
-                break
-
-        if valid:
-            positions.append((x, y))
-
-    return positions[:num_agents]

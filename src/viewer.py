@@ -524,6 +524,10 @@ def plot_terrain(
                     vmin=0,
                     vmax=1,
                 )
+                # Explicitly set limits to match ground truth dimensions
+                ax_belief.set_xlim(0, ground_truth.shape[1])
+                ax_belief.set_ylim(ground_truth.shape[0], 0)
+
                 plt.colorbar(im_belief, ax=ax_belief, fraction=0.046, pad=0.04)
 
                 # Draw observation footprint on belief
@@ -609,12 +613,12 @@ def plot_terrain(
 def _draw_regions_on_axis(ax, region_metadata, selected_region_id, region_scores):
     """
     Helper function to draw region visualization on an axis.
-    
+
     Regions are colored based on their scores using a red-to-blue colormap:
     - Red: Low value (low priority regions)
     - Blue: High value (high priority regions)
     - Selected region: Highlighted with thick black border
-    
+
     Args:
         ax: Matplotlib axis
         region_metadata: Dict mapping region_id -> metadata (center, bounds)
@@ -623,11 +627,11 @@ def _draw_regions_on_axis(ax, region_metadata, selected_region_id, region_scores
     """
     import matplotlib.cm as cm
     from matplotlib.colors import Normalize
-    
+
     # Use RdYlBu_r (red-yellow-blue reversed) colormap: red=low, blue=high
     # Or use coolwarm: blue=low, red=high. Let's use custom red-to-blue
-    cmap = cm.get_cmap('RdYlBu')  # Red (low) -> Yellow -> Blue (high)
-    
+    cmap = cm.get_cmap("RdYlBu")  # Red (low) -> Yellow -> Blue (high)
+
     # Compute score normalization
     if region_scores is not None and len(region_scores) > 0:
         scores = list(region_scores.values())
@@ -638,7 +642,7 @@ def _draw_regions_on_axis(ax, region_metadata, selected_region_id, region_scores
     else:
         norm = None
         score_range = 1.0
-    
+
     for region_id, metadata in region_metadata.items():
         center = metadata["center"]
         bounds = metadata["bounds"]
@@ -657,9 +661,9 @@ def _draw_regions_on_axis(ax, region_metadata, selected_region_id, region_scores
             fill_color = cmap(normalized_score)
             fill_alpha = 0.3 + 0.4 * normalized_score  # Higher score = more visible
         else:
-            fill_color = 'gray'
+            fill_color = "gray"
             fill_alpha = 0.2
-        
+
         # Determine edge style based on selection
         if region_id == selected_region_id:
             edge_color = "black"
@@ -711,7 +715,7 @@ def _draw_regions_on_axis(ax, region_metadata, selected_region_id, region_scores
             label_text = f"{region_id}\n{score:.2f}"
         else:
             label_text = str(region_id)
-        
+
         if region_id == selected_region_id:
             label_facecolor = "black"
             label_fontsize = 9
@@ -745,13 +749,13 @@ def _draw_regions_on_axis(ax, region_metadata, selected_region_id, region_scores
                 linewidth=1,
             ),
         )
-    
+
     # Add colorbar if scores are available
     if region_scores is not None and len(region_scores) > 0:
         sm = cm.ScalarMappable(cmap=cmap, norm=norm)
         sm.set_array([])
         cbar = plt.colorbar(sm, ax=ax, shrink=0.6, pad=0.02)
-        cbar.set_label('Region Score', fontsize=8)
+        cbar.set_label("Region Score", fontsize=8)
         cbar.ax.tick_params(labelsize=7)
 
 
