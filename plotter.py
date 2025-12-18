@@ -1,5 +1,6 @@
 import glob
 import os
+import sys
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -87,6 +88,8 @@ def _parse_single_experiment(lines, file_path):
     n_agents = None
     iteration = None
     news_mode = None  # IG, IG_d, BS, BM
+    field_len = None
+    h_displacement = None
 
     # Extract metadata from the file lines
     for line in lines:
@@ -100,6 +103,20 @@ def _parse_single_experiment(lines, file_path):
             n_agents = int(line.split(":")[1].strip())
         elif line.startswith("Iteration:"):
             iteration = int(line.split(":")[1].strip())
+        elif line.startswith("Grid info:"):
+            # Parse: Grid info: range: 0-50-50, cell_size:0.125, map shape: (400, 400), center:True
+            # Extract field_len (assuming square field)
+            parts = line.split(",")
+            for part in parts:
+                if "range:" in part:
+                    range_vals = part.split(":")[1].strip().split("-")
+                    if len(range_vals) >= 2:
+                        field_len = float(range_vals[1])  # Second value is field length
+            # Calculate h_displacement: (field_len/2) / n_h_act
+            # n_h_act = 8 for 8 agents, 5 otherwise (matches reference)
+            if field_len is not None and n_agents is not None:
+                n_h_act = 8 if n_agents == 8 else 5
+                h_displacement = (field_len / 2) / n_h_act
         elif line.startswith("N agents:"):
             # Legacy support for old format
             n_agents = int(line.split(":")[1].strip())
@@ -178,7 +195,8 @@ def _parse_single_experiment(lines, file_path):
                 heights = [
                     float(h.strip()) for h in heights_str.split(",") if h.strip()
                 ]
-                avg_height = sum(heights) / len(heights) if heights else 0.0
+                # Use maximum height instead of average (highest altitude ~32)
+                avg_height = max(heights) if heights else 0.0
             else:
                 avg_height = 0.0
 
@@ -222,6 +240,7 @@ def _parse_single_experiment(lines, file_path):
     )  # Default to IG (no sharing)
     df["sigma1"] = sigma1
     df["sigma2"] = sigma2
+    df["h_displacement"] = h_displacement  # For calculating actual comm range
     # Ensure correct data types for consistency
     df["Pairwise"] = df["Pairwise"].astype(str)
     df["GaussianRadius"] = df["GaussianRadius"].astype(str)
@@ -254,19 +273,22 @@ def aggregate_data_by_settings(path):
     FileNotFoundError: If no text files are found or file doesn't exist.
     """
 
-    # Support both files and folders
+    # Support both files and folders, and lists of them
     file_paths = []
-    if os.path.isfile(path):
-        file_paths = [path]
-    elif os.path.isdir(path):
-        file_paths = glob.glob(f"{path}/*.txt")
-        file_paths.extend(glob.glob(f"{path}/*.log"))
-    else:
-        raise FileNotFoundError(f"Path does not exist: {path}")
+    paths = path if isinstance(path, list) else [path]
 
-    assert (
-        len(file_paths) != 0
-    ), f"no file found with these settings in the path: {path}"
+    for p in paths:
+        if os.path.isfile(p):
+            file_paths.append(p)
+        elif os.path.isdir(p):
+            file_paths.extend(glob.glob(f"{p}/*.txt"))
+            file_paths.extend(glob.glob(f"{p}/*.log"))
+        else:
+            print(f"Warning: Path does not exist: {p}")
+
+    if not file_paths:
+        raise FileNotFoundError(f"No files found in provided paths: {path}")
+
     all_data = [parse_file_to_table(file_path) for file_path in file_paths]
 
     combined_df = pd.concat(all_data)
@@ -369,7 +391,7 @@ def plot_all_settings(stats, radius, save_dir, strategy=None, show=False):
                     mean_values - std_values,
                     mean_values + std_values,
                     color=colors[iter],
-                    alpha=0.1,
+                    alpha=0.25,
                 )
 
             # Only the leftmost column gets y-axis labels and tick labels
@@ -473,7 +495,9 @@ def plot_all_settings(stats, radius, save_dir, strategy=None, show=False):
         plt.show()
 
 
-def plot_information_sharing_comparison(stats, radius, save_dir, show=False):
+def plot_information_sharing_comparison(
+    stats, radius, save_dir, show=False, comm_range=None, strategy=None
+):
     """
     Plot comparison of information sharing modes (IG, IG_d, BS, BM) as in the paper.
 
@@ -492,6 +516,8 @@ def plot_information_sharing_comparison(stats, radius, save_dir, show=False):
     radius (str): Gaussian radius setting ('5' or 'orto').
     save_dir (str): Directory to save the generated plot.
     show (bool): If True, displays the plot interactively.
+    comm_range (str): Communication range setting (optional, for filename).
+    strategy (str): Strategy name (e.g., 'greedy_ig', 'dec_mcts') for title and filename.
     """
     plt.style.use("seaborn-v0_8-paper")
     plt.rcParams.update(
@@ -687,7 +713,7 @@ def plot_information_sharing_comparison(stats, radius, save_dir, show=False):
                     mean_vals - std_vals,
                     mean_vals + std_vals,
                     color=props["color"],
-                    alpha=0.15,
+                    alpha=0.25,
                 )
 
             # Print summary of what was plotted
@@ -727,21 +753,49 @@ def plot_information_sharing_comparison(stats, radius, save_dir, show=False):
     for row, metric in enumerate(metrics):
         ymin = min(axes[row, 0].get_ylim()[0], axes[row, 1].get_ylim()[0])
         ymax = max(axes[row, 0].get_ylim()[1], axes[row, 1].get_ylim()[1])
-        
+
         # For MSE, compute max from data and add padding
         if metric == "MSE":
             # Get actual max MSE value from data across all modes
             max_mse_data = data[(metric, "mean")].max()
             ymax = max_mse_data * 1.1  # Add 10% padding
             ymin = 0  # MSE starts at 0
-        
+
         for col in range(2):
             axes[row, col].set_ylim(ymin, ymax)
 
     # Add figure title with radius info (R=-1 means unlimited range)
     radius_label = "R = ∞" if str(radius) in ["-1", "orto"] else f"R = {radius}"
+
+    # Add communication range to title if provided
+    comm_label = ""
+    if comm_range is not None:
+        if str(comm_range) in ["-1", "unlimited"]:
+            comm_label = ", Comm Range = ∞"
+        else:
+            # Get h_displacement from data (if available)
+            if "h_displacement" in data.columns:
+                h_disp_val = data["h_displacement"].iloc[0]
+                # Convert to scalar if it's a Series
+                if isinstance(h_disp_val, pd.Series):
+                    h_disp_val = h_disp_val.iloc[0] if len(h_disp_val) > 0 else 3.125
+                h_disp = float(h_disp_val) if pd.notna(h_disp_val) else 3.125
+            else:
+                h_disp = 3.125
+            # comm_range is radius_multiplier: actual range = multiplier × h_displacement
+            actual_range = float(comm_range) * h_disp
+            comm_label = (
+                f", Comm Range = {comm_range}×{h_disp:.3f}m = {actual_range:.1f}m"
+            )
+
+    # Format strategy name for display
+    strategy_label = ""
+    if strategy:
+        strategy_display = strategy.replace("_", " ").title()
+        strategy_label = f"{strategy_display} - "
+    
     fig.suptitle(
-        f"Effect of information sharing in multi-agent scenarios ({radius_label})",
+        f"{strategy_label}Effect of information sharing in multi-agent scenarios ({radius_label}{comm_label})",
         fontsize=16,
         fontweight="normal",
         y=1.04,
@@ -759,7 +813,18 @@ def plot_information_sharing_comparison(stats, radius, save_dir, show=False):
 
     os.makedirs(save_dir, exist_ok=True)
     radius_str = "inf" if str(radius) in ["-1", "orto"] else str(radius)
-    filename = f"info_sharing_comparison_r{radius_str}_{num_agents_str}.png"
+
+    # Add communication range to filename if specified
+    comm_str = ""
+    if comm_range is not None:
+        comm_range_str = (
+            "inf" if str(comm_range) in ["-1", "unlimited"] else str(comm_range)
+        )
+        comm_str = f"_commR{comm_range_str}"
+
+    # Add strategy to filename
+    strategy_str = f"{strategy}_" if strategy else ""
+    filename = f"{strategy_str}info_sharing_comparison_r{radius_str}{comm_str}_{num_agents_str}.png"
     out_path = os.path.join(save_dir, filename)
     plt.savefig(out_path, dpi=300, bbox_inches="tight")
     print(f"Saved information sharing comparison to {out_path}")
@@ -768,7 +833,9 @@ def plot_information_sharing_comparison(stats, radius, save_dir, show=False):
         plt.show()
 
 
-def plot_news_mode_comparison(stats, radius, save_dir, pairwise="equal", show=False):
+def plot_news_mode_comparison(
+    stats, radius, save_dir, pairwise="equal", show=False, comm_range=None
+):
     """
     Plot all news modes (IG, IG_d, BS, BM) on a single figure for comparison.
 
@@ -921,7 +988,7 @@ def plot_news_mode_comparison(stats, radius, save_dir, pairwise="equal", show=Fa
                 mean_vals - std_vals,
                 mean_vals + std_vals,
                 color=props["color"],
-                alpha=0.15,
+                alpha=0.25,
             )
 
         ax.set_xlabel("Steps", fontsize=14, fontweight="bold")
@@ -943,8 +1010,25 @@ def plot_news_mode_comparison(stats, radius, save_dir, pairwise="equal", show=Fa
         for spine in ["left", "bottom"]:
             ax.spines[spine].set_linewidth(1.5)
 
+    # Add communication range to title if provided
+    comm_label = ""
+    if comm_range is not None:
+        if str(comm_range) in ["-1", "unlimited"]:
+            comm_label = ", Comm Range=∞"
+        else:
+            # Get h_displacement from data (if available)
+            h_disp = (
+                data["h_displacement"].iloc[0]
+                if "h_displacement" in data.columns
+                and not pd.isna(data["h_displacement"].iloc[0])
+                else 3.125
+            )
+            # comm_range is radius_multiplier: actual range = multiplier × h_displacement
+            actual_range = float(comm_range) * h_disp
+            comm_label = f", Comm Range={comm_range}×{h_disp:.3f}m={actual_range:.1f}m"
+
     fig.suptitle(
-        f"Multi-Agent Information Gain Comparison (r={radius}, {pairwise})",
+        f"Multi-Agent Information Gain Comparison (r={radius}, {pairwise}{comm_label})",
         fontsize=18,
         fontweight="bold",
         y=0.98,
@@ -963,9 +1047,16 @@ def plot_news_mode_comparison(stats, radius, save_dir, pairwise="equal", show=Fa
     modes_str = "-".join([str(m) for m in modes])
 
     os.makedirs(save_dir, exist_ok=True)
-    filename = (
-        f"news_mode_comparison_r{radius}_{pairwise}_{num_agents_str}_{modes_str}.png"
-    )
+
+    # Add communication range to filename if specified
+    comm_str = ""
+    if comm_range is not None:
+        comm_range_str = (
+            "inf" if str(comm_range) in ["-1", "unlimited"] else str(comm_range)
+        )
+        comm_str = f"_commR{comm_range_str}"
+
+    filename = f"news_mode_comparison_r{radius}{comm_str}_{pairwise}_{num_agents_str}_{modes_str}.png"
     out_path = os.path.join(save_dir, filename)
     plt.savefig(out_path, dpi=300, bbox_inches="tight")
     print(f"Saved news mode comparison to {out_path}")
@@ -974,25 +1065,25 @@ def plot_news_mode_comparison(stats, radius, save_dir, pairwise="equal", show=Fa
         plt.show()
 
 
-def main(path, show, radius):
+def main(paths, show, radius):
     """
     Main function to aggregate data from text files and generate plots.
 
     Parameters:
-    path (str): Path to a directory containing data files or a single file.
+    paths (str or list): Path(s) to directory containing data files or single file(s).
     show (bool): Whether to display the plot interactively.
     radius (str): Gaussian radius setting for filtering the data.
 
     Raises:
     ValueError: If the path is not provided.
     """
-    if path is None:
-        raise ValueError("Path must be provided")
+    if paths is None:
+        raise ValueError("Paths must be provided")
 
     all_stats = pd.DataFrame()
 
     # # Aggregate data
-    stats = aggregate_data_by_settings(path)
+    stats = aggregate_data_by_settings(paths)
     all_stats = pd.concat([all_stats, stats], ignore_index=True)
     # all_stats = aggregate_data_by_settings(path)
 
@@ -1018,7 +1109,7 @@ def main(path, show, radius):
     plot_all_settings(all_stats, radius, save_dir, strategy=strategy, show=show)
 
 
-def main_news_comparison(paths, show, radius, pairwise="equal"):
+def main_news_comparison(paths, show, radius, pairwise="equal", comm_range=None):
     """
     Main function to compare different news modes (IG, IG_d, BS, BM).
 
@@ -1027,6 +1118,7 @@ def main_news_comparison(paths, show, radius, pairwise="equal"):
     show (bool): Whether to display the plot interactively.
     radius (str): Gaussian radius setting.
     pairwise (str): Pairwise correlation type.
+    comm_range (str): Communication range setting (optional, for filename).
     """
     all_stats = pd.DataFrame()
 
@@ -1060,12 +1152,25 @@ def main_news_comparison(paths, show, radius, pairwise="equal"):
     script_dir = os.path.dirname(os.path.realpath(__file__))
     save_dir = os.path.join(script_dir, "plots")
 
+    # Extract strategy for plot titles and filenames
+    strategy = None
+    if "Strategy" in all_stats.columns and len(all_stats["Strategy"].unique()) > 0:
+        strategies = all_stats["Strategy"].unique()
+        strategy = strategies[0] if len(strategies) == 1 else "multi_strategy"
+    
     # Generate comparison plots
     if "NewsMode" in all_stats.columns:
         plot_news_mode_comparison(
-            all_stats, radius, save_dir, pairwise=pairwise, show=show
+            all_stats,
+            radius,
+            save_dir,
+            pairwise=pairwise,
+            show=show,
+            comm_range=comm_range,
         )
-        plot_information_sharing_comparison(all_stats, radius, save_dir, show=show)
+        plot_information_sharing_comparison(
+            all_stats, radius, save_dir, show=show, comm_range=comm_range, strategy=strategy
+        )
     else:
         print("NewsMode column not found - using standard plotting")
         plot_all_settings(all_stats, radius, save_dir, show=show)
@@ -1115,14 +1220,27 @@ if __name__ == "__main__":
         help="Generate information sharing comparison plots (IG, IGd, IG_BS, IG_BM, IGd_BS, IGd_BM)",
     )
 
+    parser.add_argument(
+        "--comm-range",
+        type=str,
+        default=None,
+        help="Communication range setting (for filename, e.g., 5, -1 for unlimited)",
+    )
+
     args = parser.parse_args()
 
-    if args.compare_news and args.paths:
-        # Use multiple paths for news mode comparison
-        main_news_comparison(args.paths, args.show, args.radius, args.pairwise)
-    elif args.compare_news and args.path:
-        # Use single path but generate news comparison plots
-        main_news_comparison([args.path], args.show, args.radius, args.pairwise)
+    if args.compare_news or args.paths:
+        paths = args.paths if args.paths else ([args.path] if args.path else [])
+        if not paths:
+            print("Error: No paths provided for comparison")
+            sys.exit(1)
+        main_news_comparison(
+            paths, args.show, args.radius, args.pairwise, args.comm_range
+        )
     else:
         # Standard plotting
-        main(args.path, args.show, args.radius)
+        paths = args.paths if args.paths else ([args.path] if args.path else [])
+        if not paths:
+            print("Error: No paths provided")
+            sys.exit(1)
+        main(paths, args.show, args.radius)

@@ -117,7 +117,19 @@ class planning:
         sigma = a * (1 - np.exp(-b * x_future.altitude))
 
         if self.conf_dict is not None:
-            s0, s1 = self.conf_dict[np.round(x_future.altitude, decimals=2)]
+            # Try exact lookup first (keys are rounded to 2 decimals).
+            key = np.round(x_future.altitude, decimals=2)
+            if key in self.conf_dict:
+                s0, s1 = self.conf_dict[key]
+            else:
+                # Fallback: find nearest altitude key available in conf_dict
+                try:
+                    keys = np.array(list(self.conf_dict.keys()), dtype=float)
+                    idx = np.argmin(np.abs(keys - x_future.altitude))
+                    nearest = keys[idx]
+                    s0, s1 = self.conf_dict[nearest]
+                except Exception:
+                    s0, s1 = sigma, sigma
         else:
             s0, s1 = sigma, sigma
 

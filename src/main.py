@@ -1,759 +1,25 @@
 import os
-import sys
 import json
-import random
-import logging
-import numpy as np
 from tqdm import tqdm
-import argparse
-from datetime import datetime
-
-
-from helper import (
-    FastLogger,
-    compute_metrics,
-    observed_m_ids,
-    uav_position,
-)
-from orthomap import Field
-from mapper_LBP import OccupancyMap as OM
-from planner import planning
-
-from uav_camera import Camera
-from multi_agent_coordinator import (
-    MultiAgentCoordinator,
-    generate_multi_agent_starts,
-)
-
-# from async_runner import AsyncMultiAgentRunner, create_async_runner_from_config
-
-from viewer import plot_metrics, plot_terrain
-
-from helper import create_run_folder, make_param_tag
-from config_loader import load_config  # Use new config loader with backward compat
-from experiment_utils import (
-    initialize_agent,
-    finalize_planners,
-    process_agent_observations,
-    perform_belief_fusion,
-    select_agent_actions,
-    update_agent_positions,
-    extract_region_metadata,
-)
-
 import matplotlib
 
 matplotlib.use("Agg")
 
-
-# =============================================================================
-# Logging Setup - Redirect all output to file
-# =============================================================================
-
-# Store original stdout for tqdm
-_original_stdout = sys.stdout
-_original_stderr = sys.stderr
-
-
-def setup_main_logger(log_dir: str = "logs", experiment_name: str = None) -> str:
-    """
-    Set up main logger to redirect all output to a file.
-
-    This captures:
-    - All logging.* calls
-    - All print() statements (via stdout redirect)
-
-    Args:
-        log_dir: Directory for log files
-        experiment_name: Optional experiment name for log filename
-
-    Returns:
-        Path to the created log file
-    """
-    os.makedirs(log_dir, exist_ok=True)
-
-    # Create timestamped log file
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    exp_suffix = f"_{experiment_name}" if experiment_name else ""
-    log_filename = f"main{exp_suffix}_{timestamp}.log"
-    log_file = os.path.join(log_dir, log_filename)
-
-    # Configure root logger. Use force=True to replace existing handlers
-    # so repeated calls (multiple experiment modes) create separate files.
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(message)s",
-        handlers=[logging.FileHandler(log_file)],
-        force=True,
-    )
-
-    # Create a custom stream to redirect print() to logger
-    class LoggerWriter:
-        """Redirect stdout/stderr to logger and file."""
-
-        def __init__(self, logger, level, log_file_handle):
-            self.logger = logger
-            self.level = level
-            self.log_file = log_file_handle
-            self.buffer = ""
-
-        def write(self, message):
-            if message and message.strip():
-                self.logger.log(self.level, message.strip())
-
-        def flush(self):
-            if self.log_file:
-                self.log_file.flush()
-
-    # Open log file for print redirect
-    log_file_handle = open(log_file, "a")
-
-    # Get main logger
-    main_logger = logging.getLogger("main")
-
-    # Redirect print statements to logger
-    sys.stdout = LoggerWriter(main_logger, logging.INFO, log_file_handle)
-    sys.stderr = LoggerWriter(main_logger, logging.ERROR, log_file_handle)
-
-    # Log initialization (use original stdout for immediate feedback)
-    _original_stdout.write(f"Logging to: {log_file}\n")
-    _original_stdout.flush()
-
-    main_logger.info("=" * 80)
-    main_logger.info("MAIN EXPERIMENT LOG")
-    main_logger.info(f"Experiment: {experiment_name if experiment_name else 'default'}")
-    main_logger.info(f"Log file: {log_file}")
-    main_logger.info("=" * 80)
-
-    return log_file
-
-
-def get_main_logger():
-    """Get the main logger instance."""
-    return logging.getLogger("main")
-
-
-def get_tqdm_file():
-    """Get file handle for tqdm progress bars (uses original stderr)."""
-    return _original_stderr
-
-
-# -----------------------------------------------------------------------------
-# Build Global Folder Paths from Config
-# -----------------------------------------------------------------------------
-def load_global_paths(config):
-    """
-    Build global path variables using the base 'project_path' directory provided
-    in the config.
-    """
-    PROJECT_PATH = config["project_path"].rstrip("/")  # Ensure no trailing slash
-    ANNOTATION_PATH = os.path.join(PROJECT_PATH, "data", "annotation.txt")
-    ORTHOMAP_PATH = "/media/bota/BOTA/wheat/example-run-001_20241014T1739_ortho_dsm.tif"
-    TILE_PIXEL_PATH = os.path.join(PROJECT_PATH, "data", "tiles_to_pixels.txt")
-    MODEL_PATH = os.path.join(
-        PROJECT_PATH,
-        "binary_classifier",
-        "models",
-        "best_model_auc91_lr1_-05_bs128_wd_2.5-04.pth",
-    )
-    CACHE_DIR = os.path.join(PROJECT_PATH, "data", "predictions_cache")
-    return (
-        PROJECT_PATH,
-        ANNOTATION_PATH,
-        ORTHOMAP_PATH,
-        TILE_PIXEL_PATH,
-        MODEL_PATH,
-        CACHE_DIR,
-    )
-
-
-# -----------------------------------------------------------------------------
-# Parse Command-Line Arguments
-# -----------------------------------------------------------------------------
-def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Run active sensing experiments using a configuration file."
-    )
-    parser.add_argument(
-        "--config",
-        type=str,
-        default="config.json",
-        help="Path to the JSON configuration file.",
-    )
-    return parser.parse_args()
-
-
-# -----------------------------------------------------------------------------
-# Main Experiment Code
-# -----------------------------------------------------------------------------
-
-
-def run_single_agent_experiment(
-    config,
-    grid_info,
-    camera,
-    map_obj,
-    ground_truth_map,
-    conf_dict,
-    occupancy_map,
-    planner,
-    uav_pos,
-    results_folder,
-    corr_type,
-    e_margin,
-    grf_r,
-    iter_idx,
-    n_steps,
-    ENABLE_STEPWISE_PLOTTING,
-    ENABLE_LOGGING,
-    mcts_params,
-    action_strategy,
-):
-    """
-    Run a single-agent experiment iteration.
-
-    This is the original experiment loop extracted into a function for reuse.
-    """
-    # Initialize belief map with a uniform probability (0.5)
-    belief_map = np.full((grid_info.shape[0], grid_info.shape[1], 2), 0.5)
-
-    uav_positions, actions = [uav_pos], []
-    camera.set_altitude(uav_pos.altitude)
-    camera.set_position(uav_pos.position)
-
-    observed_ids = set()
-    entropy, mse, height, coverage = [], [], [], []
-
-    logger = None
-    if ENABLE_LOGGING:
-        log_folder = os.path.join(results_folder, "txt")
-        logger = FastLogger(
-            log_folder,
-            strategy=action_strategy,
-            pairwise=corr_type,
-            grid=grid_info,
-            init_x=uav_pos,
-            r=grf_r,
-            iteration=iter_idx,
-            num_agents=1,
-            e=e_margin,
-            conf_dict=conf_dict,
-            header_extras=[("mcts_params", json.dumps(mcts_params, sort_keys=True))],
-        )
-
-    if ENABLE_STEPWISE_PLOTTING:
-        os.makedirs(
-            results_folder
-            + f"/{corr_type}_{action_strategy}_e{e_margin}_r{grf_r}/{iter_idx}/steps/",
-            exist_ok=True,
-        )
-
-    info_gain_action = {}
-
-    for step in tqdm(
-        range(0, n_steps), desc="steps", position=3, leave=False, file=get_tqdm_file()
-    ):
-        sigmas = None
-        if conf_dict is not None:
-            s0, s1 = conf_dict[np.round(uav_pos.altitude, decimals=2)]
-            sigmas = [s0, s1]
-
-        fp_vertices_ij, submap = map_obj.get_observations(uav_pos, sigmas)
-        observed_field_range = camera.get_range(index_form=False)
-
-        occupancy_map.update_belief_OG(fp_vertices_ij, submap, uav_pos)
-        occupancy_map.propagate_messages(fp_vertices_ij, submap, max_iterations=1)
-
-        belief_map[:, :, 1] = occupancy_map.get_belief().copy()
-        belief_map[:, :, 0] = 1 - belief_map[:, :, 1]
-
-        observed_ids.update(observed_m_ids(camera, uav_pos))
-        entropy_val, mse_val, coverage_val = compute_metrics(
-            ground_truth_map, belief_map, observed_ids, grid_info
-        )
-        entropy.append(entropy_val)
-        mse.append(mse_val)
-        coverage.append(coverage_val)
-        height.append(uav_pos.altitude)
-
-        if ENABLE_LOGGING and logger is not None:
-            logger.log_data(
-                entropy[-1],
-                mse[-1],
-                height[-1],
-                coverage[-1],
-                step=step,
-                action=actions[-1] if len(actions) > 0 else None,
-                ig=info_gain_action.get(actions[-1]) if len(actions) > 0 else None,
-            )
-
-        if ENABLE_STEPWISE_PLOTTING:
-            plot_metrics(
-                f"{results_folder}/{corr_type}_{action_strategy}_e{e_margin}_r{grf_r}/iter_{iter_idx}.png",
-                entropy,
-                mse,
-                coverage,
-                height,
-                height_range=camera.get_hrange(),
-            )
-
-        next_action, info_gain_action = planner.select_action(belief_map, uav_positions)
-
-        print(f"Step {step}: Selected action {next_action}")
-        print(f"Current UAV position: {uav_pos}")
-        igs_sorted = dict(
-            sorted(info_gain_action.items(), key=lambda kv: kv[1], reverse=True)
-        )
-        for a, ig in igs_sorted.items():
-            print(f"{a}\t - {ig:.4f}")
-        print("________________________________")
-
-        uav_pos = uav_position(camera.x_future(next_action))
-        actions.append(next_action)
-        uav_positions.append(uav_pos)
-        camera.set_altitude(uav_pos.altitude)
-        camera.set_position(uav_pos.position)
-
-        if ENABLE_STEPWISE_PLOTTING:
-            # Get region metadata from hierarchical planners
-            region_metadata, selected_region_id, region_scores = (
-                extract_region_metadata(planner, action_strategy)
-            )
-
-            plot_terrain(
-                f"{results_folder}/{corr_type}_{action_strategy}_e{e_margin}_r{grf_r}/{iter_idx}/steps/step_{step}.png",
-                belief_map,
-                grid_info,
-                uav_positions[0:-1],
-                ground_truth_map,
-                submap,
-                observed_field_range,
-                fp_vertices_ij,
-                camera.get_hrange(),
-                region_metadata=region_metadata,
-                selected_region_id=selected_region_id,
-                region_scores=region_scores,
-            )
-
-    return {
-        "entropy": entropy,
-        "mse": mse,
-        "coverage": coverage,
-        "height": height,
-        "uav_positions": uav_positions,
-        "actions": actions,
-    }
-
-
-def run_multi_agent_experiment(
-    config,
-    grid_info,
-    map_obj,
-    ground_truth_map,
-    conf_dict,
-    results_folder,
-    corr_type,
-    e_margin,
-    grf_r,
-    iter_idx,
-    n_steps,
-    ENABLE_STEPWISE_PLOTTING,
-    ENABLE_LOGGING,
-    mcts_params,
-    action_strategy,
-    min_alt,
-    overlap,
-    optimal_alt,
-    seed,
-    news_mode=None,
-):
-    """
-    Run a multi-agent experiment iteration with decentralized coordination.
-
-    Each agent has its own camera, planner, and tracks its own path.
-    Agents coordinate through the MultiAgentCoordinator.
-    """
-    ma_config = config.get("multi_agent", {})
-    num_agents = config.get("num_agents", ma_config.get("num_agents", 1))
-    start_position = config.get("start_position", "corner")
-
-    print(f"\n{'='*60}")
-    print(f"MULTI-AGENT EXPERIMENT: {num_agents} agents")
-    print(f"{'='*60}\n")
-
-    # Create RNG
-    rng = np.random.default_rng(seed)
-
-    # Initialize coordinator
-    # NOTE: pairwise_type (corr_type) is used in:
-    # 1. Each agent's local OccupancyMap (for LBP propagation)
-    # 2. MultiAgentMapper (for news belief management)
-    
-    # Parse news_mode for coordinator: extract "BS" or "BM" if present
-    coord_news_mode = None
-    if news_mode:
-        if "_BS" in news_mode:
-            coord_news_mode = "BS"
-        elif "_BM" in news_mode:
-            coord_news_mode = "BM"
-        elif news_mode in ["BS", "BM"]:
-            coord_news_mode = news_mode
-    
-    coordinator = MultiAgentCoordinator(
-        grid_shape=grid_info.shape,
-        config=config,
-        conf_dict=conf_dict,
-        correlation_type=corr_type,
-        news_mode=coord_news_mode,  # Pass "BS" or "BM", not full label
-        mode=news_mode,  # Pass full mode label for IGd detection
-    )
-
-    # Generate start positions for all agents
-    start_positions = generate_multi_agent_starts(
-        num_agents=num_agents,
-        grid_info=grid_info,
-        start_position=start_position,
-        min_distance=10.0,
-        seed=seed,
-    )
-
-    # Initialize per-agent state
-    agents = []
-    for agent_id in range(num_agents):
-        start_pos = start_positions[agent_id]
-
-        agent_state = initialize_agent(
-            agent_id=agent_id,
-            grid_info=grid_info,
-            start_position=start_pos,
-            action_strategy=action_strategy,
-            conf_dict=conf_dict,
-            corr_type=corr_type,
-            mcts_params=mcts_params,
-            optimal_alt=optimal_alt,
-            min_alt=min_alt,
-            overlap=overlap,
-            seed=seed,
-            coordinator=coordinator,
-        )
-        # Verify correlation_type
-        om = agent_state["occupancy_map"]
-        agents.append(agent_state)
-
-        # Update coordinator with initial position
-        camera = agent_state["camera"]
-        uav_pos = agent_state["uav_pos"]
-        current_row, current_col = camera.convert_xy_ij(
-            uav_pos.position[0], uav_pos.position[1], camera.grid.center
-        )
-        coordinator.update_agent_state(
-            agent_id=agent_id,
-            position=(current_row, current_col),
-            altitude=uav_pos.altitude,
-        )
-
-    # Get news_mode and sharing options for logging
-    dec_config = config.get("decentralized", {})
-    news_sharing = dec_config.get("news_sharing", True)
-    position_sharing = dec_config.get("position_sharing", True)
-
-    # If caller supplied a news_mode, respect it; otherwise determine based on sharing options
-    if news_mode is None:
-        if not position_sharing and not news_sharing:
-            news_mode = "IG"  # No sharing
-        elif position_sharing and not news_sharing:
-            news_mode = "IG_d"  # Position only
-        else:
-            news_mode = ma_config.get("news_mode", dec_config.get("news_mode", "BM"))
-
-    # Setup logging - single unified logger for multi-agent
-    multi_agent_logger = None
-    if ENABLE_LOGGING:
-        log_folder = os.path.join(results_folder, "txt")
-        # Collect all agent init positions
-        init_positions = [agent["uav_pos"] for agent in agents]
-        multi_agent_logger = FastLogger(
-            log_folder,
-            strategy=action_strategy,
-            pairwise=corr_type,
-            grid=grid_info,
-            init_x=init_positions,
-            r=grf_r,
-            iteration=iter_idx,
-            num_agents=num_agents,
-            e=e_margin,
-            conf_dict=conf_dict,
-            filename="run.log",
-            multi_agent=True,
-            news_mode=news_mode,
-            header_extras=[
-                ("mcts_params", json.dumps(mcts_params, sort_keys=True)),
-            ],
-        )
-
-    # Setup step-wise plotting directory
-    if ENABLE_STEPWISE_PLOTTING:
-        os.makedirs(
-            results_folder
-            + f"/{corr_type}_{action_strategy}_e{e_margin}_r{grf_r}/{iter_idx}/steps/",
-            exist_ok=True,
-        )
-
-    # Initialize fused metrics lists for plotting
-    fused_entropy_history = []
-    fused_mse_history = []
-    combined_coverage_history = []
-
-    # =========================================================================
-    # SYNCHRONOUS EXECUTION MODE (DEFAULT)
-    # =========================================================================
-    # Main multi-agent loop
-    for step in tqdm(
-        range(0, n_steps), desc="steps", position=3, leave=False, file=get_tqdm_file()
-    ):
-        # =====================================================================
-        # PHASE 1: All agents observe and update local belief (SYNCHRONOUS)
-        # =====================================================================
-        print(f"step {step}: Processing agent observations...")
-        agent_observations = process_agent_observations(
-            agents, map_obj, conf_dict, coordinator
-        )
-
-        # =====================================================================
-        # PHASE 2: Synchronous belief fusion across agents
-        # =====================================================================
-        perform_belief_fusion(
-            agents,
-            coordinator,
-            agent_observations,
-            grid_info,
-            step,
-            news_sharing=news_sharing,
-        )
-
-        # =====================================================================
-        # PHASE 3: Compute metrics, select actions, and update positions
-        # =====================================================================
-        select_agent_actions(
-            agents, ground_truth_map, grid_info, coordinator, config, step
-        )
-        update_agent_positions(agents, coordinator)
-
-        # =====================================================================
-        # COMPUTE METRICS (always needed for logging and history)
-        # =====================================================================
-        # Compute combined observed_ids (union of all agents' observed_ids)
-        combined_observed_ids = set()
-        for agent in agents:
-            combined_observed_ids.update(agent["observed_ids"])
-
-        # DEBUG: Check agent beliefs
-        if step == 0:
-            for agent in agents:
-                b = agent["belief_map"][:, :, 1]
-                om = agent["occupancy_map"]
-                print(
-                    f"[DEBUG] Agent {agent['agent_id']} corr_type={om.correlation_type} belief_range={b.min():.4f}-{b.max():.4f}",
-                    flush=True,
-                )
-
-        # Compute fused belief from all agents' local beliefs (simple average)
-        fused_local = np.mean(
-            [agent["belief_map"][:, :, 1] for agent in agents], axis=0
-        )
-        fused_local = np.clip(fused_local, 0.001, 0.999)
-
-        # Debug: print fused belief statistics to diagnose unexpected MSE
-        if step == 0 or step % 10 == 0:
-            flat = fused_local.ravel()
-            counts, edges = np.histogram(flat, bins=np.linspace(0.0, 1.0, 11))
-            print(
-                f"[DEBUG] step={step} fused_mean={flat.mean():.4f} min={flat.min():.4f} max={flat.max():.4f}",
-                flush=True,
-            )
-            print(
-                f"[DEBUG] fused_hist_counts={counts.tolist()} bins={edges.tolist()}",
-                flush=True,
-            )
-
-        display_belief = np.zeros((grid_info.shape[0], grid_info.shape[1], 2))
-        display_belief[:, :, 1] = fused_local
-        display_belief[:, :, 0] = 1 - fused_local
-
-        # Compute metrics from fused belief (display_belief)
-        fused_entropy_val, fused_mse_val, combined_coverage_val = compute_metrics(
-            ground_truth_map, display_belief, combined_observed_ids, grid_info
-        )
-
-        # Append to running history lists
-        fused_entropy_history.append(fused_entropy_val)
-        fused_mse_history.append(fused_mse_val)
-        combined_coverage_history.append(combined_coverage_val)
-
-        # Log multi-agent data (common metrics + per-agent lists)
-        if ENABLE_LOGGING and multi_agent_logger is not None:
-            heights = [agent["height"][-1] for agent in agents]
-            actions = [
-                agent["actions"][-1] if len(agent["actions"]) > 0 else None
-                for agent in agents
-            ]
-            igs = [
-                (
-                    agent["info_gain_action"].get(agent["actions"][-1])
-                    if len(agent["actions"]) > 0
-                    else None
-                )
-                for agent in agents
-            ]
-            multi_agent_logger.log_multi_agent_data(
-                entropy=fused_entropy_val,
-                mse=fused_mse_val,
-                coverage=combined_coverage_val,
-                heights=heights,
-                actions=actions,
-                igs=igs,
-                step=step,
-            )
-
-        # Stepwise plotting (combines all agents)
-        if ENABLE_STEPWISE_PLOTTING:
-            # Collect all agent paths
-            all_uav_positions = []
-            for agent in agents:
-                all_uav_positions.append(agent["uav_positions"][:-1])
-
-            # Get region metadata from first agent's planner
-            region_metadata, selected_region_id, region_scores = (
-                extract_region_metadata(agents[0]["planner"], action_strategy)
-            )
-
-            # Get observation data from first agent for plotting
-            first_agent_obs = agent_observations.get(0, {})
-            plot_submap = first_agent_obs.get("submap", np.array([]))
-            plot_fp_ij = first_agent_obs.get("fp_ij", [[0, 0], [0, 0]])
-
-            # Collect per-agent data for multi-agent visualization
-            per_agent_data = []
-            for agent in agents:
-                agent_id = agent["agent_id"]
-                obs_data = agent_observations.get(agent_id, {})
-                agent_camera = agent["camera"]
-                agent_uav_pos = obs_data.get("uav_pos", agent["uav_pos"])
-                agent_planner = agent["planner"]
-
-                # Get per-agent HLP region data
-                (
-                    agent_region_metadata,
-                    agent_selected_region,
-                    agent_region_scores,
-                ) = extract_region_metadata(agent_planner, action_strategy)
-
-                per_agent_data.append(
-                    {
-                        "agent_id": agent_id,
-                        "submap": obs_data.get("submap", np.array([])),
-                        "fp_ij": obs_data.get(
-                            "fp_ij",
-                            {"ul": (0, 0), "bl": (0, 0), "ur": (0, 0), "br": (0, 0)},
-                        ),
-                        # Use local belief (before fusion) for per-agent visualization
-                        "belief_map": agent.get(
-                            "local_belief_map", agent["belief_map"]
-                        ).copy(),
-                        "obs_range": agent_camera.get_range(
-                            position=(
-                                agent_uav_pos.position
-                                if hasattr(agent_uav_pos, "position")
-                                else agent["uav_pos"].position
-                            ),
-                            altitude=(
-                                agent_uav_pos.altitude
-                                if hasattr(agent_uav_pos, "altitude")
-                                else agent["uav_pos"].altitude
-                            ),
-                            index_form=False,
-                        ),
-                        "region_metadata": agent_region_metadata,
-                        "selected_region_id": agent_selected_region,
-                        "region_scores": agent_region_scores,
-                    }
-                )
-
-            # Plot with multi-agent paths (no region_metadata in main call - it's per-agent now)
-            plot_terrain(
-                f"{results_folder}/{corr_type}_{action_strategy}_e{e_margin}_r{grf_r}/{iter_idx}/steps/step_{step}.png",
-                display_belief,
-                grid_info,
-                all_uav_positions,  # Pass list of paths
-                ground_truth_map,
-                plot_submap,
-                agents[0]["camera"].get_range(index_form=False),
-                plot_fp_ij,
-                agents[0]["camera"].get_hrange(),
-                region_metadata=None,  # Regions shown per-agent now
-                selected_region_id=None,
-                region_scores=None,
-                multi_agent=True,  # New flag for multi-agent visualization
-                per_agent_data=per_agent_data,  # Pass per-agent observation/belief/HLP data
-            )
-
-            # Per-agent heights (list of lists)
-            per_agent_heights = [agent["height"][: step + 1] for agent in agents]
-
-            plot_metrics(
-                f"{results_folder}/{corr_type}_{action_strategy}_e{e_margin}_r{grf_r}/iter_{iter_idx}.png",
-                fused_entropy_history,
-                fused_mse_history,
-                combined_coverage_history,
-                per_agent_heights,
-                height_range=agents[0]["camera"].get_hrange(),
-            )
-
-        print(f"{'─'*40}")
-
-    # Drain any remaining messages from queues (cleanup old messages)
-    coordinator.comm_bus.clear_all_queues()
-
-    # Finalize planners using utility function
-    finalize_planners(agents)
-
-    # Close logger
-    if ENABLE_LOGGING and multi_agent_logger is not None:
-        multi_agent_logger.close()
-
-    # Print coordination statistics
-    coord_stats = coordinator.get_statistics()
-    print(f"\n{'='*60}")
-    print("MULTI-AGENT COORDINATION STATISTICS")
-    print(f"{'='*60}")
-    print(f"Belief fusions: {coord_stats.get('belief_fusions', 0)}")
-    print(f"Region allocations: {coord_stats.get('region_allocations', 0)}")
-    print(f"Collision avoidances: {coord_stats.get('collision_avoidances', 0)}")
-    print(f"Communication stats: {coord_stats.get('comm_bus', {})}")
-
-    if "lbp_fusion" in coord_stats:
-        print(f"LBP Fusion stats: {coord_stats['lbp_fusion']}")
-
-    if "coverage_per_agent" in coord_stats:
-        print(f"Coverage per agent: {coord_stats['coverage_per_agent']}")
-
-    print(f"{'='*60}\n")
-
-    return {
-        "agents": [
-            {
-                "agent_id": a["agent_id"],
-                "entropy": a["entropy"],
-                "mse": a["mse"],
-                "coverage": a["coverage"],
-                "height": a["height"],
-                "uav_positions": a["uav_positions"],
-                "actions": a["actions"],
-            }
-            for a in agents
-        ],
-        "coordination_stats": coord_stats,
-    }
+from helper import make_param_tag
+from orthomap import Field
+from mapper_LBP import OccupancyMap as OM
+from planner import planning
+from uav_camera import Camera
+from config_loader import load_config
+
+from experiment_config import (
+    setup_main_logger,
+    get_main_logger,
+    get_tqdm_file,
+    load_global_paths,
+    parse_args,
+)
+from experiment_runner import run_multi_agent_experiment
 
 
 def main():
@@ -895,10 +161,30 @@ def main():
             # Unknown mode, use defaults
             actual_news_mode = news_mode
 
-        # Build run_base with all parameters: strategy_field_r{radius}_start_N{agents}_{mode}
+        # Get communication range for folder naming
+        # Check if radius_multiplier is specified (preferred, matches reference paper)
+        radius_multiplier = ma_config.get(
+            "radius_multiplier",
+            dec_config.get("radius_multiplier", None),
+        )
+
+        if radius_multiplier is not None:
+            # Use radius_multiplier notation (e.g., "R5" for multiplier=5, "Rinf" for -1)
+            comm_range_str = (
+                "Rinf" if radius_multiplier == -1 else f"R{radius_multiplier}"
+            )
+        else:
+            # Fallback to direct communication_range in meters
+            comm_range = ma_config.get(
+                "communication_range",
+                dec_config.get("communication_range", -1),
+            )
+            comm_range_str = "inf" if comm_range == -1 else str(comm_range)
+
+        # Build run_base with all parameters: strategy_field_r{radius}_start_N{agents}_{mode}_commR{range}
         run_base = (
             f"{config['action_strategy']}_{config['field_type'].lower()}_"
-            f"r{grf_r_for_name}_{config['start_position']}_N{num_agents}_{news_mode}"
+            f"r{grf_r_for_name}_{config['start_position']}_N{num_agents}_{news_mode}_comm{comm_range_str}"
         )
         if config.get("action_strategy") == "mcts" and config.get(
             "params_in_path", True
@@ -984,6 +270,8 @@ def main():
             f_overlap=overlap,
             s_overlap=overlap,
             seed=seed,
+            a=1.0,
+            b=0.015,
         )
         map_obj = Field(
             grid_info,
@@ -1036,43 +324,19 @@ def main():
                         # theoretical sensor model
                         conf_dict = camera1.theoretical_conf_dict()
 
-                    # Decide between single-agent and multi-agent experiment
-                    if num_agents > 1:
-                        # Multi-agent experiment
-                        result = run_multi_agent_experiment(
-                            config=config,
-                            grid_info=grid_info,
-                            map_obj=map_obj,
-                            ground_truth_map=ground_truth_map,
-                            conf_dict=conf_dict,
-                            results_folder=results_folder,
-                            corr_type=corr_type,
-                            e_margin=e_margin,
-                            grf_r=grf_r,
-                            iter_idx=iter_idx,
-                            n_steps=n_steps,
-                            ENABLE_STEPWISE_PLOTTING=ENABLE_STEPWISE_PLOTTING,
-                            ENABLE_LOGGING=ENABLE_LOGGING,
-                            mcts_params=mcts_params,
-                            action_strategy=action_strategy,
-                            min_alt=min_alt,
-                            overlap=overlap,
-                            optimal_alt=optimal_alt,
-                            seed=iteration_seed,
-                            news_mode=news_mode,
-                        )
-                        print(
-                            f"Multi-agent experiment completed with {num_agents} agents"
-                        )
-                    else:
-                        # Single-agent experiment (original behavior)
-                        occupancy_map = OM(
+                    # Unified experiment call: use the same multi-agent framework
+                    # for N==1 and N>1 to avoid duplicated logic.
+                    # If single-agent experiment, build and pass initial camera/planner
+                    init_camera = None
+                    init_planner = None
+                    init_occupancy_map = None
+                    if num_agents == 1:
+                        init_occupancy_map = OM(
                             grid_info.shape,
                             conf_dict=conf_dict,
                             correlation_type=corr_type,
                         )
-
-                        planner = planning(
+                        init_planner = planning(
                             grid_info,
                             camera1,
                             action_strategy,
@@ -1081,72 +345,35 @@ def main():
                             mcts_params=mcts_params,
                             seed=iteration_seed,
                         )
+                        init_camera = camera1
 
-                        # Select initial UAV starting position
-                        if start_position == "edge":
-                            real_border = [
-                                (
-                                    -grid_info.x / 2,
-                                    random.uniform(-grid_info.y / 2, grid_info.y / 2),
-                                ),
-                                (
-                                    grid_info.x / 2,
-                                    random.uniform(-grid_info.y / 2, grid_info.y / 2),
-                                ),
-                                (
-                                    random.uniform(-grid_info.x / 2, grid_info.x / 2),
-                                    grid_info.y / 2,
-                                ),
-                                (
-                                    random.uniform(-grid_info.x / 2, grid_info.x / 2),
-                                    -grid_info.y / 2,
-                                ),
-                            ]
-                            start_pos = random.choice(real_border)
-                        elif start_position == "corner":
-                            start_pos = random.choice(
-                                [
-                                    (-grid_info.x / 2, -grid_info.y / 2),
-                                    (-grid_info.x / 2, grid_info.y / 2),
-                                    (grid_info.x / 2, -grid_info.y / 2),
-                                    (grid_info.x / 2, grid_info.y / 2),
-                                ]
-                            )
-                        elif start_position == "center":
-                            start_pos = (0.0, 0.0)
-                        else:
-                            raise ValueError(
-                                f"Invalid start_position: {start_position}. Choose from 'edge', 'corner', or 'center'."
-                            )
-
-                        uav_pos = uav_position((start_pos, camera1.get_hrange()[0]))
-
-                        result = run_single_agent_experiment(
-                            config=config,
-                            grid_info=grid_info,
-                            camera=camera1,
-                            map_obj=map_obj,
-                            ground_truth_map=ground_truth_map,
-                            conf_dict=conf_dict,
-                            occupancy_map=occupancy_map,
-                            planner=planner,
-                            uav_pos=uav_pos,
-                            results_folder=results_folder,
-                            corr_type=corr_type,
-                            e_margin=e_margin,
-                            grf_r=grf_r,
-                            iter_idx=iter_idx,
-                            n_steps=n_steps,
-                            ENABLE_STEPWISE_PLOTTING=ENABLE_STEPWISE_PLOTTING,
-                            ENABLE_LOGGING=ENABLE_LOGGING,
-                            mcts_params=mcts_params,
-                            action_strategy=action_strategy,
-                        )
-                        print("Single-agent experiment completed")
-
-                        # Finalize planner
-                        if hasattr(planner, "finalize_episode"):
-                            planner.finalize_episode()
+                    result = run_multi_agent_experiment(
+                        config=config,
+                        grid_info=grid_info,
+                        map_obj=map_obj,
+                        ground_truth_map=ground_truth_map,
+                        conf_dict=conf_dict,
+                        results_folder=results_folder,
+                        corr_type=corr_type,
+                        e_margin=e_margin,
+                        grf_r=grf_r,
+                        iter_idx=iter_idx,
+                        n_steps=n_steps,
+                        ENABLE_STEPWISE_PLOTTING=ENABLE_STEPWISE_PLOTTING,
+                        ENABLE_LOGGING=ENABLE_LOGGING,
+                        mcts_params=mcts_params,
+                        action_strategy=action_strategy,
+                        min_alt=camera1.get_hrange()[0],
+                        camera_hrange=camera1.get_hrange(),
+                        overlap=overlap,
+                        optimal_alt=optimal_alt,
+                        seed=iteration_seed,
+                        news_mode=news_mode,
+                        init_camera=init_camera,
+                        init_planner=init_planner,
+                        init_occupancy_map=init_occupancy_map,
+                    )
+                    print(f"Experiment completed with {num_agents} agents")
 
 
 if __name__ == "__main__":

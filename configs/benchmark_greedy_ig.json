@@ -6,9 +6,9 @@
   "field_type": "Gaussian",
   "start_position": "corner",
   "action_strategy": "greedy_ig",
-  "num_agents":4,
-  "n_steps": 50,
-  "iters": [0,20],
+  "num_agents":8,
+  "n_steps": 100,
+  "iters": [0,5],
   "correlation_types": ["adaptive"],
   "error_margins": [null],
   "enable_plotting": false,
@@ -17,12 +17,13 @@
   "greedy_ig": {
     "_comment": "Pure belief-based IG, no penalties: IG=no sharing, IGd=discounted IoU, BS=broadcast single news, BM=per-neighbor news",
     "overlap_penalty_weight": 0.0,
-    "mode_labels": ["IG", "IG_BS", "IG_BM", "IGd", "IGd_BS", "IGd_BM"]
+    "mode_labels": ["IG_BM", "IG_BS", "IG", "IGd_BM", "IGd_BS", "IGd" ]
   },
   
   "decentralized": {
-    "_comment_modes": "Communication settings for greedy IG benchmark",
-    "communication_range": -1
+    "_comment_modes": "Communication settings - radius_multiplier is multiplied by h_displacement (field_len/2/n_h_act)",
+    "_comment_calc": "For 8 agents: n_h_act=8, h_displacement=(50/2)/8=3.125m. radius_multiplier=5 gives 15.625m, =16 gives 50m (unlimited)",
+    "radius_multiplier": 5
   }, 
   
   "experiment": {

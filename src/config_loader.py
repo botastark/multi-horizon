@@ -32,13 +32,14 @@ logger = logging.getLogger(__name__)
 # Pairwise Potential Helpers
 # =============================================================================
 
+
 def get_pairwise_potential(potential_type: str) -> np.ndarray:
     """
     Get pairwise potential matrix based on type.
-    
+
     Args:
         potential_type: One of 'equal', 'biased', 'adaptive'
-        
+
     Returns:
         2x2 numpy array for pairwise potential
     """
@@ -50,7 +51,9 @@ def get_pairwise_potential(potential_type: str) -> np.ndarray:
         # Adaptive will be computed dynamically, use equal as default
         return np.array([[0.5, 0.5], [0.5, 0.5]])
     else:
-        logger.warning(f"Unknown pairwise_potential_type '{potential_type}', using 'equal'")
+        logger.warning(
+            f"Unknown pairwise_potential_type '{potential_type}', using 'equal'"
+        )
         return np.array([[0.5, 0.5], [0.5, 0.5]])
 
 
@@ -133,7 +136,8 @@ def _convert_v2_to_legacy(config: Dict[str, Any]) -> Dict[str, Any]:
         "parallel": planner.get("parallel_simulations", 1),
         "horizon_weights": {
             "short_horizon_depth": hier_cfg.get("llp_horizon", 5),
-            "long_horizon_depth": hier_cfg.get("hlp_horizon", 3) * 5,  # regions to steps
+            "long_horizon_depth": hier_cfg.get("hlp_horizon", 3)
+            * 5,  # regions to steps
             "tile_size": hier_cfg.get("tile_size", [100, 100]),
         },
     }
