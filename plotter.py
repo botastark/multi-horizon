@@ -1181,6 +1181,131 @@ def main_news_comparison(paths, show, radius, pairwise="equal", comm_range=None)
         plot_all_settings(all_stats, radius, save_dir, show=show)
 
 
+def plot_method_comparison(all_stats, radius, save_dir, show=False, pairwise="equal", num_agents=None):
+    """Plot comparison across methods (Dec-MCTS, MH-Dec-MCTS, Greedy-IG).
+
+    Expects `all_stats` to contain a `Method` column and aggregated metrics
+    from `aggregate_data_by_settings` (MultiIndex columns for metrics).
+    Filters by `GaussianRadius` and `Pairwise` to ensure comparisons are consistent.
+    """
+    plt.style.use("seaborn-v0_8-paper")
+    plt.rcParams.update({"font.size": 14})
+
+    # Filter by radius and pairwise correlation
+    data = all_stats[
+        (all_stats["GaussianRadius"] == radius) & (all_stats["Pairwise"] == pairwise)
+    ].copy()
+    if data.empty:
+        print(
+            f"No data for radius={radius}, pairwise={pairwise} in provided method comparisons"
+        )
+        return
+
+    methods = sorted(data["Method"].unique())
+
+    # If NumAgents column present at row-level, handle selection/filtering
+    if "NumAgents" in data.columns:
+        available_nas = sorted(list(set(data["NumAgents"].dropna().astype(int).tolist())))
+        if num_agents is None and len(available_nas) > 1:
+            print("Multiple NumAgents found across trials:", available_nas)
+            print("Please re-run with --num-agents to select one of these values")
+            return
+        if num_agents is not None:
+            if num_agents not in available_nas:
+                print(f"Requested num_agents={num_agents} not found in trials (available: {available_nas})")
+                return
+            data = data[data["NumAgents"] == num_agents]
+            na_val = num_agents
+        else:
+            # single available value
+            na_val = available_nas[0] if available_nas else "unknown"
+    else:
+        # Fallback to method-level metadata
+        method_na = {}
+        for method in methods:
+            mdata = data[data["Method"] == method]
+            if "Method_NumAgents" in mdata.columns:
+                nas = list(mdata["Method_NumAgents"].unique())
+                method_na[method] = nas[0] if len(nas) == 1 else "multi"
+            else:
+                method_na[method] = "unknown"
+        na_values = set(method_na.values())
+        if num_agents is None and len(na_values) > 1:
+            print("Multiple NumAgents found across methods:")
+            for m in methods:
+                print(f"  {m}: NumAgents={method_na.get(m)}")
+            print("Please re-run with --num-agents to select one of these values")
+            return
+        na_val = list(na_values)[0] if len(na_values) == 1 else (num_agents if num_agents is not None else "unknown")
+
+    # Metrics to plot: Entropy, Height, MSE, Coverage -> 2x2 grid
+    metrics = ["Entropy", "Height", "MSE", "Coverage"]
+    nrows, ncols = 2, 2
+    fig, axes = plt.subplots(
+        nrows=nrows, ncols=ncols, figsize=(14, 10), constrained_layout=True
+    )
+    axes = axes.flatten()
+
+    colors = ["#1f77b4", "#ff7f0e", "#2ca02c"]
+
+    for ax, metric in zip(axes, metrics):
+        for i, method in enumerate(methods):
+            mdata = data[data["Method"] == method]
+            if mdata.empty:
+                continue
+            # Group by Step and average across configurations
+            try:
+                grouped = (
+                    mdata.groupby("Step")
+                    .agg({(metric, "mean"): "mean", (metric, "std"): "mean"})
+                    .reset_index()
+                )
+            except Exception:
+                # If metric not present as MultiIndex (legacy), try single-level column
+                if metric in mdata.columns:
+                    grouped = mdata.groupby("Step").agg({metric: "mean"}).reset_index()
+                    grouped[(metric, "mean")] = grouped[metric]
+                    grouped[(metric, "std")] = 0.0
+                else:
+                    continue
+
+            if grouped.empty:
+                continue
+            steps = grouped["Step"]
+            mean_vals = grouped[(metric, "mean")]
+            std_vals = grouped[(metric, "std")]
+
+            ax.plot(
+                steps,
+                mean_vals,
+                label=method,
+                color=colors[i % len(colors)],
+                linewidth=2,
+            )
+            ax.fill_between(
+                steps,
+                mean_vals - std_vals,
+                mean_vals + std_vals,
+                color=colors[i % len(colors)],
+                alpha=0.25,
+            )
+
+        ax.set_xlabel("Steps")
+        ax.set_ylabel(metric)
+        ax.set_title(metric + " over Steps")
+        ax.grid(True, linestyle="--", alpha=0.5)
+        ax.legend()
+
+    os.makedirs(save_dir, exist_ok=True)
+    out_path = os.path.join(
+        save_dir, f"method_comparison_r_{radius}_pairwise_{pairwise}.png"
+    )
+    plt.savefig(out_path, dpi=300, bbox_inches="tight")
+    print(f"Saved method comparison to {out_path}")
+    if show:
+        plt.show()
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Plot statistics from aggregated data."
@@ -1220,6 +1345,13 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
+        "--num-agents",
+        type=int,
+        default=None,
+        help="Filter comparison to a specific number of agents (e.g., 4)",
+    )
+
+    parser.add_argument(
         "--compare-news",
         action="store_true",
         help="Generate information sharing comparison plots (IG, IGd, IG_BS, IG_BM, IGd_BS, IGd_BM)",
@@ -1232,6 +1364,19 @@ if __name__ == "__main__":
         help="Communication range setting (for filename, e.g., 5, -1 for unlimited)",
     )
 
+    parser.add_argument(
+        "--compare-methods",
+        action="store_true",
+        help="Compare Dec-MCTS, MH-Dec-MCTS and Greedy IG methods (auto-discovers trials/ folders)",
+    )
+
+    parser.add_argument(
+        "--news-mode",
+        type=str,
+        default=None,
+        help="Filter comparison to a specific news/mapping mode (e.g. IG, IGd_BM)",
+    )
+
     args = parser.parse_args()
 
     if args.compare_news or args.paths:
@@ -1241,6 +1386,109 @@ if __name__ == "__main__":
             sys.exit(1)
         main_news_comparison(
             paths, args.show, args.radius, args.pairwise, args.comm_range
+        )
+    elif args.compare_methods:
+        # Auto-discover trial folders for the three methods and compare them
+        script_dir = os.path.dirname(os.path.realpath(__file__))
+        # Patterns under trials/
+        dec_pattern = os.path.join(script_dir, "trials", "dec_mcts*")
+        mh_pattern = os.path.join(script_dir, "trials", "mh_dec_mcts*")
+        greedy_pattern = os.path.join(script_dir, "trials", "greedy_ig*")
+
+        dec_dirs = sorted(glob.glob(dec_pattern))
+        mh_dirs = sorted(glob.glob(mh_pattern))
+        greedy_dirs = sorted(glob.glob(greedy_pattern))
+
+        method_paths = {
+            "Dec-MCTS": [],
+            "MH-Dec-MCTS": [],
+            "Greedy-IG": [],
+        }
+
+        for d in dec_dirs:
+            txtp = os.path.join(d, "txt")
+            method_paths["Dec-MCTS"].append(txtp if os.path.exists(txtp) else d)
+        for d in mh_dirs:
+            txtp = os.path.join(d, "txt")
+            method_paths["MH-Dec-MCTS"].append(txtp if os.path.exists(txtp) else d)
+        for d in greedy_dirs:
+            txtp = os.path.join(d, "txt")
+            method_paths["Greedy-IG"].append(txtp if os.path.exists(txtp) else d)
+
+        # Aggregate per-method stats
+        per_method_stats = {}
+        for method, paths_list in method_paths.items():
+            if not paths_list:
+                print(f"No trials found for {method}")
+                continue
+            try:
+                stats = pd.DataFrame()
+                comm_values = set()
+                na_values = set()
+                for p in paths_list:
+                    try:
+                        s = aggregate_data_by_settings(p)
+                        # collect NumAgents if available
+                        if "NumAgents" in s.columns:
+                            try:
+                                nas = set(s["NumAgents"].unique())
+                                na_values.update(nas)
+                            except Exception:
+                                pass
+                        # try to infer comm from path name (folder like ..._comm150.0 or ..._commR5)
+                        bname = os.path.basename(p.rstrip("/"))
+                        import re
+
+                        m = re.search(r"commR?([0-9\.\-]+)", bname)
+                        if m:
+                            comm_values.add(m.group(1))
+
+                        stats = pd.concat([stats, s], ignore_index=True)
+                    except Exception as e:
+                        print(f"Warning: failed to process {p}: {e}")
+                if not stats.empty:
+                    # add method column for plotting
+                    stats["Method"] = method
+                    # attach detected method-level metadata (singletons or 'multi')
+                    stats["Method_NumAgents"] = (
+                        list(na_values)[0] if len(na_values) == 1 else "multi"
+                    )
+                    stats["Method_Comm"] = (
+                        list(comm_values)[0] if len(comm_values) == 1 else "multi"
+                    )
+                    per_method_stats[method] = stats
+            except Exception as e:
+                print(f"Error aggregating stats for {method}: {e}")
+
+        if not per_method_stats:
+            print("No method data found for comparison")
+            sys.exit(1)
+
+        # Combine all into one DataFrame for plotting
+        combined = pd.concat(list(per_method_stats.values()), ignore_index=True)
+        # If NewsMode column exists, ensure a common news/mapping mode is used
+        if "NewsMode" in combined.columns:
+            unique_modes = sorted([str(m) for m in combined["NewsMode"].unique()])
+            if args.news_mode is None and len(unique_modes) > 1:
+                print("Multiple NewsMode values found across methods:", unique_modes)
+                print("Please re-run with --news-mode to select one of these modes (e.g. --news-mode IGd_BM)")
+                sys.exit(1)
+            if args.news_mode is not None:
+                if args.news_mode not in unique_modes:
+                    print(f"Requested news_mode={args.news_mode} not found in trials (available: {unique_modes})")
+                    sys.exit(1)
+                combined = combined[combined["NewsMode"] == args.news_mode]
+
+        # call the method comparison plotter (pass pairwise filter)
+        script_dir = os.path.dirname(os.path.realpath(__file__))
+        save_dir = os.path.join(script_dir, "plots")
+        plot_method_comparison(
+            combined,
+            args.radius,
+            save_dir,
+            show=args.show,
+            pairwise=args.pairwise,
+            num_agents=args.num_agents,
         )
     else:
         # Standard plotting

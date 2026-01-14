@@ -333,18 +333,21 @@ def select_agent_actions(agents, ...):
   "action_strategy": "dec_mcts",
   "num_agents": 4,
   "n_steps": 100,
-  "iters": [0, 5],
+  "iters": [0, 20],
   "correlation_types": ["equal", "biased", "adaptive"],
   
   "dec_mcts": {
     "horizon": 10,
     "iterations": 100,
+    "mode_labels": ["IG","IGd","IG_BM","IG_BS","IGd_BM","IGd_BS"],
     "ucb_c": 1.4,
-    "discount_factor": 0.95
+    "discount_factor": 0.95,
+    "timeout": 5.0,
+    "parallel": 1
   },
   
   "decentralized": {
-    "communication_range": 15.0,
+    "communication_range": 15.625,
     "overlap_penalty_weight": 0.3,
     "d_uct": {
       "decay_factor": 0.9,
@@ -359,9 +362,10 @@ def select_agent_actions(agents, ...):
 - **UCB exploration**: `ucb_c=1.4` balances exploration vs exploitation
 - **Reward**: `discount_factor=0.95` for future trajectory value
 - **Coordination**: `overlap_penalty_weight=0.3` penalizes teammate trajectory overlap
-- **Communication**: `communication_range=15.0m` (direct specification)
+- **Communication**: `communication_range=15.625m` (direct specification)
 - **D-UCT**: `decay_factor=0.9`, `threshold_sec=2.0` for staleness discounting
-- **Testing**: 5 iterations across 3 correlation types (equal, biased, adaptive)
+- **Mode Labels**: 6 modes available - `IG` (no sharing), `IGd` (position sharing), `IG_BS`/`IG_BM` (IG + news sharing), `IGd_BS`/`IGd_BM` (IGd + news sharing)
+- **Testing**: 20 iterations across 3 correlation types (equal, biased, adaptive)
 
 ---
 ## 10. Comparison: Greedy vs Dec-MCTS

@@ -509,17 +509,20 @@ MH-Dec-MCTS uses the same belief fusion as other strategies:
 
 ```json
 {
-  "action_strategy": "hierarchical_dec_mcts",
+  "action_strategy": "mh_dec_mcts",
   "num_agents": 4,
-  "n_steps": 300,
+  "n_steps": 100,
+  "iters": [0, 20],
+  "correlation_types": ["adaptive", "equal", "biased"],
   
   "hierarchical_dec_mcts": {
-    "llp_horizon": 7,
+    "mode_labels": ["IG","IGd","IG_BM","IG_BS","IGd_BM","IGd_BS"],
+    "llp_horizon": 3,
     "llp_iterations": 50,
     "llp_ucb_c": 1.4,
     "llp_discount_factor": 0.95,
     
-    "hlp_horizon": 3,
+    "hlp_horizon": 10,
     "hlp_iterations": 30,
     "hlp_ucb_c": 1.0,
     "hlp_discount_factor": 0.98,
@@ -535,7 +538,7 @@ MH-Dec-MCTS uses the same belief fusion as other strategies:
   },
   
   "decentralized": {
-    "communication_range": 150.0,
+    "communication_range": 15.625,
     "overlap_penalty_weight": 0.3,
     "d_uct": {
       "decay_factor": 0.9,
@@ -546,10 +549,11 @@ MH-Dec-MCTS uses the same belief fusion as other strategies:
 ```
 
 **Key Parameters:**
-- **LLP**: `llp_horizon=7` steps, `llp_iterations=50`, MCTS with UCB_c=1.4
-- **HLP**: `hlp_horizon=3` regions, `hlp_iterations=30`, greedy region selection
+- **LLP**: `llp_horizon=3` steps, `llp_iterations=50`, MCTS with UCB_c=1.4
+- **HLP**: `hlp_horizon=10` regions, `hlp_iterations=30`, MCTS region selection
 - **tile_size**: `[50, 50]` defines region grid (50×50 tiles per region)
-- **Communication**: Direct meters (`communication_range=150.0`), D-UCT staleness discounting
+- **Communication**: `communication_range=15.625m` (matches other strategies for comparison)
+- **Mode Labels**: 6 modes available - `IG` (no sharing), `IGd` (position sharing), `IG_BS`/`IG_BM` (IG + news sharing), `IGd_BS`/`IGd_BM` (IGd + news sharing)
 - **Intent sharing**: LL broadcasts every 0.1s, HL every 0.5s
 
 **Removed Parameters** (obsolete as of paper-correct implementation):

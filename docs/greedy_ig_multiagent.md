@@ -337,14 +337,14 @@ next_action, info_gain_action = planner.select_action(
 ```json
 {
   "action_strategy": "greedy_ig",
-  "num_agents": 8,
+  "num_agents": 4,
   "n_steps": 100,
-  "iters": [0, 5],
-  "correlation_types": ["adaptive"],
+  "iters": [0, 20],
+  "correlation_types": ["adaptive", "equal", "biased"],
   
   "greedy_ig": {
     "overlap_penalty_weight": 0.0,
-    "mode_labels": ["IG_BM", "IG_BS", "IG", "IGd_BM", "IGd_BS", "IGd"]
+    "mode_labels": ["IG", "IGd", "IG_BM", "IG_BS", "IGd_BM", "IGd_BS"]
   },
   
   "decentralized": {
@@ -354,19 +354,20 @@ next_action, info_gain_action = planner.select_action(
 ```
 
 **Key Parameters:**
-- **num_agents**: 8 agents for comprehensive multi-agent testing
+- **num_agents**: 4 agents (consistent with Dec-MCTS and MH-Dec-MCTS benchmarks)
 - **overlap_penalty_weight**: 0.0 (pure belief-based IG, paper-compliant)
 - **mode_labels**: 6 news modes tested:
   - `IG`: No information sharing (baseline)
-  - `IG_BS`: Broadcast single news belief
-  - `IG_BM`: Per-neighbor private news beliefs
-  - `IGd`: With position sharing (discounted IoU)
+  - `IGd`: Position sharing only (discounted IoU)
+  - `IG_BS`: IG + broadcast single news belief
+  - `IG_BM`: IG + per-neighbor private news beliefs
   - `IGd_BS`: Position + broadcast news
   - `IGd_BM`: Position + per-neighbor news
 - **radius_multiplier**: 5 → 15.625m range (calculated as `radius_multiplier × h_displacement`)
-  - For 8 agents: `h_displacement = (field_len/2) / n_h_act = 25/8 = 3.125m`
+  - For 4 agents: `h_displacement = (field_len/2) / n_h_act = 25/5 = 5.0m`, thus `5 × 5.0 = 25.0m` effective range
   - Set to `-1` for unlimited range
-- **correlation_types**: `["adaptive"]` for dynamic pairwise potentials in local LBP
+- **correlation_types**: `["adaptive", "equal", "biased"]` for comprehensive LBP testing
+- **Testing**: 20 iterations across 3 correlation types
 
 ---
 
