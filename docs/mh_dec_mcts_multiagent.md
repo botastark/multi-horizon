@@ -100,8 +100,7 @@ main.py
 │           │               │       ├── _compute_teammate_coverage_mask()
 │           │               │       ├── MCTS iterations:
 │           │               │       │   ├── _simulate_trajectory()
-│           │               │       │   │   ├── _compute_ig()
-│           │               │       │   │   └── _compute_alignment_bonus()
+│           │               │       │   │   └── _compute_ig()
 │           │               │       │   └── Pick best trajectory
 │           │               │       └── Return LLIntent (action sequence)
 │           │               │
@@ -339,8 +338,6 @@ def _simulate_trajectory(self, start_state, actions, coverage_discount):
     return total_reward, state_sequence, footprint_sequence, ig_sequence
 ```
 
-**Note:** The `_compute_alignment_bonus()` function exists in the code but is **not called** - it's legacy code kept for reference. Alignment is achieved through the g2 evaluation which naturally favors trajectories that progress toward HLP target regions.
-
 ### 6.3 LLP Planning (Random Rollout MCTS)
 
 ```python
@@ -380,10 +377,119 @@ def plan(self, current_state) -> LLIntent:
 ```
 
 **Key Properties:**
-- Uses random rollout (not full UCB tree like Dec-MCTS)
+- Uses random rollout sampling (simplified MCTS without UCB tree)
 - Evaluates complete trajectories using g1 + g2 reward
-- Alignment emerges from g2 conditioning on HL intents
-- No explicit alignment bonus added to rewards
+- Coordination through teammate coverage discount mask
+- HLP guidance emerges naturally through g2 conditioning
+
+**Why Random Rollout (Not UCB Tree)?**
+
+The LLP uses a simplified MCTS approach called **random rollout sampling** instead of the full UCB tree search used in Dec-MCTS:
+
+| Aspect | Dec-MCTS (UCB Tree) | MH-LLP (Random Rollout) |
+|--------|---------------------|-------------------------|
+| **Search method** | UCB tree with Selection→Expansion→Simulation→Backpropagation | Random sampling of complete trajectories |
+| **Tree structure** | Builds explicit tree, reuses nodes across iterations | No tree structure, each iteration is independent |
+| **Action selection** | UCB1 formula balances exploitation vs exploration | Uniform random sampling |
+| **Memory** | O(iterations × horizon) nodes stored | O(1) - only stores best trajectory |
+| **Compute per iteration** | Tree traversal + UCB calculation | Direct trajectory simulation |
+| **Planning horizon** | 10 steps | 3 steps (shorter) |
+
+**Why this design choice?**
+
+1. **Computational efficiency**: LLP runs frequently (every step) and needs to be fast
+   - Random sampling: ~50 iterations × 3 steps = 150 simulations
+   - UCB tree would need more iterations to build meaningful tree statistics
+
+2. **Short horizon**: With only 3 steps, exhaustive search space is manageable
+   - 7 actions³ = 343 possible sequences (small enough for random sampling)
+   - UCB tree benefits more from longer horizons where search space is huge
+
+3. **HLP provides guidance**: The g2 reward component already incorporates long-horizon reasoning
+   - HLP (with full UCB tree) handles strategic region allocation
+   - LLP focuses on short-term tactical motion planning
+   
+4. **Hierarchical division of labor**:
+   - HLP: Complex search (UCB tree over regions, marginal g2 evaluation)
+   - LLP: Fast reactive planning (random rollout, immediate IG + g2)
+
+**What "MCTS" means in LLP:**
+The LLP is called "MCTS" because it uses Monte Carlo simulation (random rollouts) to estimate trajectory values, which is a core MCTS concept. However, it's a **simplified MCTS variant** that skips the tree-building and UCB selection phases, keeping only the simulation component.
+
+**Implementation Details** ([hierarchical_dec_mcts.py](../src/hierarchical_dec_mcts.py)):
+
+| Function | Line | Purpose |
+|----------|------|---------|
+| `LowLevelPlanner.plan()` | ~747 | **Main planning loop** - generates random action sequences |
+| `_simulate_trajectory()` | ~661 | **Trajectory simulation** - evaluates g1 + g2 for action sequence |
+| `_compute_ig()` | ~511 | **IG computation** - applies teammate coverage discount |
+| `_compute_teammate_coverage_mask()` | ~480 | **Coordination** - creates discount mask from teammate intents |
+
+**Key code snippet** (line 781 in `plan()`):
+```python
+for _ in range(self.num_iterations):  # 50 iterations
+    # Random action sequence (THIS IS THE RANDOM ROLLOUT)
+    actions = [np.random.choice(self.actions) for _ in range(self.horizon)]  # 3 steps
+    
+    # Simulate and evaluate using g1 + g2
+    reward, states, footprints, igs = self._simulate_trajectory(
+        current_state, actions, coverage_discount
+    )
+    
+    # Keep best trajectory found
+    if reward > best_reward:
+        best_reward = reward
+        best_actions = actions
+        ...
+```
+
+**No UCB tree construction** - the code shows:
+- No `DecMCTSNode` class instantiation (unlike Dec-MCTS)
+- No `best_child()` or `_tree_policy()` calls
+- No tree structure stored (`self._tree` exists but marked as `_tree_valid = False`)
+- Each iteration samples independently: `np.random.choice(self.actions)`
+
+---
+
+**For comparison: HLP's UCB Tree Implementation** ([hierarchical_dec_mcts.py](../src/hierarchical_dec_mcts.py)):
+
+| Function | Line | Purpose |
+|----------|------|---------|
+| `HighLevelPlanner._run_mcts_region_search()` | ~1183 | **Main MCTS loop** - builds UCB tree over region sequences |
+| `_mcts_iteration()` | ~1222 | **Selection + Expansion + Backprop** - full MCTS iteration |
+| `_select_best_region_ucb()` | ~1298 | **UCB selection** - chooses region using UCB1 formula |
+| `_rollout_region_sequence()` | ~1328 | **Random completion** - completes partial sequence to horizon |
+| `_backpropagate()` | ~1379 | **Update tree** - propagates value back through path |
+
+**Key code snippet** (line 1236 in `_mcts_iteration()`):
+```python
+# Selection phase: traverse tree using UCB
+while len(sequence) < self.horizon:
+    node = tree[state]
+    node["visits"] += 1
+    
+    unexplored = [r for r in available_regions if r not in node["children"]]
+    
+    if unexplored:
+        # Expansion: pick random unexplored action
+        action = random.choice(unexplored)
+        node["children"][action] = {"visits": 0, "value": 0.0}
+        # ... rollout and backpropagate
+    else:
+        # Selection: use UCB1 formula (THIS IS THE UCB TREE)
+        action = self._select_best_region_ucb(node, available_regions)
+        # ... traverse to child
+        
+# UCB1 formula (line 1318):
+exploitation = child_value / child_visits
+exploration = ucb_c * np.sqrt(np.log(parent_visits) / child_visits)
+ucb_score = exploitation + exploration
+```
+
+**HLP builds explicit tree** - dictionary structure stores:
+- Visit counts per state-action pair
+- Cumulative values for each node
+- Parent-child relationships for tree traversal
     
     return total_reward, state_sequence, footprints, igs
 ```
@@ -452,7 +558,7 @@ r_HLP = g2(with my HL intent) - g2(with null HL intent)
 
 ### Key Properties
 
-✅ **No alignment bonus**: LLP reward is IG-only (g1), alignment emerges via g2
+✅ **Two-component reward**: LLP uses g1 (IG) + g2 (mission completion time)
 ✅ **Centralized g2**: Single g2() function in `g2_evaluator.py` used by both planners
 ✅ **Time-like g2**: Lower values = better (faster mission completion)
 ✅ **Marginal HLP**: HLP evaluates its contribution, not absolute region value
@@ -487,7 +593,7 @@ def g2(ll_intents, hl_intents, env_state, agent_id=None):
 - ✅ g2 decreases as LL progresses
 - ✅ HL naturally avoids LL-covered regions
 - ✅ Bottom-up information flow (LL → HL)
-- ✅ Alignment emerges without explicit bonus
+- ✅ HLP guidance emerges through g2 conditioning
 
 ---
 
@@ -549,8 +655,8 @@ MH-Dec-MCTS uses the same belief fusion as other strategies:
 ```
 
 **Key Parameters:**
-- **LLP**: `llp_horizon=3` steps, `llp_iterations=50`, MCTS with UCB_c=1.4
-- **HLP**: `hlp_horizon=10` regions, `hlp_iterations=30`, MCTS region selection
+- **LLP**: `llp_horizon=3` steps, `llp_iterations=50`, random rollout MCTS (Note: `llp_ucb_c=1.4` is a legacy parameter - **not used** since LLP uses random sampling, not UCB tree)
+- **HLP**: `hlp_horizon=10` regions, `hlp_iterations=30`, UCB tree MCTS with `hlp_ucb_c=1.0`
 - **tile_size**: `[50, 50]` defines region grid (50×50 tiles per region)
 - **Communication**: `communication_range=15.625m` (matches other strategies for comparison)
 - **Mode Labels**: 6 modes available - `IG` (no sharing), `IGd` (position sharing), `IG_BS`/`IG_BM` (IG + news sharing), `IGd_BS`/`IGd_BM` (IGd + news sharing)
@@ -580,9 +686,9 @@ The HLP now uses **full MCTS tree search** over region sequences, making it symm
 
 ### Key Features
 
-✅ **Symmetric with LLP**: Both levels use MCTS tree search  
-✅ **Marginal g₂**: Evaluates complete sequence's contribution  
-✅ **Exploration**: UCB balances known-good vs unexplored regions  
+✅ **Full UCB tree search**: Unlike LLP which uses random rollout, HLP builds and traverses UCB tree  
+✅ **Marginal g₂ evaluation**: Evaluates complete region sequence's contribution  
+✅ **Strategic planning**: Handles long-horizon region allocation (10 regions vs LLP's 3 steps)  
 ✅ **Coordination**: Bottom-up LL→HL flow via g₂ conditioning  
 
 ### Algorithm Flow
@@ -636,13 +742,21 @@ def _run_mcts_region_search(start_position, teammate_targets):
 | Aspect | Greedy IG | Dec-MCTS | MH-Dec-MCTS |
 |--------|-----------|----------|-------------|
 | Levels | 1 | 1 | 2 (HLP + LLP) |
-| Lookahead | 1 step | N steps | HLP: regions (MCTS), LLP: steps (MCTS) |
-| Search method | Enumerate actions | MCTS tree | MCTS tree (both levels) |
-| Intent | Footprint | Trajectory | LL + HL intents |
+| Lookahead | 1 step | 10 steps | HLP: 10 regions, LLP: 3 steps |
+| Search method | Enumerate actions | **UCB tree (full MCTS)** | HLP: **UCB tree**, LLP: **Random rollout** |
+| Tree structure | None | Yes (expanded across iterations) | HLP: Yes, LLP: No |
+| Action/Region selection | Max IG | UCB1 formula | HLP: UCB1, LLP: Random sampling |
+| Intent | Footprint | Trajectory (10 steps) | LL (3 steps) + HL (region sequence) |
 | Region allocation | None | None | Yes (HLP with MCTS) |
-| Guidance | None | None | HLP → LLP (soft) |
-| Reward | IG only | IG + overlap | g1 (IG) + g2 (time) |
-| Computation | Lowest | Medium | Highest (dual MCTS) |
+| Guidance | None | None | HLP → LLP via g2 |
+| Reward | IG only | IG + overlap penalty | g1 (IG) + g2 (mission time) |
+| Iterations | 1 per action | 100 MCTS iterations | HLP: 30, LLP: 50 |
+| Computation | Lowest (~7 evals) | Medium (~1000 sims) | Highest (HLP: ~300 + LLP: ~150 sims) |
+| Memory | O(1) | O(iterations × horizon) | HLP: O(iterations × regions), LLP: O(1) |
+
+**Key Insight**: MH-Dec-MCTS uses **two different MCTS variants**:
+- **HLP**: Full UCB tree search (like Dec-MCTS) for strategic region allocation
+- **LLP**: Simplified random rollout (faster) for tactical action selection
 
 ---
 
@@ -665,7 +779,7 @@ print(f"  Teammate targets: {self.hlp._get_teammate_target_regions()}")
 # In LowLevelPlanner.plan():
 if self._hl_guidance:
     print(f"LLP guidance: target_center={self._hl_guidance.target_center}")
-print(f"Alignment adjustments: {self._alignment_adjustments}")
+print(f"Coverage discount stats: min={coverage_discount.min():.2f}, mean={coverage_discount.mean():.2f}")
 ```
 
 ### Check Intent Bus
@@ -692,7 +806,7 @@ for rid, r in self.hlp.regions.items():
 ```python
 # In _simulate_trajectory():
 for step_idx, action in enumerate(actions):
-    print(f"  Step {step_idx}: action={action}, ig={ig:.2f}, align={alignment:.2f}")
+    print(f"  Step {step_idx}: action={action}, ig={ig:.2f}, g1={g1_reward:.2f}, g2={g2_value:.2f}")
 ```
 
 ---
