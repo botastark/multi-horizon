@@ -387,9 +387,21 @@ class planning:
 
         # Initialize logger on first call
         if not hasattr(self, "_dec_mcts_logger_initialized"):
-            log_dir = getattr(self, "log_dir", "logs/dec_mcts")
             exp_name = getattr(self, "experiment_name", None)
+            log_dir = getattr(self, "log_dir", None)
             import os
+
+            # Prefer placing logs under the trial folder if an experiment
+            # name is available. Fall back to legacy `logs/dec_mcts` only
+            # when neither an explicit `log_dir` nor `experiment_name`
+            # is provided.
+            if log_dir is None:
+                if exp_name:
+                    log_dir = os.path.join("trials", exp_name, "logs")
+                else:
+                    # Avoid creating top-level `logs/` directories for legacy
+                    # dec_mcts logging; place them under `trials/logs/dec_mcts`.
+                    log_dir = os.path.join("trials", "logs", "dec_mcts")
 
             os.makedirs(log_dir, exist_ok=True)
             log_file = setup_dec_mcts_logger(log_dir=log_dir, experiment_name=exp_name)

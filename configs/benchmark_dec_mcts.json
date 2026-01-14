@@ -8,7 +8,7 @@
   "action_strategy": "dec_mcts",
   "num_agents": 4,
   "n_steps": 100,
-  "iters": [0, 5],
+  "iters": [0, 20],
   "correlation_types": ["equal","biased", "adaptive"],
   "error_margins": [null],
   "enable_plotting": false,
@@ -17,6 +17,7 @@
   "dec_mcts": {
     "horizon": 10,
     "iterations": 100,
+    "mode_labels": ["IG","IGd","IG_BM","IG_BS","IGd_BM","IGd_BS"],
     "ucb_c": 1.4,
     "discount_factor": 0.95,
     "timeout": 5.0,
@@ -24,7 +25,7 @@
   },
   
   "decentralized": {
-    "communication_range": 15.0,
+    "communication_range": 15.625,
     "communication_delay": 0.05,
     "message_drop_probability": 0.0,
     "overlap_penalty_weight": 0.3,

@@ -1,134 +1,94 @@
-# Multi-Horizon Active Sensing
+# multi-horizon — Run & Plot (MH-Dec-MCTS primary)
 
-Multi-agent active sensing system with decentralized planning and information sharing.
-
-## Quick Start
-
-### Running Benchmarks
-
-#### Greedy IG Benchmark
-
-Run the greedy information gain benchmark with various news modes (IG, IG+BS, IG+BM, IGd, IGd+BS, IGd+BM):
-
-```bash
-python src/main.py --config configs/benchmark_greedy_ig.json
-```
-
-This will run experiments for all configured news modes and save results to `trials/greedy_ig_gaussian_r5_corner_N8_<NEWS_MODE>_commR<MULTIPLIER>/`.
-
-**Communication Range Configuration:**
-
-The communication range is controlled by `radius_multiplier` in the config file:
-- `radius_multiplier: 5` → 5 × h_displacement = 5 × 3.125m = 15.625m
-- `radius_multiplier: -1` → Unlimited range
-
-where `h_displacement = (field_len/2) / n_h_act` and `n_h_act = 8` for 8 agents, otherwise 5.
-
-### Plotting Results
-
-#### Plot Greedy IG with Limited Range (R=5)
-
-```bash
-python plotter.py --compare-news --paths trials/*_commR5/txt/ --radius 5 --comm-range 5
-```
-
-This generates `plots/greedy_ig_info_sharing_comparison_r5_commR5_N8.png` showing:
-- Left column: IG, IG+BS, IG+BM
-- Right column: IGd, IGd+BS, IGd+BM
-- Title: "Greedy Ig - Effect of information sharing... (Comm Range = 5×3.125m = 15.6m)"
-
-#### Plot Greedy IG with Unlimited Range
-
-```bash
-python plotter.py --compare-news --paths trials/*_commRinf/txt/ --radius 5 --comm-range -1
-```
-
-This generates `plots/greedy_ig_info_sharing_comparison_r5_commRinf_N8.png` with unlimited communication range.
-
-#### Compare Both Communication Ranges
-
-Generate both plots to compare limited vs unlimited range:
-
-```bash
-# Limited range (15.625m)
-python plotter.py --compare-news --paths trials/*_commR5/txt/ --radius 5 --comm-range 5
-
-# Unlimited range
-python plotter.py --compare-news --paths trials/*_commRinf/txt/ --radius 5 --comm-range -1
-```
-
-## Configuration
-
-- **Config files**: `configs/benchmark_greedy_ig.json`
-- **Results directory**: `trials/`
-- **Plots directory**: `plots/`
-
-## Strategy Comparison
-
-| Aspect | Greedy IG | Dec-MCTS | MH-Dec-MCTS |
-|--------|-----------|----------|-------------|
-| **Planning levels** | 1 | 1 | 2 (LLP + HLP) |
-| **Lookahead** | 1 step | 10 steps | 3-7 steps + 3-10 regions |
-| **Search method** | Enumerate | MCTS | MCTS (both levels) |
-| **Agents** | 8 | 4 | 4 |
-| **Comm range** | 15.625m | 15.0m | 150.0m |
-| **What's shared** | Footprint + news | LL trajectory | LL + HL intents |
-| **Coordination** | Overlap avoidance | Trajectory penalty | g₂-based coupling |
-| **Reward** | IG only | IG + overlap | g₁(IG) + g₂(time) |
-# multi-horizon — Run & Plot Quick Reference
-
-Minimal instructions to run each benchmark and plot results. For detailed design and algorithm notes see the linked docs for each benchmark.
+This repository contains several planning strategies. The primary method is **MH-Dec-MCTS** (Multi-Horizon Dec-MCTS). Use the other two strategies as benchmarks for comparison: **Dec-MCTS** (single-level) and **Greedy IG** (baseline).
 
 Prerequisites
-- Activate your Python environment (example):
+- Activate your Python environment and install requirements:
 
 ```bash
 conda activate active_sensing
 pip install -r requirements.txt
 ```
 
-Greedy IG (single-step IG baseline)
-- Run:
+VS Code users: the workspace config will auto-activate the `active_sensing` Conda environment
+for new integrated terminals. If you prefer a manual step, run `conda activate active_sensing`.
 
-```bash
-python src/main.py --config configs/benchmark_greedy_ig.json
-```
-- Plot results (example):
-
-```bash
-python plotter.py trials/greedy_ig_gaussian_r5_corner_N8_IG*/txt/ --radius 5
-```
-- Docs: [Greedy IG Benchmark](docs/greedy_ig_multiagent.md)
-
-Decentralized MCTS (single-level Dec-MCTS)
-- Run:
-
-```bash
-python src/main.py --config configs/benchmark_dec_mcts.json
-```
-- Plot results (example):
-
-```bash
-python plotter.py trials/dec_mcts_gaussian_*_N4_*/txt/ --radius 5
-```
-- Docs: [Dec-MCTS Benchmark](docs/dec_mcts_multiagent.md)
-
-MH-Dec-MCTS (Multi-Horizon hierarchical planner)
-- Run:
+Main method — MH-Dec-MCTS (recommended)
+- Run the main hierarchical planner:
 
 ```bash
 python src/main.py --config configs/benchmark_mh_dec_mcts.json
 ```
-- Plot results (example):
+- Plot results:
 
 ```bash
 python plotter.py trials/mh_dec_mcts_gaussian_*_N4_*/txt/ --radius 5
 ```
 - Docs: [MH-Dec-MCTS Benchmark](docs/mh_dec_mcts_multiagent.md)
 
-Notes
-- The `plotter.py` script expects trial `txt/` output directories created by `src/main.py`.
-- `--paths` and `--compare-news` in `plotter.py` are used for multi-run/news-mode comparisons (mostly for Greedy IG).
+Benchmark — Dec-MCTS (single-level)
+- Run:
 
-That's it — these commands are all you need to run experiments and produce plots. See the linked docs for implementation details and algorithmic descriptions.
-**Status:** ✅ Paper-correct implementation (Seiler et al., 2024)
+```bash
+python src/main.py --config configs/benchmark_dec_mcts.json
+```
+- Plot results:
+
+```bash
+python plotter.py trials/dec_mcts_gaussian_*_N4_*/txt/ --radius 5
+```
+- Docs: [Dec-MCTS Benchmark](docs/dec_mcts_multiagent.md)
+
+Benchmark — Greedy IG (baseline)
+- Run (all 6 news modes: IG, IGd, IG_BS, IG_BM, IGd_BS, IGd_BM):
+
+```bash
+python src/main.py --config configs/benchmark_greedy_ig.json
+```
+- Plot results (example for specific mode):
+
+```bash
+python plotter.py trials/greedy_ig_gaussian_r5_corner_N4_IG_commR5*/txt/ --radius 5
+```
+- Docs: [Greedy IG Benchmark](docs/greedy_ig_multiagent.md)
+
+**Available Modes for All Strategies:**
+All three strategies (Greedy IG, Dec-MCTS, and MH-Dec-MCTS) support the same 6 modes configured via `mode_labels`:
+- `IG`: No information sharing (baseline)
+- `IGd`: Position sharing only (with footprint IoU discounting)
+- `IG_BS`: IG + broadcast single news (all neighbors get same news)
+- `IG_BM`: IG + per-neighbor news (each neighbor gets private news)
+- `IGd_BS`: Position sharing + broadcast single news
+- `IGd_BM`: Position sharing + per-neighbor news
+
+The config files run all modes automatically. Results are stored in separate trial folders with mode suffix in folder name.
+
+Notes
+- `plotter.py` expects `txt/` trial outputs produced by `src/main.py`.
+- Use `--paths` and `--compare-news` with `plotter.py` for multi-run comparisons (useful for comparing different news modes).
+- Each config file specifies `mode_labels` to run multiple modes in sequence. Results are stored in separate trial folders.
+- Communication range is calculated dynamically based on `radius_multiplier` (for Greedy IG) or set explicitly (for MCTS methods).
+
+For algorithmic details, reward decomposition, and implementation notes see the benchmark docs linked above.
+
+Plotter: Compare Methods
+- Use `--compare-methods` to compare Dec-MCTS, MH-Dec-MCTS and Greedy IG trial outputs in a single figure. The tool auto-discovers matching `trials/` folders, validates common metadata (e.g. `NumAgents`, `communication_range`), and writes a 2×2 panel (Entropy / Height / MSE / Coverage) to `plots/method_comparison_r_<radius>[_pairwise_<pairwise>][_N<num_agents>].png`.
+
+Examples:
+
+```bash
+# basic (auto-detects available methods)
+python plotter.py --compare-methods --radius 5
+
+# filter by pairwise correlation and select agent count
+python plotter.py --compare-methods --radius 5 --pairwise adaptive --num-agents 4
+
+# compare specific news mode across methods
+python plotter.py --compare-methods --radius 5 --pairwise adaptive --num-agents 4 --news-mode IG_BM
+```
+
+Notes:
+- `--pairwise` filters trials by pairwise correlation type (e.g. `adaptive`, `equal`, `biased`).
+- `--num-agents` ensures the comparison uses trials with the same number of agents when multiple counts exist.
+- `--news-mode` filters comparisons to a single mapping/news mode (e.g. `IG`, `IGd`, `IG_BM`, `IGd_BM`). When multiple `NewsMode` values are present across trial folders, `plotter.py --compare-methods` will require `--news-mode` to be specified.
+- If trial folders lack explicit communication metadata, the plotter attempts to infer `communication_range` from folder names; verify results when in doubt.
