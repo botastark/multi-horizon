@@ -308,26 +308,40 @@ def _compute_teammate_coverage_mask(self) -> np.ndarray:
     return coverage_discount
 ```
 
-### 6.2 Alignment Bonus (HLP Guidance)
+### 6.2 LLP Reward Computation (Paper-Correct)
+
+**No explicit alignment bonus** - alignment emerges through g2 conditioning:
 
 ```python
-def _compute_alignment_bonus(self, position, prev_position) -> float:
-    """Bonus for moving toward HLP target."""
-    if self._hl_guidance is None or self._hl_guidance.target_center is None:
-        return 0.0
+def _simulate_trajectory(self, start_state, actions, coverage_discount):
+    """
+    Simulate trajectory and compute reward: r_LLP = g1 + g2
     
-    target = self._hl_guidance.target_center
+    g1: Immediate IG (discounted sum)
+    g2: Mission completion time estimate (includes HL intents)
     
-    dist_before = np.linalg.norm(prev_position - target)
-    dist_after = np.linalg.norm(position - target)
+    Alignment emerges because g2 is conditioned on LL trajectory,
+    and HLP guides by setting target regions that reduce g2.
+    """
+    # Compute g1: discounted IG over trajectory
+    g1_reward = 0.0
+    for step_idx, action in enumerate(actions):
+        ig = self._compute_ig(next_pos, next_alt, coverage_discount)
+        g1_reward += (self.discount ** step_idx) * ig
     
-    improvement = dist_before - dist_after
-    if improvement > 0:
-        return 0.3 * improvement / max_distance
-    return 0.0  # No penalty for moving away (soft guidance)
+    # Compute g2: mission completion time
+    g2_value = self._compute_g2_for_trajectory(
+        state_sequence, footprint_sequence, ig_sequence
+    )
+    
+    # Total reward (no explicit alignment bonus)
+    total_reward = g1_reward + g2_value
+    return total_reward, state_sequence, footprint_sequence, ig_sequence
 ```
 
-### 6.3 LLP Planning (MCTS-lite)
+**Note:** The `_compute_alignment_bonus()` function exists in the code but is **not called** - it's legacy code kept for reference. Alignment is achieved through the g2 evaluation which naturally favors trajectories that progress toward HLP target regions.
+
+### 6.3 LLP Planning (Random Rollout MCTS)
 
 ```python
 def plan(self, current_state) -> LLIntent:
@@ -336,10 +350,12 @@ def plan(self, current_state) -> LLIntent:
     best_reward = -inf
     best_actions = []
     
-    # Random sampling MCTS (simplified)
+    # Random rollout MCTS
     for _ in range(self.num_iterations):
+        # Sample random action sequence
         actions = [random.choice(self.actions) for _ in range(self.horizon)]
         
+        # Simulate and evaluate using g1 + g2
         reward, states, footprints, igs = self._simulate_trajectory(
             current_state, actions, coverage_discount
         )
@@ -358,32 +374,16 @@ def plan(self, current_state) -> LLIntent:
         footprint_sequence=best_footprints,
         ig_sequence=best_igs,
         total_expected_ig=sum(best_igs),
+        value=best_reward,  # This is g1 + g2
         ...
     )
 ```
 
-### 6.4 Trajectory Simulation
-
-```python
-def _simulate_trajectory(self, start_state, actions, coverage_discount):
-    """Simulate trajectory and compute total reward (g1)."""
-    total_reward = 0.0
-    state_sequence = [start_state]
-    
-    for step_idx, action in enumerate(actions):
-        next_state = camera.x_future(action)
-        
-        # IG with teammate discount
-        ig = self._compute_ig(next_state, coverage_discount)
-        
-        # Alignment with HLP target
-        alignment = self._compute_alignment_bonus(next_state, current_pos)
-        
-        # Discounted reward
-        step_reward = (self.discount ** step_idx) * (ig + alignment)
-        total_reward += step_reward
-        
-        state_sequence.append(next_state)
+**Key Properties:**
+- Uses random rollout (not full UCB tree like Dec-MCTS)
+- Evaluates complete trajectories using g1 + g2 reward
+- Alignment emerges from g2 conditioning on HL intents
+- No explicit alignment bonus added to rewards
     
     return total_reward, state_sequence, footprints, igs
 ```
@@ -555,10 +555,6 @@ MH-Dec-MCTS uses the same belief fusion as other strategies:
 - **Communication**: `communication_range=15.625m` (matches other strategies for comparison)
 - **Mode Labels**: 6 modes available - `IG` (no sharing), `IGd` (position sharing), `IG_BS`/`IG_BM` (IG + news sharing), `IGd_BS`/`IGd_BM` (IGd + news sharing)
 - **Intent sharing**: LL broadcasts every 0.1s, HL every 0.5s
-
-**Removed Parameters** (obsolete as of paper-correct implementation):
-- ❌ `alignment_bonus_weight`: Removed—alignment now emerges via g2 conditioning
-- ❌ `region_conflict_penalty`: Removed—coordination handled by marginal g2 evaluation
 
 ---
 

@@ -654,40 +654,6 @@ class LowLevelPlanner:
 
         return ig
 
-    def _compute_alignment_bonus(
-        self,
-        position: Tuple[float, float],
-        prev_position: Tuple[float, float],
-    ) -> float:
-        """
-        Compute alignment bonus with HLP guidance.
-
-        Returns positive bonus if moving toward HLP target, 0 otherwise (soft guidance).
-        """
-        if self._hl_guidance is None or self._hl_guidance.target_center is None:
-            return 0.0
-
-        target = self._hl_guidance.target_center
-
-        # Distance before and after move
-        dist_before = np.sqrt(
-            (prev_position[0] - target[0]) ** 2 + (prev_position[1] - target[1]) ** 2
-        )
-        dist_after = np.sqrt(
-            (position[0] - target[0]) ** 2 + (position[1] - target[1]) ** 2
-        )
-
-        # Soft guidance: bonus for moving closer, no penalty for moving away
-        improvement = dist_before - dist_after
-        if improvement > 0:
-            # Normalize by max possible improvement
-            max_dist = np.sqrt(
-                self.grid_info.shape[0] ** 2 + self.grid_info.shape[1] ** 2
-            )
-            return 0.3 * improvement / max_dist
-
-        return 0.0
-
     def _simulate_trajectory(
         self,
         start_state: Tuple[float, float, float],

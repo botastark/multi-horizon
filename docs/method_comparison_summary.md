@@ -68,5 +68,3 @@ Summary of the three planners used for the method-comparison plot saved under `p
   1. Sweep `hlp_iterations` (e.g., 10, 30, 60) to measure HLP effectiveness vs compute.
   2. Vary `decentralized.overlap_penalty_weight` to see trade-offs between coverage and redundancy.
   3. Compare MH-Dec-MCTS vs Dec-MCTS under limited communication (lower `communication_range`).
-
-If you want, I can: (a) add this summary to the README, (b) write a short Jupyter notebook that reproduces the plot provenance and loads the saved `run.log` headers, or (c) expand the summary with per-step metric excerpts from the exact trials used.
