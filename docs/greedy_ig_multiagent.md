@@ -364,7 +364,7 @@ next_action, info_gain_action = planner.select_action(
   - `IGd_BS`: Position + broadcast news
   - `IGd_BM`: Position + per-neighbor news
 - **radius_multiplier**: 5 → 15.625m range (calculated as `radius_multiplier × h_displacement`)
-  - For 4 agents: `h_displacement = (field_len/2) / n_h_act = 25/5 = 5.0m`, thus `5 × 5.0 = 25.0m` effective range
+  - For agents: `h_displacement = (field_len/2) / n_h_act = 25/8 = 3.125m`
   - Set to `-1` for unlimited range
 - **correlation_types**: `["adaptive", "equal", "biased"]` for comprehensive LBP testing
 - **Testing**: 20 iterations across 3 correlation types
