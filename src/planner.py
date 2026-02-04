@@ -95,7 +95,9 @@ class planning:
             print(f"  Total IG: {stats['total_ig']:.4f}")
             if self._greedy_ig_planner.enable_discounting:
                 print(f"  Total IGd (discounted): {stats['total_igd']:.4f}")
-                print(f"  Teammate state updates received: {stats['teammate_updates_received']}\n")
+                print(
+                    f"  Teammate state updates received: {stats['teammate_updates_received']}\n"
+                )
             else:
                 print()
 
@@ -276,10 +278,14 @@ class planning:
             )
 
             mode = (
-                "IGd (null policy, footprint discount)" if config["enable_discounting"] else "IG"
+                "IGd (null policy, footprint discount)"
+                if config["enable_discounting"]
+                else "IG"
             )
             print(f"\n[GREEDY {mode}] Agent {self.agent_id} initialized")
-            print(f"  Paper approach: pure belief-based IG (no penalties, no intents)\n")
+            print(
+                f"  Paper approach: pure belief-based IG (no penalties, no intents)\n"
+            )
 
         planner = self._greedy_ig_planner
 
@@ -293,7 +299,7 @@ class planning:
             other_agents = self.coordinator.get_other_agent_positions(self.agent_id)
             for tid, pos, alt in other_agents:
                 teammate_states[tid] = (pos, alt)
-            
+
             planner.update_teammate_states(teammate_states)
 
         # Get current position
@@ -310,12 +316,12 @@ class planning:
         # Get action and scores
         action = decision.action
         action_scores = planner.get_action_scores()
-        
+
         # Add planning time and timestamps from planner
         stats = planner.get_statistics()
         if "last_planning_time_ms" in stats:
             action_scores["_timing_greedy_ms"] = stats["last_planning_time_ms"]
-        
+
         # Add timestamps if available
         if hasattr(planner, "_timing_start_ms"):
             action_scores["_timing_greedy_start_ms"] = planner._timing_start_ms
@@ -488,7 +494,7 @@ class planning:
 
         # Build action scores from MCTS values
         action_scores = planner.get_action_values()
-        
+
         # Add timing information from planner stats
         if "last_planning_time_ms" in stats:
             action_scores["_timing_dec_mcts_ms"] = stats["last_planning_time_ms"]
@@ -601,7 +607,6 @@ class planning:
         # Build action scores from LL intent
         action_scores = {}
         ll_intent = metrics.get("ll_intent")
-        hl_intent = metrics.get("hl_intent")
         if ll_intent and ll_intent.action_sequence:
             for i, act in enumerate(ll_intent.action_sequence):
                 if i < len(ll_intent.ig_sequence):
@@ -610,7 +615,7 @@ class planning:
         # Ensure current action has a score
         if action not in action_scores:
             action_scores[action] = metrics.get("expected_ig", 0.0)
-        
+
         # Add timing breakdown from metrics
         if "hlp_time_ms" in metrics:
             action_scores["_timing_hlp_ms"] = metrics["hlp_time_ms"]
@@ -619,7 +624,9 @@ class planning:
             action_scores["_timing_hlp_end_ms"] = metrics.get("hlp_end_ms")
             action_scores["_timing_llp_start_ms"] = metrics.get("llp_start_ms")
             action_scores["_timing_llp_end_ms"] = metrics.get("llp_end_ms")
-            action_scores["_timing_hlp_replanned"] = 1.0 if metrics.get("hlp_replanned", False) else 0.0
+            action_scores["_timing_hlp_replanned"] = (
+                1.0 if metrics.get("hlp_replanned", False) else 0.0
+            )
 
         return action, action_scores
 
