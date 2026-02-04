@@ -737,26 +737,38 @@ def _run_mcts_region_search(start_position, teammate_targets):
 
 ---
 
-## 12. Comparison: Greedy vs Dec-MCTS vs MH-Dec-MCTS
+## 12. Comparison: Incremental Planner Progression
 
-| Aspect | Greedy IG | Dec-MCTS | MH-Dec-MCTS |
-|--------|-----------|----------|-------------|
-| Levels | 1 | 1 | 2 (HLP + LLP) |
-| Lookahead | 1 step | 10 steps | HLP: 10 regions, LLP: 3 steps |
-| Search method | Enumerate actions | **UCB tree (full MCTS)** | HLP: **UCB tree**, LLP: **Random rollout** |
-| Tree structure | None | Yes (expanded across iterations) | HLP: Yes, LLP: No |
-| Action/Region selection | Max IG | UCB1 formula | HLP: UCB1, LLP: Random sampling |
-| Intent | Footprint | Trajectory (10 steps) | LL (3 steps) + HL (region sequence) |
-| Region allocation | None | None | Yes (HLP with MCTS) |
-| Guidance | None | None | HLP → LLP via g2 |
-| Reward | IG only | IG + overlap penalty | g1 (IG) + g2 (mission time) |
-| Iterations | 1 per action | 100 MCTS iterations | HLP: 30, LLP: 50 |
-| Computation | Lowest (~7 evals) | Medium (~1000 sims) | Highest (HLP: ~300 + LLP: ~150 sims) |
-| Memory | O(1) | O(iterations × horizon) | HLP: O(iterations × regions), LLP: O(1) |
+The framework supports **4 baselines** representing incremental planning complexity:
 
-**Key Insight**: MH-Dec-MCTS uses **two different MCTS variants**:
-- **HLP**: Full UCB tree search (like Dec-MCTS) for strategic region allocation
-- **LLP**: Simplified random rollout (faster) for tactical action selection
+| Aspect | 1. Greedy IG | 2. Dec-MCTS | 3. MH-Dec-MCTS<br>(full) | 4. MH-Dec-MCTS<br>(efficient) |
+|--------|-------------|------------|---------------------------|-------------------------------|
+| **Levels** | 1 | 1 | 2 (HLP + LLP) | 2 (HLP + LLP) |
+| **Lookahead** | 1 step | 10 steps | HLP: 10 regions<br>LLP: 3 steps | HLP: 10 regions<br>LLP: 3 steps |
+| **Search method** | Enumerate actions | **UCB tree** | HLP: **UCB tree**<br>LLP: **UCB tree** | HLP: **UCB tree**<br>LLP: **Random rollout** |
+| **Tree structure** | None | Yes | HLP: Yes<br>LLP: Yes | HLP: Yes<br>LLP: No |
+| **Action selection** | Max IG | UCB1 formula | HLP: UCB1<br>LLP: UCB1 | HLP: UCB1<br>LLP: Random sampling |
+| **Intent** | Footprint | Trajectory (10 steps) | LL (3 steps) + HL (region seq) | LL (3 steps) + HL (region seq) |
+| **Region allocation** | None | None | Yes (HLP MCTS) | Yes (HLP MCTS) |
+| **Guidance** | None | None | HLP → LLP via g2 | HLP → LLP via g2 |
+| **Reward** | IG only | IG + overlap penalty | g1 (IG) + g2 (mission time) | g1 (IG) + g2 (mission time) |
+| **Iterations** | 1 per action | 100 | HLP: 30<br>LLP: 50 | HLP: 30<br>LLP: 50 |
+| **Computation** | Lowest<br>(~7 evals) | Medium<br>(~1000 sims) | Highest<br>(~450 sims, best quality) | High<br>(~450 sims, optimized) |
+| **Memory** | O(1) | O(iter × horizon) | HLP: O(iter × regions)<br>LLP: O(iter × horizon) | HLP: O(iter × regions)<br>LLP: O(1) |
+| **use_mcts_llp** | N/A | N/A | **True** | **False** |
+
+**Incremental Progression:**
+1. **Greedy IG**: Reactive baseline, no lookahead
+2. **Dec-MCTS**: Adds multi-step planning with UCB tree search
+3. **MH-Dec-MCTS (full)**: Adds hierarchical structure, both HLP and LLP use full MCTS tree search
+4. **MH-Dec-MCTS (efficient)**: Optimizes (3) by replacing LLP tree search with random rollout to reduce computational cost
+
+**Key Design Insight (3) → (4):**
+- Baseline **(3)** establishes the full hierarchical approach with both planners using MCTS
+- Baseline **(4)** tests an optimization hypothesis: Can we replace LLP's expensive tree search with simple random rollout and maintain similar performance?
+  - **Rationale**: HLP already provides strategic guidance via g₂, so LLP may not need full tree search
+  - **Trade-off**: (4) is computationally cheaper but may find slightly lower-quality short-horizon plans
+  - **Result**: Experiments compare whether the performance loss (if any) justifies the computational savings
 
 ---
 

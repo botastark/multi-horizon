@@ -886,6 +886,9 @@ def setup_dec_mcts_logger(
     else:
         log_file = os.path.join(log_dir, f"dec_mcts_{timestamp}.log")
 
+    # Clear existing handlers to prevent duplicate logging
+    logger.handlers.clear()
+
     # Configure logger
     handler = logging.FileHandler(log_file)
     handler.setLevel(logging.INFO)
