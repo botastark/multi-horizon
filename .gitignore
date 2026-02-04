@@ -95,6 +95,9 @@ cache
 results_*
 trials/
 plots/
+logs/
+log*
+plots_*
 
 # ignore not relavant files
 src/tile_class.py

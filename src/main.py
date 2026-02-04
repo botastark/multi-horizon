@@ -10,7 +10,7 @@ from orthomap import Field
 from mapper_LBP import OccupancyMap as OM
 from planner import planning
 from uav_camera import Camera
-from config_loader import load_config
+from config_loader import load_config, flatten_hierarchical_config
 
 from experiment_config import (
     setup_main_logger,
@@ -22,9 +22,10 @@ from experiment_config import (
 from experiment_runner import run_multi_agent_experiment
 
 
-def main():
-    args = parse_args()
-    config = load_config(args.config)
+def run_experiment_with_config(config: dict, args):
+    """Run a single experiment with the given configuration."""
+    # Flatten hierarchical configs for backward compatibility
+    config = flatten_hierarchical_config(config)
 
     # Extract configuration parameters
     (
@@ -86,9 +87,12 @@ def main():
     else:
         inferred_label = "IG"
 
-    # Get radius (grf_r) - Gaussian field uses 5, Ortomap uses "orto"
+    # Get radius (grf_r) - Read from config or use defaults
     field_type_raw = config.get("field_type", "Gaussian")
-    grf_r_for_name = "orto" if field_type_raw == "Ortomap" else 5
+    if field_type_raw == "Ortomap":
+        grf_r_for_name = "orto"
+    else:
+        grf_r_for_name = config.get("cluster_radius", 5)
 
     # If strategy-specific `mode_label` is a list, run experiments for each label.
     # Otherwise resolve a single mode_label and run once.
@@ -149,6 +153,14 @@ def main():
             if "multi_agent" not in config:
                 config["multi_agent"] = {}
             config["multi_agent"]["news_mode"] = actual_news_mode
+            
+            # Limited testing mode: IG_BS uses infinite communication
+            if config.get("limited_testing", False) and news_mode == "IG_BS":
+                if "radius_multiplier" in dec_config or config.get("action_strategy") == "greedy_ig":
+                    dec_config["radius_multiplier"] = -1
+                else:
+                    dec_config["communication_range"] = -1
+                    
         elif news_mode in ["IGd_BS", "IGd_BM"]:
             # IGd with news sharing
             config["decentralized"]["position_sharing"] = True
@@ -157,6 +169,14 @@ def main():
             if "multi_agent" not in config:
                 config["multi_agent"] = {}
             config["multi_agent"]["news_mode"] = actual_news_mode
+            
+            # Limited testing mode: IGd_BM uses limited communication (3x cluster radius)
+            if config.get("limited_testing", False) and news_mode == "IGd_BM":
+                cluster_r = config.get("cluster_radius", 5)
+                if "radius_multiplier" in dec_config or config.get("action_strategy") == "greedy_ig":
+                    dec_config["radius_multiplier"] = 3
+                else:
+                    dec_config["communication_range"] = 3 * cluster_r
         else:
             # Unknown mode, use defaults
             actual_news_mode = news_mode
@@ -245,7 +265,7 @@ def main():
 
             use_sensor_model = False
         else:
-            grf_r = 5
+            grf_r = config.get("cluster_radius", 5)
             field_type = grf_r
             min_alt = None
             overlap = None
@@ -374,6 +394,30 @@ def main():
                         init_occupancy_map=init_occupancy_map,
                     )
                     print(f"Experiment completed with {num_agents} agents")
+
+
+def main():
+    """Main entry point supporting both single and multi-strategy configs."""
+    args = parse_args()
+    configs = load_config(args.config)
+
+    # Handle both single config and list of configs
+    if not isinstance(configs, list):
+        configs = [configs]
+
+    logger = get_main_logger()
+    logger.info(f"Loaded {len(configs)} configuration(s) from: {args.config}")
+
+    # Run experiments for each strategy configuration
+    for config_idx, config in enumerate(configs, 1):
+        strategy_name = config.get("action_strategy", "unknown")
+        logger.info(f"\n{'='*80}")
+        logger.info(f"Running strategy {config_idx}/{len(configs)}: {strategy_name}")
+        logger.info(f"{'='*80}\n")
+
+        run_experiment_with_config(config, args)
+
+        logger.info(f"\nCompleted strategy: {strategy_name}\n")
 
 
 if __name__ == "__main__":
