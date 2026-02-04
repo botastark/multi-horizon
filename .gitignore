@@ -98,7 +98,7 @@ plots/
 logs/
 log*
 plots_*
-
+trials_*
 # ignore not relavant files
 src/tile_class.py
 src/classifier.py
@@ -110,3 +110,4 @@ data/gpstiles.csv
 model/*
 src/sampler.ipynb
 src/tile_experiments.ipynb
+
