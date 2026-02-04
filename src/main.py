@@ -51,9 +51,13 @@ def run_experiment_with_config(config: dict, args):
     position_sharing = dec_config.get("position_sharing", True)
     news_sharing = dec_config.get("news_sharing", True)
 
-    # Allow explicit mode label override from strategy-specific config (e.g., greedy_ig.mode_label or mode_labels)
+    # Allow explicit mode label override from strategy-specific config or shared config
     strategy_cfg = config.get(config.get("action_strategy", ""), {})
     explicit_label = strategy_cfg.get("mode_labels", strategy_cfg.get("mode_label"))
+    
+    # If not in strategy config, check shared config
+    if explicit_label is None:
+        explicit_label = config.get("mode_labels")
 
     # Compute inferred label from sharing flags and news_mode
     inferred_label = "IG"
@@ -63,19 +67,13 @@ def run_experiment_with_config(config: dict, args):
         elif position_sharing and not news_sharing:
             inferred_label = "IGd"
         else:
-            # Full sharing: use BS or BM
+            # News sharing enabled: use BS or BM mode
             news_mode_setting = ma_config.get(
                 "news_mode", dec_config.get("news_mode", "BM")
             )
-            # Map to IG or IGd base plus news mode suffix
-            base = (
-                "IGd"
-                if position_sharing
-                and news_sharing
-                and not (not position_sharing and news_sharing)
-                else "IG"
-            )
-            # If position_sharing is True and news_sharing True, prefer IGd_* label only if requested; otherwise label IG_BM/IG_BS
+            # Determine label based on position_sharing + news_mode
+            # position_sharing=False, news_sharing=True → IG_BS or IG_BM
+            # position_sharing=True, news_sharing=True → IGd_BS or IGd_BM
             if news_mode_setting in ["BS", "BM"]:
                 inferred_label = (
                     f"IG_{news_mode_setting}"

@@ -95,7 +95,9 @@ class planning:
             print(f"  Total IG: {stats['total_ig']:.4f}")
             if self._greedy_ig_planner.enable_discounting:
                 print(f"  Total IGd (discounted): {stats['total_igd']:.4f}")
-            print(f"  Intent updates received: {stats['intent_updates_received']}\n")
+                print(f"  Teammate state updates received: {stats['teammate_updates_received']}\n")
+            else:
+                print()
 
     def reset(self, conf_dict=None):
         """Reset UAV and planning state, and reinitialize the belief map."""
@@ -232,7 +234,8 @@ class planning:
         - Areas observed by teammates have lower entropy -> lower IG
 
         IGd variant (when enable_discounting=True):
-        - Discount factor α_ij = 1 - IoU(fp(x_i), fp(x_j))
+        - NULL POLICY ASSUMPTION: teammates remain at current positions
+        - Discount factor α_ij = 1 - IoU(fp(my_next), fp(teammate_current))
         - Discounted IG: IG_a^d = IG_a × Π_{j ∈ neighbors} α_ij
 
         Returns:
@@ -240,7 +243,6 @@ class planning:
         """
         from greedy_ig_planner import (
             GreedyIGPlanner,
-            GreedyIGCoordinator,
             log_greedy_ig_decision,
             create_greedy_ig_planner,
         )
@@ -273,67 +275,51 @@ class planning:
                 config=config,
             )
 
-            # Create or get coordinator
-            if self.coordinator is not None:
-                if not hasattr(self.coordinator, "_greedy_ig_coordinator"):
-                    num_agents = getattr(self.coordinator, "num_agents", 1)
-                    self.coordinator._greedy_ig_coordinator = GreedyIGCoordinator(
-                        num_agents=num_agents
-                    )
-                self._greedy_ig_coordinator = self.coordinator._greedy_ig_coordinator
-            else:
-                self._greedy_ig_coordinator = None
-
             mode = (
-                "IGd (footprint discounting)" if config["enable_discounting"] else "IG"
+                "IGd (null policy, footprint discount)" if config["enable_discounting"] else "IG"
             )
             print(f"\n[GREEDY {mode}] Agent {self.agent_id} initialized")
-            print(f"  Paper approach: pure belief-based IG (no penalties)\n")
+            print(f"  Paper approach: pure belief-based IG (no penalties, no intents)\n")
 
         planner = self._greedy_ig_planner
 
         # Update belief - this should be the FUSED belief from coordinator
         planner.update_belief(self.M.copy())
 
-        # Get teammate intents for discounting (if enabled)
-        if self._greedy_ig_coordinator is not None:
-            teammate_intents = self._greedy_ig_coordinator.get_teammate_intents(
-                self.agent_id
-            )
-            planner.update_teammate_intents(teammate_intents)
-        else:
-            teammate_intents = {}
+        # Get teammate current states for IGd null policy (if enabled)
+        if self.coordinator is not None and planner.enable_discounting:
+            # Get teammate current positions and altitudes (null policy assumption)
+            teammate_states = {}
+            other_agents = self.coordinator.get_other_agent_positions(self.agent_id)
+            for tid, pos, alt in other_agents:
+                teammate_states[tid] = (pos, alt)
+            
+            planner.update_teammate_states(teammate_states)
 
         # Get current position
         uav_pos = self.uav.get_x()
 
         # Run planning (pure IG or IGd with discounting)
-        intent = planner.plan(
+        decision = planner.plan(
             current_position=uav_pos.position,
             current_altitude=uav_pos.altitude,
         )
 
-        # Share intent with coordinator
-        if self._greedy_ig_coordinator is not None:
-            self._greedy_ig_coordinator.share_intent(intent)
-
         # Log decision
-        log_greedy_ig_decision(
-            agent_id=self.agent_id,
-            step=planner._stats["plans_generated"],
-            raw_ig_scores=planner._raw_ig_scores,
-            overlap_penalties=planner._overlap_penalties,
-            final_scores=planner._action_scores,
-            selected_action=intent.action,
-            intents_received={"teammates": list(teammate_intents.keys())},
-            discount_factors=(
-                planner._discount_factors if planner.enable_discounting else None
-            ),
-        )
-
+        teammate_info = None
         # Get action and scores
-        action = intent.action
+        action = decision.action
         action_scores = planner.get_action_scores()
+        
+        # Add planning time and timestamps from planner
+        stats = planner.get_statistics()
+        if "last_planning_time_ms" in stats:
+            action_scores["_timing_greedy_ms"] = stats["last_planning_time_ms"]
+        
+        # Add timestamps if available
+        if hasattr(planner, "_timing_start_ms"):
+            action_scores["_timing_greedy_start_ms"] = planner._timing_start_ms
+            action_scores["_timing_greedy_end_ms"] = planner._timing_end_ms
 
         return action, action_scores
 
@@ -497,25 +483,18 @@ class planning:
         if self._dec_mcts_coordinator is not None:
             self._dec_mcts_coordinator.share_intent(intent)
 
-        # Log decision
+        # Get stats for timing
         stats = planner.get_statistics()
-        log_dec_mcts_decision(
-            agent_id=self.agent_id,
-            step=stats["plans_generated"],
-            mcts_action_values=planner.get_action_values(),
-            mcts_action_visits=planner.get_action_visits(),
-            selected_action=(
-                intent.action_sequence[0] if intent.action_sequence else "hover"
-            ),
-            trajectory_summary={
-                "length": len(intent.action_sequence),
-                "total_ig": intent.total_expected_ig,
-            },
-            intents_received={"teammates": list(teammate_intents.keys())},
-        )
 
         # Build action scores from MCTS values
         action_scores = planner.get_action_values()
+        
+        # Add timing information from planner stats
+        if "last_planning_time_ms" in stats:
+            action_scores["_timing_dec_mcts_ms"] = stats["last_planning_time_ms"]
+        if "last_start_ms" in stats:
+            action_scores["_timing_dec_mcts_start_ms"] = stats["last_start_ms"]
+            action_scores["_timing_dec_mcts_end_ms"] = stats["last_end_ms"]
 
         action = intent.action_sequence[0] if intent.action_sequence else "hover"
         return action, action_scores
@@ -619,37 +598,10 @@ class planning:
         # Run hierarchical planning (includes intent sharing)
         action, metrics = planner.plan()
 
-        # Log detailed planning decision
-        from hierarchical_dec_mcts import log_planning_decision, log_intent_sharing
-
-        stats = planner.get_statistics()
-        log_planning_decision(
-            agent_id=self.agent_id,
-            step=stats["hierarchical"]["planning_cycles"],
-            llp_action_scores=metrics.get("llp_action_scores", {}),
-            hlp_region_scores=metrics.get("hlp_region_scores", {}),
-            selected_action=action,
-            target_region=metrics.get("target_region"),
-            intents_received=metrics.get("intents_received", {}),
-        )
-
-        # Log intent sharing
-        ll_intent = metrics.get("ll_intent")
-        hl_intent = metrics.get("hl_intent")
-        log_intent_sharing(
-            agent_id=self.agent_id,
-            ll_intent_summary={
-                "actions": ll_intent.action_sequence if ll_intent else [],
-                "total_ig": ll_intent.total_expected_ig if ll_intent else 0,
-            },
-            hl_intent_summary={
-                "target_region": hl_intent.current_target_region if hl_intent else None,
-                "region_sequence": hl_intent.region_sequence if hl_intent else [],
-            },
-        )
-
         # Build action scores from LL intent
         action_scores = {}
+        ll_intent = metrics.get("ll_intent")
+        hl_intent = metrics.get("hl_intent")
         if ll_intent and ll_intent.action_sequence:
             for i, act in enumerate(ll_intent.action_sequence):
                 if i < len(ll_intent.ig_sequence):
@@ -663,6 +615,10 @@ class planning:
         if "hlp_time_ms" in metrics:
             action_scores["_timing_hlp_ms"] = metrics["hlp_time_ms"]
             action_scores["_timing_llp_ms"] = metrics["llp_time_ms"]
+            action_scores["_timing_hlp_start_ms"] = metrics.get("hlp_start_ms")
+            action_scores["_timing_hlp_end_ms"] = metrics.get("hlp_end_ms")
+            action_scores["_timing_llp_start_ms"] = metrics.get("llp_start_ms")
+            action_scores["_timing_llp_end_ms"] = metrics.get("llp_end_ms")
             action_scores["_timing_hlp_replanned"] = 1.0 if metrics.get("hlp_replanned", False) else 0.0
 
         return action, action_scores
