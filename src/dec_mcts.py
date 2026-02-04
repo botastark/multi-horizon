@@ -41,41 +41,6 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 
-def cH(p: np.ndarray, s0: float, s1: float) -> np.ndarray:
-    """
-    Compute conditional entropy given sensor model parameters.
-
-    Using the sensor model:
-    - P(z=1|m=1) = 1 - s1 (true positive rate)
-    - P(z=1|m=0) = s0 (false positive rate)
-
-    Args:
-        p: Prior probability P(m=1)
-        s0: False positive rate
-        s1: False negative rate
-
-    Returns:
-        Conditional entropy H(m|z)
-    """
-    eps = 1e-10
-    p = np.clip(p, eps, 1 - eps)
-
-    # P(z=1) = p*(1-s1) + (1-p)*s0
-    pz1 = p * (1 - s1) + (1 - p) * s0
-    pz0 = 1 - pz1
-
-    # Posterior P(m=1|z=1)
-    pm1_z1 = np.where(pz1 > eps, p * (1 - s1) / pz1, 0.5)
-    # Posterior P(m=1|z=0)
-    pm1_z0 = np.where(pz0 > eps, p * s1 / pz0, 0.5)
-
-    # Conditional entropy H(m|z) = P(z=1)*H(m|z=1) + P(z=0)*H(m|z=0)
-    H_m_z1 = H(pm1_z1)
-    H_m_z0 = H(pm1_z0)
-
-    return pz1 * H_m_z1 + pz0 * H_m_z0
-
-
 def copy_state(state: Dict) -> Dict:
     """Deep copy state dict with efficient numpy copy."""
     new_state = {

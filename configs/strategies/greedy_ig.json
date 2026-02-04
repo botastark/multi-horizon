@@ -1,0 +1,21 @@
+{
+  "_comment": "Strategy 1: Greedy IG - Single-step lookahead baseline",
+  "_description": "Pure belief-driven information gain maximization",
+  
+  "action_strategy": "greedy_ig",
+  
+  "greedy_ig": {
+    "overlap_penalty_weight": 0.0
+  },
+  
+  "decentralized": {
+    "_comment": "Communication range = radius_multiplier × grid_step. 5 × 3.125 = 15.625m",
+    "radius_multiplier": 5
+  },
+  
+  "experiment": {
+    "name": "greedy_ig_benchmark",
+    "log_dir_suffix": "greedy_ig",
+    "strategy_metrics": []
+  }
+}

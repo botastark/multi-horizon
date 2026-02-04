@@ -1,0 +1,452 @@
+"""
+Configuration Loader for Multi-Strategy Experiments
+
+This module loads master config + strategy-specific configs.
+
+Config Structure (v3.0):
+    Master config: Shared settings and strategy selection
+    Strategy configs: Strategy-specific parameters
+"""
+
+import json
+import os
+import copy
+import numpy as np
+from typing import Dict, Any, List
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+def get_pairwise_potential(potential_type: str) -> np.ndarray:
+    """Get pairwise potential matrix based on type."""
+    if potential_type == "equal":
+        return np.array([[0.5, 0.5], [0.5, 0.5]])
+    elif potential_type == "biased":
+        return np.array([[0.7, 0.3], [0.3, 0.7]])
+    elif potential_type == "adaptive":
+        # TODO::Return placeholder; actual adaptive potentials computed at runtime
+        # return np.array([[0.5, 0.5], [0.5, 0.5]])
+        pass
+    else:
+        logger.warning(f"Unknown pairwise_potential_type '{potential_type}', using 'equal'")
+        return np.array([[0.5, 0.5], [0.5, 0.5]])
+
+
+def load_config(config_file: str) -> List[Dict[str, Any]]:
+    """
+    Load configuration from master config file.
+    
+    Args:
+        config_file: Path to master config JSON file
+    
+    Returns:
+        List of fully resolved configurations (one per strategy)
+    """
+    with open(config_file, "r") as f:
+        config = json.load(f)
+    
+    version = config.get("_version", "3.0")
+    if version != "3.0":
+        raise ValueError(f"Only v3.0 configs supported. Found version: {version}")
+    
+    return _load_master_config(config, os.path.dirname(config_file))
+
+
+def _load_master_config(master: Dict[str, Any], base_dir: str) -> List[Dict[str, Any]]:
+    """
+    Load master config with multiple strategies.
+    
+    Args:
+        master: Master configuration dict
+        base_dir: Base directory for resolving relative paths
+    
+    Returns:
+        List of fully resolved configurations (one per strategy)
+    """
+    strategies = master.get("strategies", [])
+    strategy_configs = master.get("strategy_configs", {})
+    shared = master.get("shared", {})
+    shared_decentralized = master.get("decentralized", {})
+    shared_experiment = master.get("experiment", {})
+    
+    configs = []
+    
+    for strategy_name in strategies:
+        # Load strategy-specific config
+        strategy_config_path = strategy_configs.get(strategy_name)
+        if not strategy_config_path:
+            logger.warning(f"No config path for strategy '{strategy_name}', skipping")
+            continue
+        
+        # Resolve relative path
+        if not os.path.isabs(strategy_config_path):
+            strategy_config_path = os.path.join(base_dir, strategy_config_path)
+        
+        if not os.path.exists(strategy_config_path):
+            logger.warning(f"Strategy config not found: {strategy_config_path}, skipping")
+            continue
+        
+        # Load strategy config
+        with open(strategy_config_path, "r") as f:
+            strategy_cfg = json.load(f)
+        
+        # Merge: shared <- strategy overrides
+        merged = _merge_configs(shared, shared_decentralized, shared_experiment, strategy_cfg)
+        
+        # Filter comments
+        merged = {k: v for k, v in merged.items() if not k.startswith("_")}
+        
+        configs.append(merged)
+        logger.info(f"Loaded config for strategy: {strategy_name}")
+    
+    return configs
+
+
+def _merge_configs(
+    shared: Dict[str, Any],
+    shared_decentralized: Dict[str, Any],
+    shared_experiment: Dict[str, Any],
+    strategy: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Merge shared and strategy-specific configs.
+    
+    Strategy config takes precedence over shared config.
+    """
+    merged = copy.deepcopy(shared)
+    
+    # Merge decentralized settings
+    merged_decentralized = copy.deepcopy(shared_decentralized)
+    strategy_decentralized = strategy.get("decentralized", {})
+    merged_decentralized.update(strategy_decentralized)
+    merged["decentralized"] = merged_decentralized
+    
+    # Merge experiment settings
+    merged_experiment = copy.deepcopy(shared_experiment)
+    strategy_experiment = strategy.get("experiment", {})
+    
+    # Special handling for log_dir_suffix
+    if "log_dir_suffix" in strategy_experiment:
+        base_log_dir = merged_experiment.get("base_log_dir", "trials")
+        merged_experiment["log_dir"] = os.path.join(
+            base_log_dir, strategy_experiment["log_dir_suffix"]
+        )
+    
+    # Merge common_metrics + strategy_metrics
+    common_metrics = merged_experiment.get("common_metrics", [])
+    strategy_metrics = strategy_experiment.get("strategy_metrics", [])
+    merged_experiment["metrics"] = common_metrics + strategy_metrics
+    
+    merged_experiment.update(strategy_experiment)
+    merged["experiment"] = merged_experiment
+    
+    # Add strategy-specific sections
+    for key, value in strategy.items():
+        if key not in ["decentralized", "experiment"]:
+            merged[key] = value
+    
+    return merged
+
+
+def flatten_hierarchical_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Flatten hierarchical_dec_mcts nested structure for backward compatibility.
+    
+    Converts:
+        hierarchical_dec_mcts.llp.horizon -> hierarchical_dec_mcts.llp_horizon
+        hierarchical_dec_mcts.hlp.horizon -> hierarchical_dec_mcts.hlp_horizon
+    """
+    hier = config.get("hierarchical_dec_mcts", {})
+    if not hier:
+        return config
+    
+    # If already flat (has llp_horizon), return as-is
+    if "llp_horizon" in hier:
+        return config
+    
+    # Flatten nested structure
+    flattened = {}
+    
+    # Copy top-level settings
+    for key in ["use_mcts_llp", "mode_labels", "intent_sharing"]:
+        if key in hier:
+            flattened[key] = hier[key]
+    
+    # Flatten LLP settings
+    llp = hier.get("llp", {})
+    for key, value in llp.items():
+        if not key.startswith("_"):
+            flattened[f"llp_{key}"] = value
+    
+    # Flatten HLP settings
+    hlp = hier.get("hlp", {})
+    for key, value in hlp.items():
+        if not key.startswith("_"):
+            if key == "replan_interval":
+                flattened["hlp_replan_interval"] = value
+            else:
+                flattened[f"hlp_{key}"] = value
+    
+    config["hierarchical_dec_mcts"] = flattened
+    return config
+
+    """
+    Convert v2.0 config format to include legacy keys for backward compatibility.
+
+    Args:
+        config: New format configuration
+
+    Returns:
+        Configuration with both new structure and legacy flat keys
+    """
+    result = {}
+
+    # Keep original structure (filtered)
+    for key, value in config.items():
+        if not key.startswith("_"):
+            result[key] = value
+
+    # === Map to legacy keys ===
+
+    # Simulation settings
+    sim = config.get("simulation", {})
+    result["field_type"] = sim.get("field_type", "Gaussian")
+    result["start_position"] = sim.get("start_position", "corner")
+    result["n_steps"] = sim.get("num_steps", 100)
+    result["iters"] = sim.get("iterations", [0, 1])
+    result["correlation_types"] = sim.get("correlation_types", ["equal"])
+    result["error_margins"] = [
+        "None" if e is None else e for e in sim.get("error_margins", [None])
+    ]
+    result["project_path"] = sim.get("project_path", "./")
+
+    # Strategy
+    strategy = config.get("strategy", {})
+    result["action_strategy"] = strategy.get("type", "hierarchical_dec_mcts")
+
+    # Output settings
+    output = config.get("output", {})
+    result["enable_plotting"] = output.get("enable_plotting", True)
+    result["enable_logging"] = output.get("enable_logging", True)
+
+    # Build mcts_params (legacy format for basic MCTS)
+    planner = config.get("planner", {})
+    hier_cfg = config.get("hierarchical_dec_mcts", {})
+
+    result["mcts_params"] = {
+        "planning_depth": planner.get("planning_depth", 15),
+        "num_iterations": planner.get("num_iterations", 100),
+        "ucb1_c": planner.get("ucb1_exploration", 0.95),
+        "discount_factor": planner.get("discount_factor", 0.99),
+        "timeout": planner.get("timeout_ms", 2000),
+        "parallel": planner.get("parallel_simulations", 1),
+        "horizon_weights": {
+            "short_horizon_depth": hier_cfg.get("llp_horizon", 5),
+            "long_horizon_depth": hier_cfg.get("hlp_horizon", 3)
+            * 5,  # regions to steps
+            "tile_size": hier_cfg.get("tile_size", [100, 100]),
+        },
+    }
+
+    # Build hierarchical_dec_mcts (legacy format)
+    dec_coord = config.get("decentralized", {}).get("coordination", {})
+    belief = config.get("belief", {})
+    d_uct = dec_coord.get("d_uct", {})
+    hier_cfg = config.get("hierarchical_dec_mcts", {})
+
+    result["hierarchical_dec_mcts"] = {
+        "llp_horizon": hier_cfg.get("llp_horizon", 5),
+        "llp_iterations": hier_cfg.get("llp_iterations", 50),
+        "hlp_horizon": hier_cfg.get("hlp_horizon", 3),
+        "hlp_iterations": hier_cfg.get("hlp_iterations", 30),
+        "tile_size": hier_cfg.get("tile_size", [100, 100]),
+        "hlp_replan_interval": hier_cfg.get("hlp_replan_interval", 1.0),
+        "intent_discount": dec_coord.get("intent_discount", 0.8),
+        "enable_belief_sharing": belief.get("fusion_enabled", True),
+        # D-UCT settings for asynchronous drift handling
+        "d_uct_enabled": d_uct.get("enabled", True),
+        "d_uct_decay_factor": d_uct.get("decay_factor", 0.9),
+        "d_uct_min_visits": d_uct.get("min_visits_before_decay", 5),
+        "d_uct_stale_threshold": d_uct.get("stale_intent_threshold_sec", 2.0),
+    }
+
+    # Build greedy_ig (legacy format for benchmark)
+    greedy_ig_cfg = config.get("greedy_ig", {})
+    result["greedy_ig"] = {
+        "intent_discount": greedy_ig_cfg.get("intent_discount", 0.5),
+        "overlap_penalty_weight": greedy_ig_cfg.get("overlap_penalty_weight", 0.3),
+    }
+
+    # Build dec_mcts (single-level MCTS planner)
+    dec_mcts_cfg = config.get("dec_mcts", {})
+    result["dec_mcts"] = {
+        "horizon": dec_mcts_cfg.get("horizon", 10),
+        "iterations": dec_mcts_cfg.get("iterations", 100),
+        "ucb_c": dec_mcts_cfg.get("ucb_c", 1.4),
+        "discount_factor": dec_mcts_cfg.get("discount_factor", 0.95),
+        "overlap_penalty_weight": dec_mcts_cfg.get("overlap_penalty_weight", 0.3),
+        "timeout": dec_mcts_cfg.get("timeout", 5.0),
+        "parallel": dec_mcts_cfg.get("parallel", 1),
+    }
+
+    # Build multi_agent (legacy format)
+    agents = config.get("agents", {})
+    belief_cfg = config.get("belief", {})
+    lbp = belief_cfg.get("lbp", {})
+
+    # Resolve pairwise_potential from type
+    pairwise_type = lbp.get("pairwise_potential_type", "equal")
+    pairwise_potential = get_pairwise_potential(pairwise_type)
+
+    result["multi_agent"] = {
+        "num_agents": agents.get("num_agents", 4),
+        "enable_coordination": True,
+        "belief_fusion": belief_cfg.get("fusion_enabled", True),
+        "fusion_method": belief_cfg.get("fusion_method", "lbp"),
+        "use_lbp": lbp.get("enabled", True),
+        "lbp_iterations": lbp.get("iterations", 1),
+        "news_mode": belief_cfg.get("news_mode", "BM"),
+        "pairwise_potential_type": pairwise_type,
+        "pairwise_potential": pairwise_potential,
+        "region_allocation": "auction",
+        "communication_range": agents.get("communication_range", -1),
+        "collision_avoidance_distance": agents.get("collision_avoidance_distance", 5.0),
+        "belief_fusion_weight": 0.7,
+        "coordination_frequency": 5,
+    }
+
+    # Build decentralized (legacy format for decentralized_agent.py)
+    dec = config.get("decentralized", {})
+    sharing = dec.get("sharing", {})
+    comm = dec.get("communication", {})
+    coord = dec.get("coordination", {})
+    d_uct_cfg = coord.get("d_uct", {})
+
+    result["decentralized"] = {
+        "enable_belief_fusion": sharing.get("belief_fusion", True),
+        "enable_llp_intent_sharing": sharing.get("llp_intent", True),
+        "enable_hlp_intent_sharing": sharing.get("hlp_intent", True),
+        "enable_position_sharing": sharing.get("position", True),
+        "news_mode": belief_cfg.get("news_mode", "BM"),
+        "intent_horizon": coord.get("intent_horizon", 5),
+        "intent_discount": coord.get("intent_discount", 0.8),
+        "overlap_penalty_weight": coord.get("overlap_penalty_weight", 0.3),
+        "stale_message_threshold": comm.get("stale_threshold_sec", 10.0),
+        "message_queue_size": comm.get("message_queue_size", 100),
+        "message_delay": comm.get("message_delay_sec", 0.0),
+        "drop_probability": comm.get("drop_probability", 0.0),
+        # D-UCT settings
+        "d_uct_enabled": d_uct_cfg.get("enabled", True),
+        "d_uct_decay_factor": d_uct_cfg.get("decay_factor", 0.9),
+        "d_uct_stale_threshold": d_uct_cfg.get("stale_intent_threshold_sec", 2.0),
+    }
+    # Also provide flattened access for simpler code
+    result["use_lbp"] = lbp.get("enabled", True)
+    result["lbp_iterations"] = lbp.get("iterations", 1)
+    result["communication_range"] = agents.get("communication_range", -1)
+
+    logger.debug("Converted v2.0 config to legacy format")
+
+    return result
+
+
+def get_config_section(config: Dict[str, Any], section: str) -> Dict[str, Any]:
+    """
+    Get a specific section from the config.
+
+    Works with both new and legacy formats.
+
+    Args:
+        config: Full configuration dict
+        section: Section name (e.g., 'simulation', 'planner', 'decentralized')
+
+    Returns:
+        Section configuration dict
+    """
+    return config.get(section, {})
+
+
+def get_decentralized_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Get decentralized agent configuration.
+
+    Handles both new nested format and legacy flat format.
+
+    Args:
+        config: Full configuration dict
+
+    Returns:
+        Decentralized configuration with flat keys for agent initialization
+    """
+    dec = config.get("decentralized", {})
+
+    # If already in flat format (legacy), return as-is
+    if "enable_belief_fusion" in dec:
+        return dec
+
+    # Convert from nested format
+    sharing = dec.get("sharing", {})
+    comm = dec.get("communication", {})
+    coord = dec.get("coordination", {})
+
+    return {
+        "enable_belief_fusion": sharing.get("belief_fusion", True),
+        "enable_llp_intent_sharing": sharing.get("llp_intent", True),
+        "enable_hlp_intent_sharing": sharing.get("hlp_intent", True),
+        "enable_position_sharing": sharing.get("position", True),
+        "intent_horizon": coord.get("intent_horizon", 5),
+        "overlap_penalty_weight": coord.get("overlap_penalty_weight", 0.3),
+        "stale_message_threshold": comm.get("stale_threshold_sec", 10.0),
+        "message_queue_size": comm.get("message_queue_size", 100),
+        "message_delay": comm.get("message_delay_sec", 0.0),
+        "drop_probability": comm.get("drop_probability", 0.0),
+    }
+
+
+def print_config_summary(config: Dict[str, Any]) -> None:
+    """Print a summary of the configuration."""
+    print("\n" + "=" * 60)
+    print("CONFIGURATION SUMMARY")
+    print("=" * 60)
+
+    # Simulation
+    sim = config.get("simulation", {})
+    print(f"\n[Simulation]")
+    print(f"  Field type: {config.get('field_type', sim.get('field_type', 'N/A'))}")
+    print(
+        f"  Start position: {config.get('start_position', sim.get('start_position', 'N/A'))}"
+    )
+    print(f"  Steps: {config.get('n_steps', sim.get('num_steps', 'N/A'))}")
+
+    # Strategy
+    print(f"\n[Strategy]")
+    print(f"  Type: {config.get('action_strategy', 'N/A')}")
+
+    # Agents
+    agents = config.get("agents", {})
+    multi = config.get("multi_agent", {})
+    print(f"\n[Agents]")
+    print(f"  Number: {multi.get('num_agents', agents.get('num_agents', 'N/A'))}")
+    print(
+        f"  Communication range: {multi.get('communication_range', agents.get('communication_range', 'N/A'))}"
+    )
+
+    # Decentralized
+    dec = config.get("decentralized", {})
+    sharing = dec.get("sharing", dec)  # Handle both formats
+    print(f"\n[Decentralized Sharing]")
+    print(
+        f"  Belief fusion: {sharing.get('belief_fusion', sharing.get('enable_belief_fusion', 'N/A'))}"
+    )
+    print(
+        f"  LLP intent: {sharing.get('llp_intent', sharing.get('enable_llp_intent_sharing', 'N/A'))}"
+    )
+    print(
+        f"  HLP intent: {sharing.get('hlp_intent', sharing.get('enable_hlp_intent_sharing', 'N/A'))}"
+    )
+    print(
+        f"  Position: {sharing.get('position', sharing.get('enable_position_sharing', 'N/A'))}"
+    )
+
+    print("\n" + "=" * 60 + "\n")

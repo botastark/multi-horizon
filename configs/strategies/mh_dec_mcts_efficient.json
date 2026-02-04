@@ -1,0 +1,50 @@
+{
+  "_comment": "Strategy 4: MH-Dec-MCTS (efficient) - Hierarchical with LLP using random rollout",
+  "_description": "Optimized hierarchical: HLP uses MCTS, LLP uses random rollout sampling",
+  
+  "action_strategy": "mh_dec_mcts",
+  
+  "hierarchical_dec_mcts": {
+    "use_mcts_llp": false,
+    
+    "llp": {
+      "_comment": "Low-Level Planner - tactical action selection with random rollout",
+      "horizon": 3,
+      "iterations": 50,
+      "discount_factor": 0.95
+    },
+    
+    "hlp": {
+      "_comment": "High-Level Planner - strategic region allocation with MCTS tree search",
+      "horizon": 10,
+      "iterations": 30,
+      "ucb_c": 1.0,
+      "discount_factor": 0.98,
+      "tile_size": [50, 50],
+      "replan_interval": 1.0
+    },
+    
+    "intent_sharing": {
+      "ll_broadcast_interval": 0.1,
+      "hl_broadcast_interval": 0.5,
+      "max_history": 10
+    }
+  },
+  
+  "decentralized": {
+    "overlap_penalty_weight": 0.3
+  },
+  
+  "experiment": {
+    "name": "mh_dec_mcts_efficient_benchmark",
+    "log_dir_suffix": "mh_dec_mcts_efficient",
+    "strategy_metrics": [
+      "llp_iterations",
+      "llp_planning_time_ms",
+      "hlp_iterations",
+      "hlp_planning_time_ms",
+      "ll_intents_sent",
+      "hl_intents_sent"
+    ]
+  }
+}
