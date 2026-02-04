@@ -284,12 +284,14 @@ class FastLogger:
         num_agents=1,
         iteration=None,
         news_mode=None,
+        use_hierarchical_timing=False,
     ):
         os.makedirs(log_folder, exist_ok=True)
         self.path = os.path.join(log_folder, filename)
         self._f = open(self.path, "a", buffering=1)
         self.multi_agent = multi_agent
         self.num_agents = num_agents
+        self._use_hierarchical_timing = use_hierarchical_timing
 
         # Header
         self._w(f"[{_dt.datetime.now().isoformat(timespec='seconds')}]\n")
@@ -351,8 +353,9 @@ class FastLogger:
 
         # Table header - different format for multi-agent
         if multi_agent:
+            # All planners: no timing columns (see timestamps.csv files)
             self._w(
-                "Step\tEntropy\tMSE\tCoverage\tHeights\tActions\tIGs\tPlanningTimes\tHLP_Times\tLLP_Times\tHLP_Replans\n"
+                f"{'Step':<6}{'Entropy':<12}{'MSE':<10}{'Coverage':<10}{'Heights':<30}{'Actions':<35}{'IGs':<45}\n"
             )
             self._w("-" * 180 + "\n")
         else:
@@ -429,40 +432,14 @@ class FastLogger:
         mse_s = f"{float(mse):<8.3f}"
         cov_s = f"{float(coverage):<8.4f}"
 
-        # Format per-agent lists
+        # Format per-agent lists with consistent width
         h_list = "[" + ", ".join(f"{h:.1f}" for h in heights) + "]"
         act_list = "[" + ", ".join(str(a) if a else "-" for a in actions) + "]"
         ig_list = "[" + ", ".join(f"{ig:.4f}" if ig else "-" for ig in igs) + "]"
 
-        if planning_times is not None:
-            pt_list = (
-                "["
-                + ", ".join(
-                    f"{pt:.2f}" if pt is not None else "-" for pt in planning_times
-                )
-                + "]"
-            )
-        else:
-            pt_list = "[-]"
-        
-        # HLP/LLP timing breakdown (only for MH-Dec-MCTS)
-        if hlp_times is not None:
-            hlp_list = "[" + ", ".join(f"{t:.2f}" if t is not None else "-" for t in hlp_times) + "]"
-        else:
-            hlp_list = "[-]"
-        
-        if llp_times is not None:
-            llp_list = "[" + ", ".join(f"{t:.2f}" if t is not None else "-" for t in llp_times) + "]"
-        else:
-            llp_list = "[-]"
-        
-        if hlp_replans is not None:
-            rep_list = "[" + ", ".join(str(int(r)) if r is not None else "-" for r in hlp_replans) + "]"
-        else:
-            rep_list = "[-]"
-
+        # Write log entry (no timing columns - see timestamps.csv files)
         self._w(
-            f"{step_s}\t{ent_s}\t{mse_s}\t{cov_s}\t{h_list}\t{act_list}\t{ig_list}\t{pt_list}\t{hlp_list}\t{llp_list}\t{rep_list}\n"
+            f"{step_s:<6}{ent_s:<12}{mse_s:<10}{cov_s:<10}{h_list:<30}{act_list:<35}{ig_list:<45}\n"
         )
 
     def close(self):

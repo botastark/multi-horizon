@@ -534,7 +534,7 @@ class DecMCTSPlanner:
         Returns:
             DecMCTSIntent with planned trajectory
         """
-        start_time = time.time()
+        start_time = time.perf_counter()  # High-resolution timer
 
         # Build initial state
         uav_pos = uav_position((self.position, self.altitude))
@@ -559,7 +559,7 @@ class DecMCTSPlanner:
         max_iterations = self.config["iterations"]
 
         while iterations < max_iterations:
-            if time.time() - start_time >= timeout:
+            if time.perf_counter() - start_time >= timeout:
                 break
 
             # Selection
@@ -577,6 +577,8 @@ class DecMCTSPlanner:
 
             iterations += 1
 
+        end_time = time.perf_counter()
+        
         # Extract best action and trajectory
         best_action, action_values = self._extract_best_action(root)
         trajectory = self._extract_trajectory(root)
@@ -591,10 +593,13 @@ class DecMCTSPlanner:
         intent = self._build_intent(best_action, trajectory)
         self.current_intent = intent
 
-        # Update stats
-        planning_time = time.time() - start_time
+        # Update stats with timestamps
+        planning_time = end_time - start_time
         self._stats["plans_generated"] += 1
         self._stats["total_iterations"] += iterations
+        self._stats["last_planning_time_ms"] = planning_time * 1000.0
+        self._stats["last_start_ms"] = start_time * 1000.0
+        self._stats["last_end_ms"] = end_time * 1000.0
         n = self._stats["plans_generated"]
         self._stats["avg_planning_time"] = (
             self._stats["avg_planning_time"] * (n - 1) + planning_time

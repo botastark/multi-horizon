@@ -1778,12 +1778,13 @@ class HierarchicalDecMCTSPlanner:
             self._current_position[1],
             self.camera.grid.center,
         )
-        hlp_start_time = time.time()
+        hlp_start_time = time.perf_counter()
         hlp_last_replan_before = (
             self.hlp._last_replan_time
         )  # Save timestamp before planning
         hl_intent = self.hlp.plan((grid_pos[0], grid_pos[1]))
-        hlp_time_ms = (time.time() - hlp_start_time) * 1000.0
+        hlp_end_time = time.perf_counter()
+        hlp_time_ms = (hlp_end_time - hlp_start_time) * 1000.0
         # Check if HLP actually ran MCTS (timestamp changed)
         hlp_replanned = self.hlp._last_replan_time != hlp_last_replan_before
 
@@ -1806,9 +1807,10 @@ class HierarchicalDecMCTSPlanner:
             self._current_position[1],
             self._current_altitude,
         )
-        llp_start_time = time.time()
+        llp_start_time = time.perf_counter()
         ll_intent = self.llp.plan(current_state)
-        llp_time_ms = (time.time() - llp_start_time) * 1000.0
+        llp_end_time = time.perf_counter()
+        llp_time_ms = (llp_end_time - llp_start_time) * 1000.0
 
         # Step 5: Broadcast intents
         self.intent_bus.broadcast_ll_intent(ll_intent)
@@ -1845,6 +1847,10 @@ class HierarchicalDecMCTSPlanner:
             # Timing breakdown
             "hlp_time_ms": hlp_time_ms,
             "llp_time_ms": llp_time_ms,
+            "hlp_start_ms": hlp_start_time * 1000.0,
+            "hlp_end_ms": hlp_end_time * 1000.0,
+            "llp_start_ms": llp_start_time * 1000.0,
+            "llp_end_ms": llp_end_time * 1000.0,
             "hlp_replanned": hlp_replanned,
             # Detailed scoring for logging
             "mcts_action_values": mcts_action_values,  # MCTS rollout values (actual decision basis)
@@ -1902,6 +1908,10 @@ class HierarchicalDecMCTSPlanner:
         # Add timing breakdown as special keys (prefixed with _timing_)
         action_scores["_timing_hlp_ms"] = metrics.get("hlp_time_ms", 0.0)
         action_scores["_timing_llp_ms"] = metrics.get("llp_time_ms", 0.0)
+        action_scores["_timing_hlp_start_ms"] = metrics.get("hlp_start_ms")
+        action_scores["_timing_hlp_end_ms"] = metrics.get("hlp_end_ms")
+        action_scores["_timing_llp_start_ms"] = metrics.get("llp_start_ms")
+        action_scores["_timing_llp_end_ms"] = metrics.get("llp_end_ms")
         action_scores["_timing_hlp_replanned"] = (
             1.0 if metrics.get("hlp_replanned", False) else 0.0
         )

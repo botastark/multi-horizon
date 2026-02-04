@@ -313,6 +313,10 @@ def run_multi_agent_experiment(
     if ENABLE_LOGGING:
         log_folder = os.path.join(results_folder, "txt")
         init_positions = [agent["uav_pos"] for agent in agents]
+        
+        # Determine if hierarchical timing columns are needed
+        use_hierarchical_timing = action_strategy in ("hierarchical_dec_mcts", "mh_dec_mcts", "mh_dec_mcts_both", "mh_dec_mcts_full", "mh_dec_mcts_efficient")
+        
         multi_agent_logger = FastLogger(
             log_folder,
             strategy=action_strategy,
@@ -327,6 +331,7 @@ def run_multi_agent_experiment(
             filename="run.log",
             multi_agent=True,
             news_mode=news_mode,
+            use_hierarchical_timing=use_hierarchical_timing,
             header_extras=[
                 ("mcts_params", json.dumps(mcts_params, sort_keys=True)),
             ],
