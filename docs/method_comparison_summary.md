@@ -82,12 +82,12 @@ Summary of the **four baselines** used for method comparison, representing an in
 
 The four baselines represent an **incremental progression** in planning sophistication:
 
-| Baseline | Planning Type | Lookahead | Search Method | Computational Cost |
-|----------|---------------|-----------|---------------|-------------------|
-| 1. Greedy IG | None | 1 step | Enumerate actions | Lowest (~7 evals) |
-| 2. Dec-MCTS | Single-level | 10 steps | UCB tree search | Medium (~1000 sims) |
-| 3. MH-Dec-MCTS | Hierarchical | HLP: 10 regions<br>LLP: 3 steps | HLP: UCB tree<br>LLP: **UCB tree** | Highest (~450 sims, highest quality) |
-| 4. MH-Dec-MCTS (efficient) | Hierarchical | HLP: 10 regions<br>LLP: 3 steps | HLP: UCB tree<br>LLP: **Random rollout** | High (~450 sims, reduced cost) |
+| Baseline | Planning Type | Lookahead | Search Method | Relative Complexity |
+|----------|---------------|-----------|---------------|---------------------|
+| 1. Greedy IG | None | 1 step | Enumerate actions | Lowest |
+| 2. Dec-MCTS | Single-level | Multi-step | UCB tree search | Medium |
+| 3. MH-Dec-MCTS (full) | Hierarchical | HLP: Multi-region<br>LLP: Multi-step | HLP: MCTS<br>LLP: **MCTS** | Highest |
+| 4. MH-Dec-MCTS (efficient) | Hierarchical | HLP: Multi-region<br>LLP: Multi-step | HLP: MCTS<br>LLP: **Random rollout** | High |
 
 **Design Rationale (3) → (4):**
 - Baseline **(3)** establishes the full hierarchical approach with both planners using MCTS tree search
