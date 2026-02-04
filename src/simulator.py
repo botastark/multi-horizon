@@ -275,11 +275,30 @@ class Simulator:
             agent["coverage"].append(coverage_val)
             agent["height"].append(uav_pos.altitude)
 
-            # Select action
+            # Select action with timing
+            import time
+            start_time = time.time()
             next_action, info_gain_action = planner.select_action(
                 belief_map, agent["uav_positions"]
             )
+            planning_time_ms = (time.time() - start_time) * 1000.0
+            
             agent["info_gain_action"] = info_gain_action
+            
+            # Store planning time
+            if "planning_times" not in agent:
+                agent["planning_times"] = []
+            agent["planning_times"].append(planning_time_ms)
+            
+            # Store HLP/LLP timing breakdown if available (for MH-Dec-MCTS)
+            if "_timing_hlp_ms" in info_gain_action:
+                if "hlp_times" not in agent:
+                    agent["hlp_times"] = []
+                    agent["llp_times"] = []
+                    agent["hlp_replans"] = []
+                agent["hlp_times"].append(info_gain_action["_timing_hlp_ms"])
+                agent["llp_times"].append(info_gain_action["_timing_llp_ms"])
+                agent["hlp_replans"].append(info_gain_action["_timing_hlp_replanned"])
 
             # Apply collision avoidance if enabled
             if self.coordinator and self.coordinator.collision_distance > 0:
@@ -456,6 +475,43 @@ class Simulator:
                 )
                 for agent in self.agents
             ]
+            
+            # Get planning times
+            planning_times = [
+                (
+                    agent["planning_times"][-1]
+                    if "planning_times" in agent and len(agent["planning_times"]) > 0
+                    else None
+                )
+                for agent in self.agents
+            ]
+            
+            # Get HLP/LLP timing breakdown (only for MH-Dec-MCTS)
+            hlp_times = [
+                (
+                    agent["hlp_times"][-1]
+                    if "hlp_times" in agent and len(agent["hlp_times"]) > 0
+                    else None
+                )
+                for agent in self.agents
+            ]
+            llp_times = [
+                (
+                    agent["llp_times"][-1]
+                    if "llp_times" in agent and len(agent["llp_times"]) > 0
+                    else None
+                )
+                for agent in self.agents
+            ]
+            hlp_replans = [
+                (
+                    agent["hlp_replans"][-1]
+                    if "hlp_replans" in agent and len(agent["hlp_replans"]) > 0
+                    else None
+                )
+                for agent in self.agents
+            ]
+            
             self.multi_agent_logger.log_multi_agent_data(
                 entropy=self.fused_entropy_history[-1],
                 mse=self.fused_mse_history[-1],
@@ -464,7 +520,12 @@ class Simulator:
                 actions=actions,
                 igs=igs,
                 step=step,
+                planning_times=planning_times,
+                hlp_times=hlp_times,
+                llp_times=llp_times,
+                hlp_replans=hlp_replans,
             )
+
 
     def _plot_step(self, step, agent_observations):
         if self.enable_stepwise_plotting:

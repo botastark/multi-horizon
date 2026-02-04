@@ -353,11 +353,14 @@ class planning:
         elif self.strategy == "dec_mcts":
             # Use Dec-MCTS planner (single-level MCTS, multi-agent)
             return self.dec_mcts_decision()
-        elif self.strategy == "hierarchical_dec_mcts":
-            # Use Multi-Horizon Dec-MCTS with LLP/HLP hierarchy
+        elif self.strategy in ("hierarchical_dec_mcts", "mh_dec_mcts"):
+            # Use Multi-Horizon Dec-MCTS with LLP/HLP hierarchy (random rollout LLP)
             return self.hierarchical_dec_mcts_decision(visited_x)
+        elif self.strategy == "mh_dec_mcts_both":
+            # Use Multi-Horizon Dec-MCTS with MCTS for both LLP and HLP
+            return self.hierarchical_dec_mcts_decision(visited_x, use_mcts_llp=True)
         elif self.strategy == "ig":
-            # Legacy single-agent IG (backward compatibility)compatibility
+            # Legacy single-agent IG (backward compatibility)
             return self.ig_based(permitted_actions)
 
         # Default fallback to legacy IG
@@ -517,7 +520,7 @@ class planning:
         action = intent.action_sequence[0] if intent.action_sequence else "hover"
         return action, action_scores
 
-    def hierarchical_dec_mcts_decision(self, visited_x):
+    def hierarchical_dec_mcts_decision(self, visited_x, use_mcts_llp=False):
         """
         Run Multi-Horizon Dec-MCTS planning with shared beliefs and intents.
 
@@ -530,6 +533,7 @@ class planning:
 
         Args:
             visited_x: List of visited positions
+            use_mcts_llp: If True, use MCTS tree search for LLP; if False, use random rollouts
 
         Returns:
             Tuple of (selected_action, action_scores)
@@ -577,6 +581,7 @@ class planning:
                     "tile_size", horizon_weights.get("tile_size", [100, 100])
                 ),
                 "hlp_replan_interval": hier_config.get("hlp_replan_interval", 1.0),
+                "use_mcts_llp": use_mcts_llp,
             }
 
             num_agents = 1
@@ -592,12 +597,13 @@ class planning:
                 config=config,
             )
 
+            llp_mode = "MCTS tree search" if use_mcts_llp else "random rollouts"
             print(f"\n[HIERARCHICAL DEC-MCTS] Agent {self.agent_id} initialized")
             print(
-                f"  LLP horizon: {config['llp_horizon']}, iterations: {config['llp_iterations']}"
+                f"  LLP: {llp_mode}, horizon: {config['llp_horizon']}, iterations: {config['llp_iterations']}"
             )
             print(
-                f"  HLP horizon: {config['hlp_horizon']}, tile_size: {config['tile_size']}\n"
+                f"  HLP: MCTS, horizon: {config['hlp_horizon']}, tile_size: {config['tile_size']}\n"
             )
 
         planner = self._hierarchical_planner
@@ -652,6 +658,12 @@ class planning:
         # Ensure current action has a score
         if action not in action_scores:
             action_scores[action] = metrics.get("expected_ig", 0.0)
+        
+        # Add timing breakdown from metrics
+        if "hlp_time_ms" in metrics:
+            action_scores["_timing_hlp_ms"] = metrics["hlp_time_ms"]
+            action_scores["_timing_llp_ms"] = metrics["llp_time_ms"]
+            action_scores["_timing_hlp_replanned"] = 1.0 if metrics.get("hlp_replanned", False) else 0.0
 
         return action, action_scores
 

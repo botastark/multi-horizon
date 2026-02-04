@@ -12,6 +12,14 @@ Dec-MCTS is a single-level MCTS planner with multi-agent coordination:
 - **Intent sharing**: Agents share planned trajectories for coordination
 - **D-UCT discounting**: Handles asynchronous intent staleness
 
+**Coordination Mechanism:**
+Agents avoid redundant coverage by sharing their planned trajectories. Each agent:
+1. Receives teammate intents (planned footprint sequences)
+2. Creates a `teammate_mask` showing which grid cells teammates plan to observe
+3. Applies D-UCT staleness discounting (older intents weighted less)
+4. During MCTS rollouts, applies an `overlap_penalty` to discourage observing cells teammates plan to cover
+5. This creates decentralized coordination without explicit task allocation—agents naturally spread out
+
 **Key Difference from Greedy IG:**
 - Greedy: Evaluates single actions → picks best immediate IG
 - Dec-MCTS: Simulates rollouts → picks action with best cumulative IG
@@ -200,11 +208,18 @@ class DecMCTSIntent:
 
 ## 5. D-UCT Staleness Handling
 
+**Purpose:** Agents share intents to avoid redundant observations, but intents become stale as time passes (agents may have changed plans). D-UCT applies exponential decay to older intents, reducing their influence on planning.
+
 ### 5.1 Teammate Mask Computation
 
 ```python
 def _compute_teammate_mask(self) -> np.ndarray:
-    """Discount teammate footprints based on intent age."""
+    """
+    Discount teammate footprints based on intent age.
+    
+    Creates a 2D mask showing which grid cells teammates plan to observe,
+    weighted by intent freshness. Used to penalize overlap during MCTS rollouts.
+    """
     mask = np.zeros((H, W), dtype=float)
     
     for teammate_id, intent in self._teammate_intents.items():
@@ -219,9 +234,16 @@ def _compute_teammate_mask(self) -> np.ndarray:
         
         # Add discounted footprints
         for footprint in intent.footprint_sequence:
-            mask[imin:imax, jmin:jmax] += discount
+**Purpose:** Reduces the reward for actions that observe cells teammates already plan to cover, encouraging agents to explore different areas and avoid redundant observations.
+
+```python
+def compute_overlap_penalty(self, state, imin, imax, jmin, jmax) -> float:
+    """
+    Penalize overlap with teammate planned footprints.
     
-    return mask
+    This is subtracted from IG reward during rollouts, making actions
+    that overlap with teammate plans less attractive.
+    
 ```
 
 ### 5.2 Overlap Penalty in Rollout

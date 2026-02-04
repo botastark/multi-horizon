@@ -93,13 +93,13 @@ def collect_sample_set(grid):
             while current_shape % win_size != 0:
                 current_shape += 1
             pad_rows = current_shape - rows
-        
+
         if cols % win_size != 0:
             current_shape = cols
             while current_shape % win_size != 0:
                 current_shape += 1
             pad_cols = current_shape - cols
-            
+
         grid = np.pad(grid, ((0, pad_rows), (0, pad_cols)), mode="edge")
         rows, cols = grid.shape
 
@@ -351,8 +351,10 @@ class FastLogger:
 
         # Table header - different format for multi-agent
         if multi_agent:
-            self._w("Step\tEntropy\tMSE\tCoverage\tHeights\tActions\tIGs\n")
-            self._w("-" * 120 + "\n")
+            self._w(
+                "Step\tEntropy\tMSE\tCoverage\tHeights\tActions\tIGs\tPlanningTimes\tHLP_Times\tLLP_Times\tHLP_Replans\n"
+            )
+            self._w("-" * 180 + "\n")
         else:
             self._w("Step   Entropy      MSE        Height   Coverage   Action    IG\n")
             self._w(
@@ -398,6 +400,10 @@ class FastLogger:
         actions,
         igs,
         step=None,
+        planning_times=None,
+        hlp_times=None,
+        llp_times=None,
+        hlp_replans=None,
     ):
         """
         Log multi-agent data with common metrics and per-agent lists.
@@ -410,6 +416,10 @@ class FastLogger:
             actions: List of actions per agent [a0, a1, ...]
             igs: List of info gains per agent [ig0, ig1, ...]
             step: Step number
+            planning_times: List of planning times in ms per agent [t0, t1, ...]
+            hlp_times: List of HLP times in ms per agent (MH-Dec-MCTS only)
+            llp_times: List of LLP times in ms per agent (MH-Dec-MCTS only)
+            hlp_replans: List of HLP replan flags per agent (1=replanned, 0=cached)
         """
         try:
             step_s = f"{step:<5d}" if step is not None else "-    "
@@ -424,8 +434,35 @@ class FastLogger:
         act_list = "[" + ", ".join(str(a) if a else "-" for a in actions) + "]"
         ig_list = "[" + ", ".join(f"{ig:.4f}" if ig else "-" for ig in igs) + "]"
 
+        if planning_times is not None:
+            pt_list = (
+                "["
+                + ", ".join(
+                    f"{pt:.2f}" if pt is not None else "-" for pt in planning_times
+                )
+                + "]"
+            )
+        else:
+            pt_list = "[-]"
+        
+        # HLP/LLP timing breakdown (only for MH-Dec-MCTS)
+        if hlp_times is not None:
+            hlp_list = "[" + ", ".join(f"{t:.2f}" if t is not None else "-" for t in hlp_times) + "]"
+        else:
+            hlp_list = "[-]"
+        
+        if llp_times is not None:
+            llp_list = "[" + ", ".join(f"{t:.2f}" if t is not None else "-" for t in llp_times) + "]"
+        else:
+            llp_list = "[-]"
+        
+        if hlp_replans is not None:
+            rep_list = "[" + ", ".join(str(int(r)) if r is not None else "-" for r in hlp_replans) + "]"
+        else:
+            rep_list = "[-]"
+
         self._w(
-            f"{step_s}\t{ent_s}\t{mse_s}\t{cov_s}\t{h_list}\t{act_list}\t{ig_list}\n"
+            f"{step_s}\t{ent_s}\t{mse_s}\t{cov_s}\t{h_list}\t{act_list}\t{ig_list}\t{pt_list}\t{hlp_list}\t{llp_list}\t{rep_list}\n"
         )
 
     def close(self):

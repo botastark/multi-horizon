@@ -10,7 +10,9 @@ Decentralised Monte Carlo Tree Search" with:
 
 2. Two-Level Planning:
    - LLP (Low-Level Planner): Short-horizon, detailed motion planning, IG-based reward
-   - HLP (High-Level Planner): Long-horizon, region/cluster allocation
+     * Option A: Random rollout sampling (default, use_mcts_llp=False)
+     * Option B: MCTS tree search (use_mcts_llp=True)
+   - HLP (High-Level Planner): Long-horizon, region/cluster allocation (MCTS-based)
 
 3. Intent Sharing:
    - LL-intent: Detailed short-horizon motion plan (primitive actions + footprints)
@@ -24,6 +26,12 @@ Decentralised Monte Carlo Tree Search" with:
 5. Asynchronous Operation:
    - Both planners run independently with continuous intent exchange
    - D-UCT style discounting for handling asynchronous drift
+
+Baseline Comparison:
+   1. Greedy IG: Single-step lookahead, no planning
+   2. Dec-MCTS: Single-level MCTS, no hierarchical structure
+   3. MH Dec-MCTS (use_mcts_llp=False): HLP uses MCTS, LLP uses random rollouts
+   4. MH Dec-MCTS Both (use_mcts_llp=True): Both HLP and LLP use MCTS tree search
 """
 
 import time
@@ -401,6 +409,7 @@ class LowLevelPlanner:
         ucb_c: float = 1.41,
         discount: float = 0.95,
         intent_discount: float = 0.8,  # Discount for teammate intent influence
+        use_mcts_llp: bool = False,  # Use MCTS for LLP instead of random rollouts
     ):
         """
         Initialize LLP.
@@ -414,6 +423,7 @@ class LowLevelPlanner:
             ucb_c: UCB exploration constant
             discount: Reward discount factor
             intent_discount: Discount for teammate intent cells
+            use_mcts_llp: If True, use MCTS tree search for LLP; if False, use random rollouts
         """
         self.agent_id = agent_id
         self.camera = camera
@@ -423,6 +433,7 @@ class LowLevelPlanner:
         self.ucb_c = ucb_c
         self.discount = discount
         self.intent_discount = intent_discount
+        self.use_mcts_llp = use_mcts_llp
 
         # Current belief map
         self.belief: Optional[np.ndarray] = None
@@ -743,6 +754,148 @@ class LowLevelPlanner:
 
         return total_reward, state_sequence, footprint_sequence, ig_sequence
 
+    def _mcts_tree_search(
+        self,
+        current_state: Tuple[float, float, float],
+        coverage_discount: np.ndarray,
+    ) -> Tuple[List[str], float, List[Tuple], List[Tuple], List[float]]:
+        """
+        MCTS tree search for LLP action selection.
+
+        Returns:
+            (best_actions, best_reward, best_states, best_footprints, best_igs)
+        """
+        import math
+
+        # MCTS tree node structure: {state_key: {action: {visits, value, children}}}
+        tree = {}
+
+        def state_key(state):
+            """Convert state to hashable key."""
+            return (round(state[0], 2), round(state[1], 2), round(state[2], 2))
+
+        def ucb_score(parent_visits, child_visits, child_value):
+            """UCB1 formula for action selection."""
+            if child_visits == 0:
+                return float("inf")
+            exploitation = child_value / child_visits
+            exploration = self.ucb_c * math.sqrt(math.log(parent_visits) / child_visits)
+            return exploitation + exploration
+
+        def select_action(state_k, depth):
+            """Select action using UCB1."""
+            if state_k not in tree:
+                tree[state_k] = {}
+                return np.random.choice(self.actions)
+
+            node = tree[state_k]
+            if not node or depth >= self.horizon:
+                return np.random.choice(self.actions)
+
+            # Get total visits at this state
+            total_visits = sum(action_data["visits"] for action_data in node.values())
+
+            # Select action with highest UCB score
+            best_action = None
+            best_score = float("-inf")
+            for action in self.actions:
+                if action not in node:
+                    # Unexplored action has infinite value
+                    return action
+                action_data = node[action]
+                score = ucb_score(
+                    total_visits, action_data["visits"], action_data["value"]
+                )
+                if score > best_score:
+                    best_score = score
+                    best_action = action
+
+            return best_action if best_action else np.random.choice(self.actions)
+
+        # Run MCTS iterations
+        best_reward = float("-inf")
+        best_actions = []
+        best_states = []
+        best_footprints = []
+        best_igs = []
+
+        # Save camera state
+        org = self.camera.get_x()
+        original_pos, original_alt = org.position, org.altitude
+
+        for iteration in range(self.num_iterations):
+            # Selection & Expansion & Simulation
+            state = current_state
+            state_k = state_key(state)
+            trajectory_actions = []
+
+            for depth in range(self.horizon):
+                # Select action
+                action = select_action(state_k, depth)
+                trajectory_actions.append(action)
+
+                # Initialize node if needed
+                if state_k not in tree:
+                    tree[state_k] = {}
+                if action not in tree[state_k]:
+                    tree[state_k][action] = {"visits": 0, "value": 0.0}
+
+                # Get next state
+                pos, alt = state[:2], state[2]
+                self.camera.set_position(pos)
+                self.camera.set_altitude(alt)
+                future = self.camera.x_future(action)
+                if future is None:
+                    break
+                next_pos, next_alt = future[0], future[1]
+                state = (next_pos[0], next_pos[1], next_alt)
+                state_k = state_key(state)
+
+            # Evaluate trajectory
+            reward, states, footprints, igs = self._simulate_trajectory(
+                current_state, trajectory_actions, coverage_discount
+            )
+
+            # Backpropagation
+            state = current_state
+            state_k = state_key(state)
+            for action in trajectory_actions:
+                if state_k in tree and action in tree[state_k]:
+                    tree[state_k][action]["visits"] += 1
+                    tree[state_k][action]["value"] += reward
+
+                # Move to next state
+                pos, alt = state[:2], state[2]
+                self.camera.set_position(pos)
+                self.camera.set_altitude(alt)
+                future = self.camera.x_future(action)
+                if future is None:
+                    break
+                next_pos, next_alt = future[0], future[1]
+                state = (next_pos[0], next_pos[1], next_alt)
+                state_k = state_key(state)
+
+            # Track best trajectory
+            if reward > best_reward:
+                best_reward = reward
+                best_actions = trajectory_actions
+                best_states = states
+                best_footprints = footprints
+                best_igs = igs
+
+        # Restore camera state
+        self.camera.set_position(original_pos)
+        self.camera.set_altitude(original_alt)
+
+        # Update MCTS action values for logging
+        root_key = state_key(current_state)
+        if root_key in tree:
+            for action, data in tree[root_key].items():
+                if data["visits"] > 0:
+                    self._mcts_action_values[action] = data["value"] / data["visits"]
+
+        return best_actions, best_reward, best_states, best_footprints, best_igs
+
     def plan(self, current_state: Tuple[float, float, float]) -> LLIntent:
         """
         Run MCTS planning and generate LL intent.
@@ -760,44 +913,45 @@ class LowLevelPlanner:
         # Compute teammate coverage discount
         coverage_discount = self._compute_teammate_coverage_mask()
 
-        # Track per-action scores for logging
-        self._action_scores = {}  # IG scores (single-step)
+        # Track MCTS action values for logging
         self._mcts_action_values = {
             action: float("-inf") for action in self.actions
         }  # Best rollout value per first action
 
-        # Simple MCTS: evaluate random rollouts and pick best
-        best_reward = float("-inf")
-        best_actions = []
-        best_states = []
-        best_footprints = []
-        best_igs = []
-
-        # First, compute single-step scores for each action (for reference)
-        for action in self.actions:
-            ig = self._evaluate_single_action(current_state, action, coverage_discount)
-            self._action_scores[action] = ig
-
-        for _ in range(self.num_iterations):
-            # Random action sequence
-            actions = [np.random.choice(self.actions) for _ in range(self.horizon)]
-
-            # Simulate and evaluate
-            reward, states, footprints, igs = self._simulate_trajectory(
-                current_state, actions, coverage_discount
+        # Choose planning method based on configuration
+        if self.use_mcts_llp:
+            # MCTS tree search for LLP
+            best_actions, best_reward, best_states, best_footprints, best_igs = (
+                self._mcts_tree_search(current_state, coverage_discount)
             )
+        else:
+            # Random rollout sampling (original approach)
+            best_reward = float("-inf")
+            best_actions = []
+            best_states = []
+            best_footprints = []
+            best_igs = []
 
-            # Track best rollout value for each first action (this is what MCTS actually uses)
-            first_action = actions[0]
-            if reward > self._mcts_action_values[first_action]:
-                self._mcts_action_values[first_action] = reward
+            for _ in range(self.num_iterations):
+                # Random action sequence
+                actions = [np.random.choice(self.actions) for _ in range(self.horizon)]
 
-            if reward > best_reward:
-                best_reward = reward
-                best_actions = actions
-                best_states = states
-                best_footprints = footprints
-                best_igs = igs
+                # Simulate and evaluate
+                reward, states, footprints, igs = self._simulate_trajectory(
+                    current_state, actions, coverage_discount
+                )
+
+                # Track best rollout value for each first action
+                first_action = actions[0]
+                if reward > self._mcts_action_values[first_action]:
+                    self._mcts_action_values[first_action] = reward
+
+                if reward > best_reward:
+                    best_reward = reward
+                    best_actions = actions
+                    best_states = states
+                    best_footprints = footprints
+                    best_igs = igs
 
         # Create intent
         intent = LLIntent(
@@ -1481,6 +1635,7 @@ class HierarchicalDecMCTSPlanner:
         hlp_iterations: int = 50,
         tile_size: Tuple[int, int] = (100, 100),
         hlp_replan_interval: float = 1.0,
+        use_mcts_llp: bool = False,
     ):
         """
         Initialize hierarchical planner.
@@ -1497,6 +1652,7 @@ class HierarchicalDecMCTSPlanner:
             hlp_iterations: HLP MCTS iterations
             tile_size: Region tile size for HLP
             hlp_replan_interval: Minimum time between HLP replans
+            use_mcts_llp: If True, use MCTS tree search for LLP; if False, use random rollouts
         """
         self.agent_id = agent_id
         self.num_agents = num_agents
@@ -1511,6 +1667,7 @@ class HierarchicalDecMCTSPlanner:
             grid_info=grid_info,
             horizon=llp_horizon,
             num_iterations=llp_iterations,
+            use_mcts_llp=use_mcts_llp,
         )
 
         # Create HLP
@@ -1606,20 +1763,29 @@ class HierarchicalDecMCTSPlanner:
         Returns:
             (best_action, metrics_dict)
         """
+        import time
+
         if self._current_position is None:
             return "hover", {}
 
         # Step 1: Receive teammate intents
         self.receive_intents()
 
-        # Step 2: Run HLP
+        # Step 2: Run HLP with timing
         # Convert position to grid coordinates for HLP
         grid_pos = self.camera.convert_xy_ij(
             self._current_position[0],
             self._current_position[1],
             self.camera.grid.center,
         )
+        hlp_start_time = time.time()
+        hlp_last_replan_before = (
+            self.hlp._last_replan_time
+        )  # Save timestamp before planning
         hl_intent = self.hlp.plan((grid_pos[0], grid_pos[1]))
+        hlp_time_ms = (time.time() - hlp_start_time) * 1000.0
+        # Check if HLP actually ran MCTS (timestamp changed)
+        hlp_replanned = self.hlp._last_replan_time != hlp_last_replan_before
 
         # Step 3: Update LLP with HLP guidance
         # Convert target_center from grid coords to world coords for LLP
@@ -1634,13 +1800,15 @@ class HierarchicalDecMCTSPlanner:
         else:
             self.llp.update_hl_guidance(hl_intent)
 
-        # Step 4: Run LLP
+        # Step 4: Run LLP with timing
         current_state = (
             self._current_position[0],
             self._current_position[1],
             self._current_altitude,
         )
+        llp_start_time = time.time()
         ll_intent = self.llp.plan(current_state)
+        llp_time_ms = (time.time() - llp_start_time) * 1000.0
 
         # Step 5: Broadcast intents
         self.intent_bus.broadcast_ll_intent(ll_intent)
@@ -1652,7 +1820,6 @@ class HierarchicalDecMCTSPlanner:
         best_action = self.llp.get_best_action()
 
         # Collect detailed scoring info for logging
-        llp_action_scores = getattr(self.llp, "_action_scores", {})
         mcts_action_values = getattr(self.llp, "_mcts_action_values", {})
         hlp_region_scores = dict(self.hlp._region_coverage)
 
@@ -1675,8 +1842,11 @@ class HierarchicalDecMCTSPlanner:
             "hl_value": hl_intent.value,
             "target_region": hl_intent.current_target_region,
             "expected_ig": ll_intent.total_expected_ig,
+            # Timing breakdown
+            "hlp_time_ms": hlp_time_ms,
+            "llp_time_ms": llp_time_ms,
+            "hlp_replanned": hlp_replanned,
             # Detailed scoring for logging
-            "llp_action_scores": llp_action_scores,  # Single-step IG (g1 only)
             "mcts_action_values": mcts_action_values,  # MCTS rollout values (actual decision basis)
             "hlp_region_scores": hlp_region_scores,
             "intents_received": intents_received,
@@ -1728,6 +1898,13 @@ class HierarchicalDecMCTSPlanner:
         for act in self.llp.actions:
             if act not in action_scores:
                 action_scores[act] = 0.0
+
+        # Add timing breakdown as special keys (prefixed with _timing_)
+        action_scores["_timing_hlp_ms"] = metrics.get("hlp_time_ms", 0.0)
+        action_scores["_timing_llp_ms"] = metrics.get("llp_time_ms", 0.0)
+        action_scores["_timing_hlp_replanned"] = (
+            1.0 if metrics.get("hlp_replanned", False) else 0.0
+        )
 
         return action, action_scores
 
@@ -1781,6 +1958,7 @@ def create_hierarchical_planner(
     hlp_iterations = config.get("hlp_iterations", 50)
     tile_size = tuple(config.get("tile_size", [100, 100]))
     hlp_replan_interval = config.get("hlp_replan_interval", 1.0)
+    use_mcts_llp = config.get("use_mcts_llp", False)
 
     return HierarchicalDecMCTSPlanner(
         agent_id=agent_id,
@@ -1794,4 +1972,5 @@ def create_hierarchical_planner(
         hlp_iterations=hlp_iterations,
         tile_size=tile_size,
         hlp_replan_interval=hlp_replan_interval,
+        use_mcts_llp=use_mcts_llp,
     )
