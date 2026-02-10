@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+"""
+Module for Field representation - supports both Gaussian random fields and orthomosaics.
+Note: "ortomap" terminology used throughout refers to "orthomosaic" (georeferenced mosaic of aerial images).
+"""
 import pickle
 import random
 import sys
@@ -69,48 +73,6 @@ class ImageSampler:
         blurred = image.filter(ImageFilter.GaussianBlur(radius=blur_radius))
         return blurred.resize(target_size, Image.LANCZOS)
 
-    # def simulate_higher_altitude(
-    #     self,
-    #     image,
-    #     target_altitude,
-    #     original_altitude=20,
-    #     base_blur_radius=2,
-    #     base_noise_std=20,
-    #     base_contrast_factor=0.8,
-    #     base_brightness_factor=1.1,
-    # ):
-    #     """
-    #     Simulate the effect of capturing an image from a higher altitude.
-    #     Applies downsampling, blur, noise, and contrast/brightness adjustments.
-    #     """
-    #     altitude_ratio = target_altitude / original_altitude
-    #     width, height = image.size
-    #     downsample_factor = max(1, int(round(altitude_ratio)))
-    #     new_size = (width // downsample_factor, height // downsample_factor)
-    #     downsampled = image.resize(new_size, Image.BILINEAR)
-
-    #     # Apply altitude-scaled Gaussian blur
-    #     blur_radius = base_blur_radius * altitude_ratio
-    #     blurred = downsampled.filter(ImageFilter.GaussianBlur(radius=blur_radius))
-
-    #     # Add noise scaled with altitude ratio
-    #     noise_std = base_noise_std * altitude_ratio
-    #     noisy_arr = np.array(blurred).astype(np.float32)
-    #     noise = np.random.normal(0, noise_std, noisy_arr.shape).astype(np.float32)
-    #     noisy_arr = np.clip(noisy_arr + noise, 0, 255).astype(np.uint8)
-    #     noisy_image = Image.fromarray(noisy_arr)
-
-    #     # Adjust contrast and brightness
-    #     contrast_factor = base_contrast_factor / altitude_ratio
-    #     brightness_factor = base_brightness_factor * altitude_ratio
-    #     adjusted = Image.eval(
-    #         noisy_image,
-    #         lambda x: np.clip(
-    #             contrast_factor * (x - 128) + 128 * brightness_factor, 0, 255
-    #         ),
-    #     )
-    #     return adjusted.resize((width, height), Image.BILINEAR)
-
     def get_image_at_altitude(self, image, altitude):
         """
         Return an image adjusted to simulate capture at the specified altitude.
@@ -124,7 +86,7 @@ class ImageSampler:
 
 class Field:
     """
-    Class representing a field, either as a Gaussian random field or an orthomap,
+    Class representing a field, either as a Gaussian random field or an orthomosaic,
     with methods for loading data, obtaining observations, and simulating sensor noise.
     """
 
@@ -148,11 +110,11 @@ class Field:
 
         Args:
             grid_info: Grid configuration (attributes: shape, x, y, center, length).
-            field_type: Integer for Gaussian (interpreted as the radius) or "Ortomap" for orthomap.
+            field_type: Integer for Gaussian (interpreted as the radius) or "Ortomap" for orthomosaic.
             cache_dir: Directory for caching predictions.
             seed: Seed for the random generator.
             model_path: Path to the classifier model.
-            ortomap_path: Path to the ortho image.
+            ortomap_path: Path to the orthomosaic image.
             sweep: Strategy ("sweep" for sweeping mode; any other value uses prediction mode).
             a: Coefficient for sensor noise.
             b: Decay factor for sensor noise with altitude.
@@ -260,7 +222,7 @@ class Field:
 
     def _init_ortomap(self):
         """
-        Load the orthomap image, tile information, and annotations.
+        Load the orthomosaic image, tile information, and annotations.
         """
         self.predictor = Predicter(model_weights_path=self.model_path, num_classes=2)
         dataset = gdal.Open(self.ortomap_path)

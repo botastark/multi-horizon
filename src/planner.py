@@ -166,7 +166,7 @@ class planning:
 
         # self.sweep_direction = "LeftRight"
         if self.sweep_direction == "LeftRight":
-            # give propriority to left or right (if one of them is present in sweep_actions, only one can be present at a time)
+            # give priority to left or right (if one of them is present in sweep_actions, only one can be present at a time)
             if "left" in sweep_actions:
                 self.last_action = "left"
             elif "right" in sweep_actions:
@@ -178,7 +178,7 @@ class planning:
             else:
                 self.last_action = "hover"
         if self.sweep_direction == "BackFront":
-            # give propriority to back or front (if one of them is present in sweep_actions, only one can be present at a time)
+            # give priority to back or front (if one of them is present in sweep_actions, only one can be present at a time)
             if "back" in sweep_actions:
                 self.last_action = "back"
             elif "front" in sweep_actions:

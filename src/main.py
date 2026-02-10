@@ -54,7 +54,7 @@ def run_experiment_with_config(config: dict, args):
     # Allow explicit mode label override from strategy-specific config or shared config
     strategy_cfg = config.get(config.get("action_strategy", ""), {})
     explicit_label = strategy_cfg.get("mode_labels", strategy_cfg.get("mode_label"))
-    
+
     # If not in strategy config, check shared config
     if explicit_label is None:
         explicit_label = config.get("mode_labels")
@@ -151,14 +151,17 @@ def run_experiment_with_config(config: dict, args):
             if "multi_agent" not in config:
                 config["multi_agent"] = {}
             config["multi_agent"]["news_mode"] = actual_news_mode
-            
+
             # Limited testing mode: IG_BS uses infinite communication
             if config.get("limited_testing", False) and news_mode == "IG_BS":
-                if "radius_multiplier" in dec_config or config.get("action_strategy") == "greedy_ig":
+                if (
+                    "radius_multiplier" in dec_config
+                    or config.get("action_strategy") == "greedy_ig"
+                ):
                     dec_config["radius_multiplier"] = -1
                 else:
                     dec_config["communication_range"] = -1
-                    
+
         elif news_mode in ["IGd_BS", "IGd_BM"]:
             # IGd with news sharing
             config["decentralized"]["position_sharing"] = True
@@ -167,11 +170,14 @@ def run_experiment_with_config(config: dict, args):
             if "multi_agent" not in config:
                 config["multi_agent"] = {}
             config["multi_agent"]["news_mode"] = actual_news_mode
-            
+
             # Limited testing mode: IGd_BM uses limited communication (3x cluster radius)
             if config.get("limited_testing", False) and news_mode == "IGd_BM":
                 cluster_r = config.get("cluster_radius", 5)
-                if "radius_multiplier" in dec_config or config.get("action_strategy") == "greedy_ig":
+                if (
+                    "radius_multiplier" in dec_config
+                    or config.get("action_strategy") == "greedy_ig"
+                ):
                     dec_config["radius_multiplier"] = 3
                 else:
                     dec_config["communication_range"] = 3 * cluster_r
