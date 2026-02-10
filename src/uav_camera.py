@@ -77,7 +77,7 @@ class Camera:
         # Compute horizontal step size (xy_step) based on overlaps and FoV.
         if f_overlap != None and s_overlap != None:
             # Compute horizontal step size (xy_step) based on overlaps and FoV.
-            theta_w = np.deg2rad(self.fov)  # Horizonatal FoV (radians)
+            theta_w = np.deg2rad(self.fov)  # Horizontal FoV (radians)
             theta_h = np.deg2rad(self.fov)  # Vertical FoV (radians)
 
             # Compute ground footprint dimensions

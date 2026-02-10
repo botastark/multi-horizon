@@ -348,7 +348,7 @@ class MultiAgentMapper:
             read_slice = data["read_slice"](fp_vertices_ij)
             write_slice = data["write_slice"](fp_vertices_ij)
 
-            # elementwise multiplication of msgs from neighbors
+            # element-wise multiplication of msgs from neighbors
             mul_0 = np.prod(1 - self.news_msgs[product_slice], axis=0)
             mul_1 = np.prod(self.news_msgs[product_slice], axis=0)
 

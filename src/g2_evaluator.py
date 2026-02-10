@@ -3,7 +3,7 @@ g2 Evaluator - Mission Completion Time Estimation
 
 Centralized g2() function for MH-Dec-MCTS, used by both HLP and LLP planners.
 
-Paper reference: "Multi-Horizon Multi-Agent Planning Using Decentralised Monte Carlo Tree Search"
+Paper reference: "Multi-Horizon Multi-Agent Planning Using De-centralized Monte Carlo Tree Search"
 Seiler et al., 2024
 
 The reward decomposition is:

@@ -14,7 +14,7 @@ Key Design Principles:
 - Per-neighbor news beliefs (δ_ij) prevent re-fusion of stale information
 - Position sharing enables non-redundant exploration without centralized planning
 
-Reference: "Multi-Horizon Multi-Agent Planning Using Decentralised Monte Carlo Tree Search"
+Reference: "Multi-Horizon Multi-Agent Planning Using De-centralised Monte Carlo Tree Search"
 """
 
 import numpy as np

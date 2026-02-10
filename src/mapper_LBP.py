@@ -252,7 +252,7 @@ class OccupancyMap:
         self.last_observations = z
         if correlation_type is None:
             correlation_type = self.correlation_type
-        
+
         psi = self.pairwise_potential(correlation_type)
 
         # reset msgs and msgs_buffer
@@ -274,7 +274,7 @@ class OccupancyMap:
                 read_slice = data["read_slice"](fp_vertices_ij)
                 write_slice = data["write_slice"](fp_vertices_ij)
 
-                # elementwise multiplication of msgs from neighbors
+                # element-wise multiplication of msgs from neighbors
                 mul_0 = np.prod(1 - self.msgs[product_slice], axis=0)
                 mul_1 = np.prod(self.msgs[product_slice], axis=0)
 
@@ -302,7 +302,7 @@ class OccupancyMap:
         spatial_slice = self.direction_to_slicing_data["left"]["product_slice"](
             fp_vertices_ij
         )
-        
+
         # Select all 5 channels: (0,1,2,3,4)
         # spatial_slice[1] is row slice, spatial_slice[2] is col slice
         msgs_slice = self.msgs[:, spatial_slice[1], spatial_slice[2]]
@@ -319,93 +319,3 @@ class OccupancyMap:
         ) and np.all(
             np.less_equal(self.map_beliefs[product_slice[1], product_slice[2]], 1.0)
         )
-
-    # def update_news_belief_LBP_and_fuse_single(self, zx, zy, z):
-    #     """
-    #     Update and propagate beliefs in `news_map_beliefs` using a single LBP iteration.
-
-    #     Args:
-    #         zx (ndarray): Row indices of the observed patch.
-    #         zy (ndarray): Column indices of the observed patch.
-    #         z (ndarray): Binary sensor values observartions.
-    #     """
-    #     fp_vertices_ij = self.get_indices(zx, zy)
-    #     I, J = 0, 1
-    #     sigma0, sigma1 = self.sigma0, self.sigma1
-
-    #     # Compute observation likelihoods
-    #     likelihood_m_zero = np.where(z == 0, 1 - sigma0, sigma0)
-    #     likelihood_m_one = np.where(z == 0, sigma1, 1 - sigma1)
-
-    #     # Extract prior
-    #     prior = self.news_map_beliefs[
-    #         0,
-    #         0,
-    #         fp_vertices_ij["ul"][I] : fp_vertices_ij["bl"][I],
-    #         fp_vertices_ij["ul"][J] : fp_vertices_ij["ur"][J],
-    #     ]
-
-    #     # Posterior update
-    #     posterior_m_zero = likelihood_m_zero * (1.0 - prior)
-    #     posterior_m_one = likelihood_m_one * prior
-    #     assert np.all(np.greater_equal(posterior_m_one, 0.0))
-    #     posterior_m_one_norm = posterior_m_one / (posterior_m_zero + posterior_m_one)
-    #     assert np.all(np.greater_equal(posterior_m_one_norm, 0.0)) and np.all(
-    #         np.less_equal(posterior_m_one_norm, 1.0)
-    #     )
-
-    #     # Write updated beliefs
-
-    #     self.news_map_beliefs[
-    #         0,
-    #         0,
-    #         fp_vertices_ij["ul"][I] : fp_vertices_ij["bl"][I],
-    #         fp_vertices_ij["ul"][J] : fp_vertices_ij["ur"][J],
-    #     ] = posterior_m_one_norm
-
-    #     # Reset msgs and msgs_buffer
-    #     self.msgs[:] = 0.5
-    #     self.msgs_buffer[:] = 0.5
-    #     # set msgs last channel with current map belief
-    #     self.msgs[4, :, :] = self.news_map_beliefs[0, 0, :, :]
-
-    #     # Run 1-step LBP update
-    #     for direction, data in self.direction_to_slicing_data.items():
-    #         product_slice = data["product_slice"](fp_vertices_ij)
-    #         read_slice = data["read_slice"](fp_vertices_ij)
-    #         write_slice = data["write_slice"](fp_vertices_ij)
-
-    #         # elementwise multiplication of msgs
-    #         mul_0 = np.prod(1 - self.msgs[product_slice], axis=0)
-    #         mul_1 = np.prod(self.msgs[product_slice], axis=0)
-    #         psi = self.pairwise_potential(self.correlation_type)
-
-    #         # matrix-vector multiplication (factor-msg)
-    #         msg_0 = psi[0, 0] * mul_0 + psi[0, 1] * mul_1
-    #         msg_1 = psi[1, 0] * mul_0 + psi[1, 1] * mul_1
-    #         # normalize the first coordinate of the msg
-    #         norm_msg_1 = msg_1 / (msg_0 + msg_1)
-
-    #         # buffering
-    #         self.msgs_buffer[write_slice] = norm_msg_1[read_slice]
-    #     self.msgs[:4, :, :] = self.msgs_buffer[:4, :, :]
-
-    #     # Belief update
-    #     bel_0 = np.prod(1 - self.msgs[:, product_slice[1], product_slice[2]], axis=0)
-    #     bel_1 = np.prod(self.msgs[:, product_slice[1], product_slice[2]], axis=0)
-
-    #     self.news_map_beliefs[0, 0, product_slice[1], product_slice[2]] = bel_1 / (
-    #         bel_0 + bel_1
-    #     )
-
-    #     assert np.all(
-    #         np.greater_equal(
-    #             self.news_map_beliefs[0, 0, product_slice[1], product_slice[2]],
-    #             0.0,
-    #         )
-    #     ) and np.all(
-    #         np.less_equal(
-    #             self.news_map_beliefs[0, 0, product_slice[1], product_slice[2]],
-    #             1.0,
-    #         )
-    #     )
