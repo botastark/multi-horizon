@@ -1181,8 +1181,10 @@ def main_news_comparison(paths, show, radius, pairwise="equal", comm_range=None)
         plot_all_settings(all_stats, radius, save_dir, show=show)
 
 
-def plot_method_comparison(all_stats, radius, save_dir, show=False, pairwise="equal", num_agents=None):
-    """Plot comparison across methods (Dec-MCTS, MH-Dec-MCTS, Greedy-IG).
+def plot_method_comparison(
+    all_stats, radius, save_dir, show=False, pairwise="equal", num_agents=None
+):
+    """Plot comparison across methods (Greedy-IG, Dec-MCTS, MH-Dec-MCTS-Efficient, MH-Dec-MCTS-Full).
 
     Expects `all_stats` to contain a `Method` column and aggregated metrics
     from `aggregate_data_by_settings` (MultiIndex columns for metrics).
@@ -1203,16 +1205,27 @@ def plot_method_comparison(all_stats, radius, save_dir, show=False, pairwise="eq
 
     methods = sorted(data["Method"].unique())
 
+    # Extract news_mode for filename (if available)
+    news_mode = None
+    if "NewsMode" in data.columns:
+        unique_modes = data["NewsMode"].unique()
+        if len(unique_modes) == 1:
+            news_mode = unique_modes[0]
+
     # If NumAgents column present at row-level, handle selection/filtering
     if "NumAgents" in data.columns:
-        available_nas = sorted(list(set(data["NumAgents"].dropna().astype(int).tolist())))
+        available_nas = sorted(
+            list(set(data["NumAgents"].dropna().astype(int).tolist()))
+        )
         if num_agents is None and len(available_nas) > 1:
             print("Multiple NumAgents found across trials:", available_nas)
             print("Please re-run with --num-agents to select one of these values")
             return
         if num_agents is not None:
             if num_agents not in available_nas:
-                print(f"Requested num_agents={num_agents} not found in trials (available: {available_nas})")
+                print(
+                    f"Requested num_agents={num_agents} not found in trials (available: {available_nas})"
+                )
                 return
             data = data[data["NumAgents"] == num_agents]
             na_val = num_agents
@@ -1236,7 +1249,11 @@ def plot_method_comparison(all_stats, radius, save_dir, show=False, pairwise="eq
                 print(f"  {m}: NumAgents={method_na.get(m)}")
             print("Please re-run with --num-agents to select one of these values")
             return
-        na_val = list(na_values)[0] if len(na_values) == 1 else (num_agents if num_agents is not None else "unknown")
+        na_val = (
+            list(na_values)[0]
+            if len(na_values) == 1
+            else (num_agents if num_agents is not None else "unknown")
+        )
 
     # Metrics to plot: Entropy, Height, MSE, Coverage -> 2x2 grid
     metrics = ["Entropy", "Height", "MSE", "Coverage"]
@@ -1246,7 +1263,12 @@ def plot_method_comparison(all_stats, radius, save_dir, show=False, pairwise="eq
     )
     axes = axes.flatten()
 
-    colors = ["#1f77b4", "#ff7f0e", "#2ca02c"]
+    colors = [
+        "#1f77b4",
+        "#ff7f0e",
+        "#2ca02c",
+        "#d62728",
+    ]  # Added 4th color for 4 methods
 
     for ax, metric in zip(axes, metrics):
         for i, method in enumerate(methods):
@@ -1294,12 +1316,21 @@ def plot_method_comparison(all_stats, radius, save_dir, show=False, pairwise="eq
         ax.set_ylabel(metric)
         ax.set_title(metric + " over Steps")
         ax.grid(True, linestyle="--", alpha=0.5)
-        ax.legend()
+
+    # Add a single shared legend at the bottom
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc='lower center', ncol=4, bbox_to_anchor=(0.5, -0.02), frameon=True)
 
     os.makedirs(save_dir, exist_ok=True)
-    out_path = os.path.join(
-        save_dir, f"method_comparison_r_{radius}_pairwise_{pairwise}.png"
-    )
+
+    # Build filename with news_mode if available
+    filename_parts = [f"method_comparison_r_{radius}"]
+    if news_mode:
+        filename_parts.append(f"news_{news_mode}")
+    filename_parts.append(f"pairwise_{pairwise}")
+    filename = "_".join(filename_parts) + ".png"
+
+    out_path = os.path.join(save_dir, filename)
     plt.savefig(out_path, dpi=300, bbox_inches="tight")
     print(f"Saved method comparison to {out_path}")
     if show:
@@ -1367,7 +1398,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--compare-methods",
         action="store_true",
-        help="Compare Dec-MCTS, MH-Dec-MCTS and Greedy IG methods (auto-discovers trials/ folders)",
+        help="Compare Greedy-IG, Dec-MCTS, MH-Efficient and MH-Full methods (auto-discovers trials/ folders)",
     )
 
     parser.add_argument(
@@ -1391,29 +1422,39 @@ if __name__ == "__main__":
         # Auto-discover trial folders for the three methods and compare them
         script_dir = os.path.dirname(os.path.realpath(__file__))
         # Patterns under trials/
-        dec_pattern = os.path.join(script_dir, "trials", "dec_mcts*")
-        mh_pattern = os.path.join(script_dir, "trials", "mh_dec_mcts*")
         greedy_pattern = os.path.join(script_dir, "trials", "greedy_ig*")
+        dec_pattern = os.path.join(script_dir, "trials", "dec_mcts_*")
+        mh_full_pattern = os.path.join(script_dir, "trials", "mh_dec_mcts_both*")
+        mh_efficient_pattern = os.path.join(script_dir, "trials", "mh_dec_mcts_*")
 
-        dec_dirs = sorted(glob.glob(dec_pattern))
-        mh_dirs = sorted(glob.glob(mh_pattern))
         greedy_dirs = sorted(glob.glob(greedy_pattern))
+        dec_dirs = sorted(glob.glob(dec_pattern))
+        mh_full_dirs = sorted(glob.glob(mh_full_pattern))
+        # MH-Efficient: get mh_dec_mcts_* but exclude mh_dec_mcts_both*
+        all_mh_dirs = sorted(glob.glob(mh_efficient_pattern))
+        mh_efficient_dirs = [
+            d for d in all_mh_dirs if "_both" not in os.path.basename(d)
+        ]
 
         method_paths = {
-            "Dec-MCTS": [],
-            "MH-Dec-MCTS": [],
             "Greedy-IG": [],
+            "Dec-MCTS": [],
+            "MH-Efficient": [],
+            "MH-Full": [],
         }
 
-        for d in dec_dirs:
-            txtp = os.path.join(d, "txt")
-            method_paths["Dec-MCTS"].append(txtp if os.path.exists(txtp) else d)
-        for d in mh_dirs:
-            txtp = os.path.join(d, "txt")
-            method_paths["MH-Dec-MCTS"].append(txtp if os.path.exists(txtp) else d)
         for d in greedy_dirs:
             txtp = os.path.join(d, "txt")
             method_paths["Greedy-IG"].append(txtp if os.path.exists(txtp) else d)
+        for d in dec_dirs:
+            txtp = os.path.join(d, "txt")
+            method_paths["Dec-MCTS"].append(txtp if os.path.exists(txtp) else d)
+        for d in mh_efficient_dirs:
+            txtp = os.path.join(d, "txt")
+            method_paths["MH-Efficient"].append(txtp if os.path.exists(txtp) else d)
+        for d in mh_full_dirs:
+            txtp = os.path.join(d, "txt")
+            method_paths["MH-Full"].append(txtp if os.path.exists(txtp) else d)
 
         # Aggregate per-method stats
         per_method_stats = {}
@@ -1471,11 +1512,15 @@ if __name__ == "__main__":
             unique_modes = sorted([str(m) for m in combined["NewsMode"].unique()])
             if args.news_mode is None and len(unique_modes) > 1:
                 print("Multiple NewsMode values found across methods:", unique_modes)
-                print("Please re-run with --news-mode to select one of these modes (e.g. --news-mode IGd_BM)")
+                print(
+                    "Please re-run with --news-mode to select one of these modes (e.g. --news-mode IGd_BM)"
+                )
                 sys.exit(1)
             if args.news_mode is not None:
                 if args.news_mode not in unique_modes:
-                    print(f"Requested news_mode={args.news_mode} not found in trials (available: {unique_modes})")
+                    print(
+                        f"Requested news_mode={args.news_mode} not found in trials (available: {unique_modes})"
+                    )
                     sys.exit(1)
                 combined = combined[combined["NewsMode"] == args.news_mode]
 

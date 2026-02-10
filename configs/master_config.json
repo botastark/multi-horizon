@@ -4,8 +4,10 @@
   "limited_testing": true,
   
   "strategies": [
-
-    "mh_dec_mcts_full"
+    "mh_dec_mcts_efficient",
+    "mh_dec_mcts_full",
+    "greedy_ig",
+    "dec_mcts"
   ],
   "_comment_strategies": "Define the strategy configurations and their corresponding config file paths (greedy_ig, dec_mcts, mh_dec_mcts_full, mh_dec_mcts_efficient)",
   
@@ -23,7 +25,7 @@
     "start_position": "corner",
     "num_agents": 4,
     "n_steps": 100,
-    "iters": [0, 1],
+    "iters": [0, 20],
     "correlation_types": ["adaptive"],
     "error_margins": [null],
     "enable_plotting": true,

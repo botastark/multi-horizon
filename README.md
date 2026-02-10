@@ -79,10 +79,6 @@ configs/
 └── [other configs]            # Additional test/utility configs
 ```
 
-**Benefits:**
-- ✅ Run all baselines with single command
-- ✅ Shared settings defined once (no duplication)
-- ✅ Easy to compare strategies
 
 📖 **See**: [Configuration Guide](configs/README.md) for complete details.
 
@@ -92,33 +88,48 @@ configs/
 
 ```bash
 # Plot MH-Dec-MCTS full results
-python plotter.py trials/mh_dec_mcts_both_gaussian_*_N4_*/txt/ --radius 5
+python plotter.py trials/mh_dec_mcts_both_gaussian_*_N4_*/txt/ --radius 4
 
 # Plot MH-Dec-MCTS efficient results
-python plotter.py trials/mh_dec_mcts_gaussian_*_N4_*/txt/ --radius 5
+python plotter.py trials/mh_dec_mcts_gaussian_*_N4_*/txt/ --radius 4
 ```
 
 ### Benchmark Methods
 
 ```bash
 # Dec-MCTS
-python plotter.py trials/dec_mcts_gaussian_*_N4_*/txt/ --radius 5
+python plotter.py trials/dec_mcts_gaussian_*_N4_*/txt/ --radius 4
 
 # Greedy IG
-python plotter.py trials/greedy_ig_gaussian_*_N4_IG_*/txt/ --radius 5
+python plotter.py trials/greedy_ig_gaussian_*_N4_IG_*/txt/ --radius 4
 ```
 
 ### Compare All Methods
 
 ```bash
 # Basic comparison
-python plotter.py --compare-methods --radius 5
+python plotter.py --compare-methods --radius 4
 
 # Filter by pairwise correlation and agent count
-python plotter.py --compare-methods --radius 5 --pairwise adaptive --num-agents 4
+python plotter.py --compare-methods --radius 4 --pairwise adaptive --num-agents 4
 
 # Compare specific communication mode
-python plotter.py --compare-methods --radius 5 --news-mode IG_BM
+python plotter.py --compare-methods --radius 4 --news-mode IG_BM
+```
+
+### Planning Time Comparison
+
+Generate planning time comparison plots showing computational efficiency across methods:
+
+```bash
+# Open analysis.ipynb in Jupyter and run the planning time analysis cells
+jupyter notebook analysis.ipynb
+
+# The notebook will generate plots comparing:
+# - Average Total Time per Run (total planning time across all steps)
+# - Average Time per Step (planning time per decision cycle)
+# 
+# Plots are saved to plots/ directory
 ```
 
 **Communication Modes:**
@@ -143,7 +154,6 @@ multi-horizon/
 ├── configs/                   # Configuration files
 │   ├── master_config.json    # Master config (v3.0)
 │   ├── strategies/           # Strategy-specific configs
-│   └── [legacy]              # Backward compatible configs
 ├── src/                      # Source code
 │   ├── main.py              # Main entry point
 │   ├── config_loader.py     # Multi-strategy config loader
@@ -155,44 +165,4 @@ multi-horizon/
 ├── plots/                    # Generated plots
 ├── run_benchmark.py         # Example runner script
 └── plotter.py               # Visualization tool
-```
-
-## Key Features
-
-- ✅ **4 baseline strategies** with incremental complexity
-- ✅ **Hierarchical planning** with LLP (tactical) + HLP (strategic)
-- ✅ **Flexible LLP**: MCTS tree search OR random rollout sampling
-- ✅ **Multi-agent coordination** with intent sharing and D-UCT
-- ✅ **Belief fusion** using LBP with adaptive pairwise potentials
-- ✅ **Modular configuration** system supporting multi-strategy runs
-
-## Common Tasks
-
-### Change Number of Agents
-Edit [master_config.json](configs/master_config.json):
-```json
-"shared": {
-  "num_agents": 8  // Change from 4 to 8
-}
-```
-
-### Modify Planning Horizon
-Edit strategy config (e.g., [strategies/mh_dec_mcts_full.json](configs/strategies/mh_dec_mcts_full.json)):
-```json
-"hierarchical_dec_mcts": {
-  "llp": {"horizon": 5},  // Change from 3 to 5
-  "hlp": {"horizon": 15}  // Change from 10 to 15
-}
-```
-
-### Add New Strategy
-1. Create `configs/strategies/my_strategy.json`
-2. Add to [master_config.json](configs/master_config.json):
-```json
-{
-  "strategies": [..., "my_strategy"],
-  "strategy_configs": {
-    "my_strategy": "strategies/my_strategy.json"
-  }
-}
 ```
