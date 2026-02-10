@@ -20,6 +20,7 @@ for new integrated terminals.
 Run all strategies in sequence using the master config:
 
 ```bash
+# From project root (NOT from src/)
 python src/main.py --config configs/master_config.json
 ```
 
@@ -31,13 +32,17 @@ This will run:
 
 ### Run Single Strategy
 
-```bash
-# Run specific strategy
-python src/main.py --config configs/strategies/greedy_ig.json
-python src/main.py --config configs/strategies/dec_mcts.json
-python src/main.py --config configs/strategies/mh_dec_mcts_full.json
-python src/main.py --config configs/strategies/mh_dec_mcts_efficient.json
+To run a single strategy, edit `configs/master_config.json` and set:
+```json
+"strategies": ["mh_dec_mcts_full"]
 ```
+
+Then run:
+```bash
+python src/main.py --config configs/master_config.json
+```
+
+⚠️ **Note:** Individual strategy configs (e.g., `configs/strategies/mh_dec_mcts_full.json`) cannot be run directly—they are templates loaded by the master config.
 
 ### Example Runner
 
@@ -191,19 +196,3 @@ Edit strategy config (e.g., [strategies/mh_dec_mcts_full.json](configs/strategie
   }
 }
 ```
-
-## Citation
-
-If you use this code, please cite:
-```
-@article{seiler2024multihorizon,
-  title={Multi-Horizon Decentralized Monte Carlo Tree Search for Multi-Agent Coverage},
-  author={Seiler, et al.},
-  year={2024}
-}
-```
-
-## License
-
-[Add license information]
-
