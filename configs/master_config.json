@@ -4,11 +4,10 @@
   "limited_testing": true,
   
   "strategies": [
-    "greedy_ig",
-    "dec_mcts",
-    "mh_dec_mcts_full",
-    "mh_dec_mcts_efficient"
+
+    "mh_dec_mcts_full"
   ],
+  "_comment_strategies": "Define the strategy configurations and their corresponding config file paths (greedy_ig, dec_mcts, mh_dec_mcts_full, mh_dec_mcts_efficient)",
   
   "strategy_configs": {
     "greedy_ig": "strategies/greedy_ig.json",
@@ -23,11 +22,11 @@
     "cluster_radius": 4,
     "start_position": "corner",
     "num_agents": 4,
-    "n_steps": 5,
+    "n_steps": 100,
     "iters": [0, 1],
     "correlation_types": ["adaptive"],
     "error_margins": [null],
-    "enable_plotting": false,
+    "enable_plotting": true,
     "enable_logging": true,
     "mode_labels": ["IG_BS", "IGd_BM"]
   },
@@ -46,7 +45,7 @@
   "experiment": {
     "_comment": "Experiment logging and output settings",
     "base_log_dir": "trials",
-    "save_trajectory": true,
+    "save_trajectory": false,
     "save_belief_maps": false,
     "common_metrics": [
       "cumulative_ig",

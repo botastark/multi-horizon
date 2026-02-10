@@ -1,5 +1,6 @@
 import os
 import json
+import numpy as np
 from tqdm import tqdm
 import matplotlib
 
@@ -285,6 +286,7 @@ def run_experiment_with_config(config: dict, args):
             use_sensor_model = True
 
         seed = config.get("seed", 42)
+        np.random.seed(seed)
 
         # Create initial camera (for single-agent or field initialization)
         camera1 = Camera(
