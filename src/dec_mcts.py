@@ -578,7 +578,7 @@ class DecMCTSPlanner:
             iterations += 1
 
         end_time = time.perf_counter()
-        
+
         # Extract best action and trajectory
         best_action, action_values = self._extract_best_action(root)
         trajectory = self._extract_trajectory(root)
@@ -770,8 +770,6 @@ class DecMCTSCoordinator:
             return self._intents.copy()
 
 
-# =============================================================================
-# Logging Functions
 # =============================================================================
 # Factory Function
 # =============================================================================

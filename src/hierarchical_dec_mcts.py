@@ -410,6 +410,7 @@ class LowLevelPlanner:
         discount: float = 0.95,
         intent_discount: float = 0.8,  # Discount for teammate intent influence
         use_mcts_llp: bool = False,  # Use MCTS for LLP instead of random rollouts
+        use_g2: bool = False,  # Compute g2 mission time estimate (slower but more accurate)
     ):
         """
         Initialize LLP.
@@ -424,6 +425,7 @@ class LowLevelPlanner:
             discount: Reward discount factor
             intent_discount: Discount for teammate intent cells
             use_mcts_llp: If True, use MCTS tree search for LLP; if False, use random rollouts
+            use_g2: If True, compute g2 mission time estimates (more accurate but slower)
         """
         self.agent_id = agent_id
         self.camera = camera
@@ -434,6 +436,7 @@ class LowLevelPlanner:
         self.discount = discount
         self.intent_discount = intent_discount
         self.use_mcts_llp = use_mcts_llp
+        self.use_g2 = use_g2
 
         # Current belief map
         self.belief: Optional[np.ndarray] = None
@@ -500,6 +503,7 @@ class LowLevelPlanner:
         Uses memoized staleness checks to reduce redundant calls.
         """
         import time
+
         H, W = self.grid_info.shape
         coverage_discount: Optional[np.ndarray] = None
         current_time = time.time()
@@ -555,25 +559,33 @@ class LowLevelPlanner:
         if self.belief is None:
             return 0.0
 
+        # Cache key for position/altitude
+        cache_key = (round(position[0], 1), round(position[1], 1), round(altitude, 1))
+
         # Compute footprint directly without get_range() overhead
         try:
             import math
+
             grid_length = self.camera.grid.length
             fov_rad = np.deg2rad(self.camera.fov) / 2
             x_dist = round(altitude * math.tan(fov_rad) / grid_length) * grid_length
             y_dist = round(altitude * math.tan(fov_rad) / grid_length) * grid_length
-            
+
             x_min = max(position[0] - x_dist, self.camera.x_range[0])
             x_max = min(position[0] + x_dist, self.camera.x_range[1])
             y_min = max(position[1] - y_dist, self.camera.y_range[0])
             y_max = min(position[1] + y_dist, self.camera.y_range[1])
-            
+
             if x_max - x_min <= 0 or y_max - y_min <= 0:
                 return 0.0
-            
+
             # Convert to grid indices
-            i_max, j_min = self.camera.convert_xy_ij(x_min, y_min, self.camera.grid.center)
-            i_min, j_max = self.camera.convert_xy_ij(x_max, y_max, self.camera.grid.center)
+            i_max, j_min = self.camera.convert_xy_ij(
+                x_min, y_min, self.camera.grid.center
+            )
+            i_min, j_max = self.camera.convert_xy_ij(
+                x_max, y_max, self.camera.grid.center
+            )
             imin, imax, jmin, jmax = i_min, i_max, j_min, j_max
         except Exception:
             return 0.0
@@ -587,22 +599,43 @@ class LowLevelPlanner:
         if imax <= imin or jmax <= jmin:
             return 0.0
 
-        # Extract belief probabilities (occupied channel)
-        if self.belief.ndim == 3:
-            belief_slice = self.belief[imin:imax, jmin:jmax, 1]
-        else:
-            belief_slice = self.belief[imin:imax, jmin:jmax]
+        # Check cache (reset cache if belief updated)
+        if not hasattr(self, "_ig_cache"):
+            self._ig_cache = {}
+            self._ig_cache_belief_hash = hash(self.belief.tobytes())
 
-        # Compute entropy (uncertainty)
-        eps = 1e-10
-        p = np.clip(belief_slice, eps, 1 - eps)
-        entropy = -p * np.log2(p) - (1 - p) * np.log2(1 - p)
+        # Reset cache if belief changed
+        current_belief_hash = hash(self.belief.tobytes())
+        if current_belief_hash != self._ig_cache_belief_hash:
+            self._ig_cache = {}
+            self._ig_cache_belief_hash = current_belief_hash
+
+        # Return cached value if available
+        if cache_key in self._ig_cache:
+            base_ig = self._ig_cache[cache_key]
+        else:
+            # Extract belief probabilities (occupied channel)
+            if self.belief.ndim == 3:
+                belief_slice = self.belief[imin:imax, jmin:jmax, 1]
+            else:
+                belief_slice = self.belief[imin:imax, jmin:jmax]
+
+            # Compute entropy (uncertainty)
+            eps = 1e-10
+            p = np.clip(belief_slice, eps, 1 - eps)
+            entropy = -p * np.log2(p) - (1 - p) * np.log2(1 - p)
+            base_ig = float(np.sum(entropy))
+
+            # Cache the base IG value
+            self._ig_cache[cache_key] = base_ig
 
         # Apply teammate coverage discount
         discount_slice = coverage_discount[imin:imax, jmin:jmax]
-        discounted_entropy = entropy * discount_slice
+        discounted_ig = (
+            base_ig * np.mean(discount_slice) if discount_slice.size > 0 else base_ig
+        )
 
-        return float(np.sum(discounted_entropy))
+        return discounted_ig
 
     def _compute_g2_for_trajectory(
         self,
@@ -741,7 +774,7 @@ class LowLevelPlanner:
                 break
 
             next_pos, next_alt = future_state
-            
+
             # Compute IG for this step (g1) - now uses direct footprint computation
             ig = self._compute_ig(next_pos, next_alt, coverage_discount)
             step_reward = (self.discount**step_idx) * ig
@@ -754,19 +787,24 @@ class LowLevelPlanner:
             # Compute footprint directly (no camera mutation)
             try:
                 import math
+
                 grid_length = self.camera.grid.length
                 fov_rad = np.deg2rad(self.camera.fov) / 2
                 x_dist = round(next_alt * math.tan(fov_rad) / grid_length) * grid_length
                 y_dist = round(next_alt * math.tan(fov_rad) / grid_length) * grid_length
-                
+
                 x_min = max(next_pos[0] - x_dist, self.camera.x_range[0])
                 x_max = min(next_pos[0] + x_dist, self.camera.x_range[1])
                 y_min = max(next_pos[1] - y_dist, self.camera.y_range[0])
                 y_max = min(next_pos[1] + y_dist, self.camera.y_range[1])
-                
+
                 if x_max - x_min > 0 and y_max - y_min > 0:
-                    i_max, j_min = self.camera.convert_xy_ij(x_min, y_min, self.camera.grid.center)
-                    i_min, j_max = self.camera.convert_xy_ij(x_max, y_max, self.camera.grid.center)
+                    i_max, j_min = self.camera.convert_xy_ij(
+                        x_min, y_min, self.camera.grid.center
+                    )
+                    i_min, j_max = self.camera.convert_xy_ij(
+                        x_max, y_max, self.camera.grid.center
+                    )
                     footprint_sequence.append((i_min, i_max, j_min, j_max))
                 else:
                     footprint_sequence.append((0, 0, 0, 0))
@@ -777,17 +815,18 @@ class LowLevelPlanner:
             current_pos = next_pos
             current_alt = next_alt
 
-        # Compute g2: mission completion time estimate
-        # Use this trajectory as the LL intent for g2 evaluation
-        g2_value = self._compute_g2_for_trajectory(
-            state_sequence, footprint_sequence, ig_sequence
-        )
+        # Compute g2: mission completion time estimate (optional, slower)
+        g2_value = 0.0
+        if self.use_g2:
+            g2_value = self._compute_g2_for_trajectory(
+                state_sequence, footprint_sequence, ig_sequence
+            )
 
-        # Total LLP reward = g1 + g2
+        # Total LLP reward = g1 + g2 (g2=0 if disabled)
         total_reward = g1_reward + g2_value
 
         return total_reward, state_sequence, footprint_sequence, ig_sequence
-    
+
     def _apply_action(
         self, pos: Tuple[float, float], alt: float, action: str
     ) -> Optional[Tuple[Tuple[float, float], float]]:
@@ -796,13 +835,21 @@ class LowLevelPlanner:
             return pos, alt + self.camera.h_step
         elif action == "down" and alt - self.camera.h_step >= self.camera.h_range[0]:
             return pos, alt - self.camera.h_step
-        elif action == "front" and pos[1] + self.camera.xy_step <= self.camera.y_range[1]:
+        elif (
+            action == "front" and pos[1] + self.camera.xy_step <= self.camera.y_range[1]
+        ):
             return (pos[0], pos[1] + self.camera.xy_step), alt
-        elif action == "back" and pos[1] - self.camera.xy_step >= self.camera.y_range[0]:
+        elif (
+            action == "back" and pos[1] - self.camera.xy_step >= self.camera.y_range[0]
+        ):
             return (pos[0], pos[1] - self.camera.xy_step), alt
-        elif action == "right" and pos[0] + self.camera.xy_step <= self.camera.x_range[1]:
+        elif (
+            action == "right" and pos[0] + self.camera.xy_step <= self.camera.x_range[1]
+        ):
             return (pos[0] + self.camera.xy_step, pos[1]), alt
-        elif action == "left" and pos[0] - self.camera.xy_step >= self.camera.x_range[0]:
+        elif (
+            action == "left" and pos[0] - self.camera.xy_step >= self.camera.x_range[0]
+        ):
             return (pos[0] - self.camera.xy_step, pos[1]), alt
         elif action == "hover":
             return pos, alt
@@ -962,8 +1009,9 @@ class LowLevelPlanner:
             LLIntent with planned trajectory
         """
         import time
+
         plan_start = time.time()
-        
+
         if self.belief is None:
             # Return empty intent
             return LLIntent(agent_id=self.agent_id)
@@ -1027,7 +1075,7 @@ class LowLevelPlanner:
         self.current_intent = intent
         self._stats["plans_generated"] += 1
         self._stats["total_iterations"] += self.num_iterations
-        
+
         plan_elapsed = (time.time() - plan_start) * 1000  # ms
         self._stats["llp_plan_time_ms"] = plan_elapsed
 
@@ -1329,8 +1377,9 @@ class HighLevelPlanner:
             HLIntent with planned region sequence
         """
         import time
+
         plan_start = time.time()
-        
+
         if not self._should_replan() and self.current_intent is not None:
             return self.current_intent
 
@@ -1406,7 +1455,7 @@ class HighLevelPlanner:
         self.current_intent = intent
         self._stats["plans_generated"] += 1
         self._stats["total_iterations"] += self.num_iterations
-        
+
         plan_elapsed = (time.time() - plan_start) * 1000  # ms
         self._stats["hlp_plan_time_ms"] = plan_elapsed
 
@@ -1714,6 +1763,7 @@ class HierarchicalDecMCTSPlanner:
         tile_size: Tuple[int, int] = (100, 100),
         hlp_replan_interval: float = 1.0,
         use_mcts_llp: bool = False,
+        use_g2: bool = False,
     ):
         """
         Initialize hierarchical planner.
@@ -1731,6 +1781,7 @@ class HierarchicalDecMCTSPlanner:
             tile_size: Region tile size for HLP
             hlp_replan_interval: Minimum time between HLP replans
             use_mcts_llp: If True, use MCTS tree search for LLP; if False, use random rollouts
+            use_g2: If True, compute g2 mission time estimates (more accurate but slower)
         """
         self.agent_id = agent_id
         self.num_agents = num_agents
@@ -1746,6 +1797,7 @@ class HierarchicalDecMCTSPlanner:
             horizon=llp_horizon,
             num_iterations=llp_iterations,
             use_mcts_llp=use_mcts_llp,
+            use_g2=use_g2,
         )
 
         # Create HLP
@@ -2047,6 +2099,7 @@ def create_hierarchical_planner(
     tile_size = tuple(config.get("tile_size", [100, 100]))
     hlp_replan_interval = config.get("hlp_replan_interval", 1.0)
     use_mcts_llp = config.get("use_mcts_llp", False)
+    use_g2 = config.get("use_g2", False)
 
     return HierarchicalDecMCTSPlanner(
         agent_id=agent_id,
@@ -2061,4 +2114,5 @@ def create_hierarchical_planner(
         tile_size=tile_size,
         hlp_replan_interval=hlp_replan_interval,
         use_mcts_llp=use_mcts_llp,
+        use_g2=use_g2,
     )
