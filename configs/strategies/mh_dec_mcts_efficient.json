@@ -6,22 +6,23 @@
   
   "hierarchical_dec_mcts": {
     "use_mcts_llp": false,
+    "use_g2": true,
     
     "llp": {
       "_comment": "Low-Level Planner - tactical action selection with random rollout",
       "horizon": 3,
-      "iterations": 50,
+      "iterations": 30,
       "discount_factor": 0.95
     },
     
     "hlp": {
       "_comment": "High-Level Planner - strategic region allocation with MCTS tree search",
-      "horizon": 10,
-      "iterations": 30,
+      "horizon": 8,
+      "iterations": 20,
       "ucb_c": 1.0,
       "discount_factor": 0.98,
       "tile_size": [50, 50],
-      "replan_interval": 1.0
+      "replan_interval": 2.0
     },
     
     "intent_sharing": {
