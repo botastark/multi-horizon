@@ -441,7 +441,7 @@ class MultiAgentCoordinator:
 
         Args:
             grid_info: Object with `x` and `y` attributes (field extents).
-            start_position: "corner" | other (only "corner" supported).
+            start_position: "corner" | "sample".
             seed: RNG seed for reproducible assignment.
             min_distance: Minimum distance between start positions (unused for corner).
             altitude: Starting altitude for all agents (optional).
@@ -473,6 +473,32 @@ class MultiAgentCoordinator:
         positions: List[Tuple[float, float, float]] = []
 
         if start_position == "corner":
+            corners = [
+                (-grid_info.x / 2, -grid_info.y / 2),
+                (grid_info.x / 2, -grid_info.y / 2),
+                (-grid_info.x / 2, grid_info.y / 2),
+                (grid_info.x / 2, grid_info.y / 2),
+            ]
+
+            # Assign corner positions in fixed order
+            for i in range(min(self.num_agents, len(corners))):
+                x, y = corners[i]
+                positions.append((x, y, altitude))
+
+            # If more agents than corners, add edge positions deterministically
+            if self.num_agents > len(corners):
+                edges = [
+                    (0, -grid_info.y / 2),
+                    (0, grid_info.y / 2),
+                    (-grid_info.x / 2, 0),
+                    (grid_info.x / 2, 0),
+                ]
+                idx = 0
+                while len(positions) < self.num_agents:
+                    ex, ey = edges[idx % len(edges)]
+                    positions.append((ex, ey, altitude))
+                    idx += 1
+        elif start_position == "sample":
             # Reference simulator logic (regions)
 
             # Determine n_h_act based on num_agents to match reference simulator
@@ -547,36 +573,12 @@ class MultiAgentCoordinator:
                     else:
                         positions.append((0.0, 0.0, altitude))
             else:
-                corners = [
-                    (-grid_info.x / 2, -grid_info.y / 2),
-                    (grid_info.x / 2, -grid_info.y / 2),
-                    (-grid_info.x / 2, grid_info.y / 2),
-                    (grid_info.x / 2, grid_info.y / 2),
-                ]
-
-                rng.shuffle(corners)
-
-                # Assign corner positions first
-                for i in range(min(self.num_agents, len(corners))):
-                    x, y = corners[i]
-                    positions.append((x, y, altitude))
-
-                # If more agents than corners, add edge positions deterministically
-                if self.num_agents > len(corners):
-                    edges = [
-                        (0, -grid_info.y / 2),
-                        (0, grid_info.y / 2),
-                        (-grid_info.x / 2, 0),
-                        (grid_info.x / 2, 0),
-                    ]
-                    rng.shuffle(edges)
-                    idx = 0
-                    while len(positions) < self.num_agents:
-                        ex, ey = edges[idx % len(edges)]
-                        positions.append((ex, ey, altitude))
-                        idx += 1
+                raise NotImplementedError(
+                    "start_position='sample' supports agent counts: "
+                    f"{sorted(n_agents_to_n_regions.keys())}"
+                )
         else:
-            raise NotImplementedError("Only 'corner' start_position is implemented")
+            raise NotImplementedError("start_position must be 'corner' or 'sample'")
 
         # Update internal agent tracking and broadcast positions
         now = time.time()
