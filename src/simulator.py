@@ -89,6 +89,11 @@ class Simulator:
         
         self.fused_mse_history = []
         self.combined_coverage_history = []
+        
+        # Initialize display_belief with prior (0.5 probability for all cells)
+        self.display_belief = np.full(
+            (self.grid_info.shape[0], self.grid_info.shape[1], 2), 0.5
+        )
 
     def run(self):
         """Run the simulation loop."""
@@ -101,6 +106,22 @@ class Simulator:
         ):
             if step == 0:
                 print(f"Map Sum: {self.ground_truth_map.sum()}")
+                # Special case for step 0: observe at starting positions BEFORE any actions
+                print(f"step {step}: Processing initial observations at starting positions...")
+                agent_observations = self._process_agent_observations()
+                
+                # Perform belief fusion for initial observations
+                if self.coordinator is not None:
+                    dec_config = self.coordinator.config.get("decentralized", {})
+                    news_sharing = dec_config.get("news_sharing", True)
+                    self._perform_belief_fusion(
+                        agent_observations,
+                        step,
+                        news_sharing=news_sharing,
+                    )
+                
+                # Plot initial state with observations at starting positions
+                self._plot_step(step, agent_observations)
 
             # 1. Compute metrics and log (BEFORE observations, matching reference paper)
             # At step 0, this logs the prior state before any observations
@@ -118,19 +139,20 @@ class Simulator:
             print(f"step {step}: Processing agent observations...")
 
             # 4. Observe (at new position)
-            agent_observations = self._process_agent_observations()
+            if step > 0:  # Skip for step 0 since we already observed at starting position
+                agent_observations = self._process_agent_observations()
 
-            # 5. Fusion (skip when no coordinator provided)
-            if self.coordinator is not None:
-                dec_config = self.coordinator.config.get("decentralized", {})
-                news_sharing = dec_config.get("news_sharing", True)
-                self._perform_belief_fusion(
-                    agent_observations,
-                    step,
-                    news_sharing=news_sharing,
-                )
+                # 5. Fusion (skip when no coordinator provided)
+                if self.coordinator is not None:
+                    dec_config = self.coordinator.config.get("decentralized", {})
+                    news_sharing = dec_config.get("news_sharing", True)
+                    self._perform_belief_fusion(
+                        agent_observations,
+                        step,
+                        news_sharing=news_sharing,
+                    )
 
-            self._plot_step(step, agent_observations)
+                self._plot_step(step, agent_observations)
 
             print(f"{'─'*40}")
 
@@ -624,7 +646,12 @@ class Simulator:
             )
     def _plot_step(self, step, agent_observations):
         if self.enable_stepwise_plotting:
-            all_uav_positions = [agent["uav_positions"][:-1] for agent in self.agents]
+            # For step 0, include the starting position in trajectory
+            # For step > 0, exclude the last position (current) to show path up to previous step
+            if step == 0:
+                all_uav_positions = [agent["uav_positions"][:] for agent in self.agents]
+            else:
+                all_uav_positions = [agent["uav_positions"][:-1] for agent in self.agents]
             first_agent_obs = agent_observations.get(0, {})
             plot_submap = first_agent_obs.get("submap", np.array([]))
             plot_fp_ij = first_agent_obs.get("fp_ij", [[0, 0], [0, 0]])
