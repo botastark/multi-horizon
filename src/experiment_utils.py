@@ -289,9 +289,11 @@ def extract_region_metadata(planner, action_strategy: str) -> Tuple:
     selected_region_id = None
     region_scores = None
 
-    if action_strategy in ("mh_dec_mcts", "hierarchical_dec_mcts") and hasattr(
-        planner, "_hierarchical_planner"
-    ):
+    if action_strategy in (
+        "mh_dec_mcts",
+        "hierarchical_dec_mcts",
+        "mh_dec_mcts_both",
+    ) and hasattr(planner, "_hierarchical_planner"):
         hp = planner._hierarchical_planner
         if hasattr(hp, "current_region_metadata"):
             region_metadata = hp.current_region_metadata
