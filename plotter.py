@@ -1319,7 +1319,14 @@ def plot_method_comparison(
 
     # Add a single shared legend at the bottom
     handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc='lower center', ncol=4, bbox_to_anchor=(0.5, -0.02), frameon=True)
+    fig.legend(
+        handles,
+        labels,
+        loc="lower center",
+        ncol=4,
+        bbox_to_anchor=(0.5, -0.02),
+        frameon=True,
+    )
 
     os.makedirs(save_dir, exist_ok=True)
 
