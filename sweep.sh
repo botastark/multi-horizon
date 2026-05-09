@@ -61,34 +61,28 @@ run_one() {
   jq -n --slurpfile base "$BASE_CFG" --argjson over "$OVERRIDES" \
      "$JQ_DEEP_MERGE rmerge(\$base[0]; \$over)" > "$MERGED"
 
-  # 3) compute the results root exactly like main.py
-  # results_root = project_path/trials/<field_type_lower>_<start_position>[__mcts_tag]
-  local PROJECT FIELD START STRAT PPATH
-  PROJECT="$(jq -r '.project_path' "$MERGED")"; PROJECT="${PROJECT%/}"
-  FIELD="$(jq -r '.field_type' "$MERGED" | tr '[:upper:]' '[:lower:]')"
-  START="$(jq -r '.start_position' "$MERGED")"
+  # 3) compute the results path using new experiments/temp/ structure
+  # Will be moved to experiments/runs/<method>/ by main.py on completion
+  local PROJECT STRAT TIMESTAMP
+  PROJECT="$(jq -r '.project_path // "./"' "$MERGED")"; PROJECT="${PROJECT%/}"
   STRAT="$(jq -r '.action_strategy' "$MERGED")"
-  PPATH="$(jq -r '.params_in_path // true' "$MERGED")"
-
-  local RUN_BASE TAG RESULTS_ROOT
-  RUN_BASE="${FIELD}_${START}"
-  if [[ "$STRAT" == "mcts" && "$PPATH" == "true" ]]; then
-    TAG="$(jq -r "$JQ_PARAM_TAG make_tag" "$MERGED")"
-    RUN_BASE="${RUN_BASE}__${TAG}"
-  fi
-  RESULTS_ROOT="${PROJECT}/trials/${RUN_BASE}"
-
-  # 4) place a copy of the merged config INSIDE the results root
-  mkdir -p "$RESULTS_ROOT"
+  TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
+  
+  # Use experiments/temp/ - main.py will handle moving to runs/<method>/ on completion
+  local TEMP_DIR
+  TEMP_DIR="${PROJECT}/experiments/temp"
+  mkdir -p "$TEMP_DIR"
+  
+  # 4) Save config to temp directory with unique name
   local CFG_OUT LOG_OUT
-  CFG_OUT="${RESULTS_ROOT}/config_${NAME}.json"
-  LOG_OUT="${RESULTS_ROOT}/run_${NAME}.log"
+  CFG_OUT="${TEMP_DIR}/config_${NAME}_${TIMESTAMP}.json"
+  LOG_OUT="${TEMP_DIR}/run_${NAME}_${TIMESTAMP}.log"
   cp "$MERGED" "$CFG_OUT"
 
-  echo "[$(date +%H:%M:%S)] ▶ ${NAME}"
+  echo "[$(date +%H:%M:%S)] ▶ ${NAME} (${STRAT})"
   echo "  config → $CFG_OUT"
   echo "  logs   → $LOG_OUT"
-  echo "  folder → $RESULTS_ROOT"
+  echo "  → Will be moved to experiments/runs/${STRAT}/run_* on completion"
 
   # 5) run main with that config
   if [[ "$DRY_RUN" == "1" ]]; then

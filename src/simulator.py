@@ -32,6 +32,8 @@ class Simulator:
         action_strategy,
         coordinator=None,
         multi_agent_logger=None,
+        run_id=None,
+        debug_logs=False,
     ):
         self.agents = agents
         self.map_obj = map_obj
@@ -47,8 +49,11 @@ class Simulator:
         self.enable_stepwise_plotting = enable_stepwise_plotting
         self.enable_logging = enable_logging
         self.action_strategy = action_strategy
+        self.debug_logs = debug_logs
         self.coordinator = coordinator
         self.multi_agent_logger = multi_agent_logger
+        self.run_id = run_id
+        self.run_number = iter_idx
 
         self.fused_entropy_history = []
 
@@ -58,38 +63,69 @@ class Simulator:
             "by_planner": {},  # Aggregate by planner type
             "outliers": [],  # Records with latency > mean + 3*std
         }
-        
+
         # Open timestamp CSV files for direct writing per step
         if self.multi_agent_logger is not None:
             log_folder = os.path.dirname(self.multi_agent_logger.path)
         else:
             log_folder = os.path.join(results_folder, "txt")
             os.makedirs(log_folder, exist_ok=True)
-        
-        # Create CSV writers for timestamps (write header immediately)
-        self._timestamp_file = open(os.path.join(log_folder, "timestamps.csv"), "w", newline="")
-        self._timestamp_writer = csv.DictWriter(self._timestamp_file, fieldnames=["step", "agent_id", "start_ms", "end_ms"])
-        self._timestamp_writer.writeheader()
+
+        # Determine file mode: write header on first run, append on subsequent runs
+        timestamp_path = os.path.join(log_folder, "timestamps.csv")
+        file_exists = os.path.exists(timestamp_path)
+        file_mode = "a" if file_exists else "w"
+
+        # Create CSV writers for timestamps with run_id and run_number columns
+        fieldnames = ["run_id", "run_number", "step", "agent_id", "start_ms", "end_ms"]
+        self._timestamp_file = open(timestamp_path, file_mode, newline="")
+        self._timestamp_writer = csv.DictWriter(
+            self._timestamp_file, fieldnames=fieldnames
+        )
+        if not file_exists:
+            self._timestamp_writer.writeheader()
         self._timestamp_file.flush()
-        
+
         # For MH planners, create separate HLP and LLP timestamp files
-        if action_strategy in ("hierarchical_dec_mcts", "mh_dec_mcts", "mh_dec_mcts_both", "mh_dec_mcts_full", "mh_dec_mcts_efficient"):
-            self._timestamp_hlp_file = open(os.path.join(log_folder, "timestamps_hlp.csv"), "w", newline="")
-            self._timestamp_hlp_writer = csv.DictWriter(self._timestamp_hlp_file, fieldnames=["step", "agent_id", "start_ms", "end_ms"])
-            self._timestamp_hlp_writer.writeheader()
+        if action_strategy in (
+            "hierarchical_dec_mcts",
+            "mh_dec_mcts",
+            "mh_dec_mcts_both",
+            "mh_dec_mcts_full",
+            "mh_dec_mcts_efficient",
+        ):
+            hlp_path = os.path.join(log_folder, "timestamps_hlp.csv")
+            llp_path = os.path.join(log_folder, "timestamps_llp.csv")
+
+            hlp_exists = os.path.exists(hlp_path)
+            llp_exists = os.path.exists(llp_path)
+
+            self._timestamp_hlp_file = open(
+                hlp_path, "a" if hlp_exists else "w", newline=""
+            )
+            self._timestamp_hlp_writer = csv.DictWriter(
+                self._timestamp_hlp_file, fieldnames=fieldnames
+            )
+            if not hlp_exists:
+                self._timestamp_hlp_writer.writeheader()
             self._timestamp_hlp_file.flush()
-            
-            self._timestamp_llp_file = open(os.path.join(log_folder, "timestamps_llp.csv"), "w", newline="")
-            self._timestamp_llp_writer = csv.DictWriter(self._timestamp_llp_file, fieldnames=["step", "agent_id", "start_ms", "end_ms"])
-            self._timestamp_llp_writer.writeheader()
+
+            self._timestamp_llp_file = open(
+                llp_path, "a" if llp_exists else "w", newline=""
+            )
+            self._timestamp_llp_writer = csv.DictWriter(
+                self._timestamp_llp_file, fieldnames=fieldnames
+            )
+            if not llp_exists:
+                self._timestamp_llp_writer.writeheader()
             self._timestamp_llp_file.flush()
         else:
             self._timestamp_hlp_file = None
             self._timestamp_llp_file = None
-        
+
         self.fused_mse_history = []
         self.combined_coverage_history = []
-        
+
         # Initialize display_belief with prior (0.5 probability for all cells)
         self.display_belief = np.full(
             (self.grid_info.shape[0], self.grid_info.shape[1], 2), 0.5
@@ -105,11 +141,15 @@ class Simulator:
             file=get_tqdm_file(),
         ):
             if step == 0:
-                print(f"Map Sum: {self.ground_truth_map.sum()}")
+                if self.debug_logs:
+                    print(f"Map Sum: {self.ground_truth_map.sum()}")
                 # Special case for step 0: observe at starting positions BEFORE any actions
-                print(f"step {step}: Processing initial observations at starting positions...")
+                if self.debug_logs:
+                    print(
+                        f"step {step}: Processing initial observations at starting positions..."
+                    )
                 agent_observations = self._process_agent_observations()
-                
+
                 # Perform belief fusion for initial observations
                 if self.coordinator is not None:
                     dec_config = self.coordinator.config.get("decentralized", {})
@@ -119,7 +159,7 @@ class Simulator:
                         step,
                         news_sharing=news_sharing,
                     )
-                
+
                 # Plot initial state with observations at starting positions
                 self._plot_step(step, agent_observations)
 
@@ -128,7 +168,8 @@ class Simulator:
             self._compute_metrics(step)
             self._log_step(step)
 
-            print(f"step {step}: Planning...")
+            if self.debug_logs:
+                print(f"step {step}: Planning...")
 
             # 2. Plan (using current belief)
             self._select_agent_actions(step)
@@ -136,10 +177,13 @@ class Simulator:
             # 3. Act (Update positions)
             self._update_agent_positions()
 
-            print(f"step {step}: Processing agent observations...")
+            if self.debug_logs:
+                print(f"step {step}: Processing agent observations...")
 
             # 4. Observe (at new position)
-            if step > 0:  # Skip for step 0 since we already observed at starting position
+            if (
+                step > 0
+            ):  # Skip for step 0 since we already observed at starting position
                 agent_observations = self._process_agent_observations()
 
                 # 5. Fusion (skip when no coordinator provided)
@@ -154,7 +198,8 @@ class Simulator:
 
                 self._plot_step(step, agent_observations)
 
-            print(f"{'─'*40}")
+            if self.debug_logs:
+                print(f"{'─'*40}")
 
         # Cleanup and finalize
         if self.coordinator is not None:
@@ -167,9 +212,10 @@ class Simulator:
         if self.enable_logging and self.multi_agent_logger is not None:
             self.multi_agent_logger.close()
 
-        # Print Priority 1 timing statistics
-        self.print_timing_summary()
-        # Persist detailed timing records for analysis
+        # Print Priority 1 timing statistics (only if debug logging enabled)
+        if self.debug_logs:
+            self.print_timing_summary()
+        # Persist detailed timing records for analysis (silent unless debug)
         self.write_timing_log_csv()
 
         return {
@@ -275,7 +321,7 @@ class Simulator:
                 )
 
             # Debug: Print neighbor connectivity at step 0
-            if step == 0:
+            if self.debug_logs and step == 0:
                 total_connections = sum(
                     len(neighbors) for neighbors in neighbor_map.values()
                 )
@@ -292,7 +338,7 @@ class Simulator:
             mapper.update_news_and_fuse(agent_observations, neighbor_map)
 
             # Log fusion stats periodically
-            if step == 0 or step % 20 == 0:
+            if self.debug_logs and (step == 0 or step % 20 == 0):
                 fusion_stats = mapper.get_stats()
                 print(
                     f"[Step {step}] Belief Fusion: news_fusions={fusion_stats.get('news_fusions', 0)}, "
@@ -376,12 +422,16 @@ class Simulator:
             agent["planning_times"].append(llp_latency_ms)
 
             # Write timestamps directly to CSV (main file for all planners)
-            self._timestamp_writer.writerow({
-                "step": step,
-                "agent_id": agent_id,
-                "start_ms": llp_start_time * 1000.0,
-                "end_ms": llp_end_time * 1000.0,
-            })
+            self._timestamp_writer.writerow(
+                {
+                    "run_id": self.run_id,
+                    "run_number": self.run_number,
+                    "step": step,
+                    "agent_id": agent_id,
+                    "start_ms": llp_start_time * 1000.0,
+                    "end_ms": llp_end_time * 1000.0,
+                }
+            )
             self._timestamp_file.flush()
 
             # For MH planners, write separate HLP and LLP timestamps
@@ -390,27 +440,35 @@ class Simulator:
                 hlp_end_ms = info_gain_action.get("_timing_hlp_end_ms")
                 llp_start_ms = info_gain_action.get("_timing_llp_start_ms")
                 llp_end_ms = info_gain_action.get("_timing_llp_end_ms")
-                
+
                 # Write HLP timestamps
                 if hlp_start_ms is not None and self._timestamp_hlp_writer is not None:
-                    self._timestamp_hlp_writer.writerow({
-                        "step": step,
-                        "agent_id": agent_id,
-                        "start_ms": hlp_start_ms,
-                        "end_ms": hlp_end_ms,
-                    })
+                    self._timestamp_hlp_writer.writerow(
+                        {
+                            "run_id": self.run_id,
+                            "run_number": self.run_number,
+                            "step": step,
+                            "agent_id": agent_id,
+                            "start_ms": hlp_start_ms,
+                            "end_ms": hlp_end_ms,
+                        }
+                    )
                     self._timestamp_hlp_file.flush()
-                
+
                 # Write LLP timestamps
                 if llp_start_ms is not None and self._timestamp_llp_writer is not None:
-                    self._timestamp_llp_writer.writerow({
-                        "step": step,
-                        "agent_id": agent_id,
-                        "start_ms": llp_start_ms,
-                        "end_ms": llp_end_ms,
-                    })
+                    self._timestamp_llp_writer.writerow(
+                        {
+                            "run_id": self.run_id,
+                            "run_number": self.run_number,
+                            "step": step,
+                            "agent_id": agent_id,
+                            "start_ms": llp_start_ms,
+                            "end_ms": llp_end_ms,
+                        }
+                    )
                     self._timestamp_llp_file.flush()
-                
+
                 # Store in legacy arrays
                 hlp_time = info_gain_action["_timing_hlp_ms"]
                 llp_time = info_gain_action["_timing_llp_ms"]
@@ -426,10 +484,11 @@ class Simulator:
                 )
 
             # Log selected action
-            print(
-                f"[Agent {agent_id}] Step {step}: action={next_action} | "
-                f"pos=({uav_pos.position[0]:.1f}, {uav_pos.position[1]:.1f})"
-            )
+            if self.debug_logs:
+                print(
+                    f"[Agent {agent_id}] Step {step}: action={next_action} | "
+                    f"pos=({uav_pos.position[0]:.1f}, {uav_pos.position[1]:.1f})"
+                )
 
             # Store action for later position update
             agent["_next_action"] = next_action
@@ -537,7 +596,7 @@ class Simulator:
         )
         fused_local = np.clip(fused_local, 0.001, 0.999)
 
-        if step == 0 or step % 10 == 0:
+        if self.debug_logs and (step == 0 or step % 10 == 0):
             flat = fused_local.ravel()
             print(
                 f"[DEBUG] step={step} fused_mean={flat.mean():.4f} min={flat.min():.4f} max={flat.max():.4f}",
@@ -563,9 +622,10 @@ class Simulator:
 
         # Get action of first agent
         action = self.agents[0]["actions"][-1] if self.agents[0]["actions"] else "None"
-        print(
-            f"Step {step}: Action={action}, Entropy={fused_entropy_val:.4f}, MSE={fused_mse_val:.4f}"
-        )
+        if self.debug_logs:
+            print(
+                f"Step {step}: Action={action}, Entropy={fused_entropy_val:.4f}, MSE={fused_mse_val:.4f}"
+            )
 
         self.fused_entropy_history.append(fused_entropy_val)
         self.fused_mse_history.append(fused_mse_val)
@@ -644,6 +704,7 @@ class Simulator:
                 llp_times=llp_times,
                 hlp_replans=hlp_replans,
             )
+
     def _plot_step(self, step, agent_observations):
         if self.enable_stepwise_plotting:
             # For step 0, include the starting position in trajectory
@@ -651,7 +712,9 @@ class Simulator:
             if step == 0:
                 all_uav_positions = [agent["uav_positions"][:] for agent in self.agents]
             else:
-                all_uav_positions = [agent["uav_positions"][:-1] for agent in self.agents]
+                all_uav_positions = [
+                    agent["uav_positions"][:-1] for agent in self.agents
+                ]
             first_agent_obs = agent_observations.get(0, {})
             plot_submap = first_agent_obs.get("submap", np.array([]))
             plot_fp_ij = first_agent_obs.get("fp_ij", [[0, 0], [0, 0]])
@@ -697,7 +760,7 @@ class Simulator:
                 )
 
             plot_terrain(
-                f"{self.results_folder}/{self.corr_type}_{self.action_strategy}_e{self.e_margin}_r{self.grf_r}/{self.iter_idx}/steps/step_{step}.png",
+                f"{self.results_folder}/plots/{self.iter_idx}/steps/step_{step}.png",
                 self.display_belief,
                 self.grid_info,
                 all_uav_positions,
@@ -715,7 +778,7 @@ class Simulator:
 
             per_agent_heights = [agent["height"][: step + 1] for agent in self.agents]
             plot_metrics(
-                f"{self.results_folder}/{self.corr_type}_{self.action_strategy}_e{self.e_margin}_r{self.grf_r}/iter_{self.iter_idx}.png",
+                f"{self.results_folder}/plots/iter_{self.iter_idx}.png",
                 self.fused_entropy_history,
                 self.fused_mse_history,
                 self.combined_coverage_history,
@@ -745,7 +808,8 @@ class Simulator:
                 all_records.extend(agent["timing_log"])
 
         if not all_records:
-            print("[WARNING] No timing records found")
+            if self.debug_logs:
+                print("[WARNING] No timing records found")
             return {}
 
         self.timing_stats["all_records"] = all_records
@@ -909,14 +973,22 @@ class Simulator:
         try:
             if hasattr(self, "_timestamp_file") and self._timestamp_file:
                 self._timestamp_file.close()
-                print(f"[INFO] Timestamps saved to: {self._timestamp_file.name}")
-            
+                if self.debug_logs:
+                    print(f"[INFO] Timestamps saved to: {self._timestamp_file.name}")
+
             if hasattr(self, "_timestamp_hlp_file") and self._timestamp_hlp_file:
                 self._timestamp_hlp_file.close()
-                print(f"[INFO] HLP timestamps saved to: {self._timestamp_hlp_file.name}")
-            
+                if self.debug_logs:
+                    print(
+                        f"[INFO] HLP timestamps saved to: {self._timestamp_hlp_file.name}"
+                    )
+
             if hasattr(self, "_timestamp_llp_file") and self._timestamp_llp_file:
                 self._timestamp_llp_file.close()
-                print(f"[INFO] LLP timestamps saved to: {self._timestamp_llp_file.name}")
+                if self.debug_logs:
+                    print(
+                        f"[INFO] LLP timestamps saved to: {self._timestamp_llp_file.name}"
+                    )
         except Exception as exc:
-            print(f"[ERROR] Failed to close timestamp files: {exc}")
+            if self.debug_logs:
+                print(f"[ERROR] Failed to close timestamp files: {exc}")

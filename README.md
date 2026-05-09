@@ -50,6 +50,37 @@ python src/main.py --config configs/master_config.json
 python run_benchmark.py  # Edit file to select strategies
 ```
 
+### Web Interface (Optional)
+
+Launch the interactive web interface for easy parameter tuning and experiment management:
+
+```bash
+cd web_interface
+./start_web_interface.sh
+# Open http://localhost:5000 in your browser
+```
+
+**Features:**
+- 🎛️ Interactive parameter controls for all methods
+- 📊 Real-time progress monitoring and plotting
+- 📁 Automatic experiment organization in `experiments/` directory
+- 🔄 Multi-run comparison (overlay multiple experiments)
+- ⚙️ Optional debug logs (disabled by default for cleaner output)
+
+### Batch Experiments (Command Line)
+
+For running multiple parameter combinations via command line:
+
+```bash
+# Edit sweep.json to configure parameter grid
+./sweep.sh
+```
+
+**All methods use the same directory structure:**
+- Experiments save to `experiments/runs/<method>/run_<timestamp>_*/`
+- Each run contains: `txt/` (results), `plots/` (visualizations), `config.json`
+- Web interface also creates `metadata.json` and moves failed runs to `experiments/failed/`
+
 ## The 4 Baselines
 
 | # | Strategy | LLP | HLP | Description |
@@ -84,24 +115,28 @@ configs/
 
 ## Plotting Results
 
-### Main Method — MH-Dec-MCTS
+### Quick Start
 
 ```bash
-# Plot MH-Dec-MCTS full results
-python plotter.py trials/mh_dec_mcts_both_gaussian_*_N4_*/txt/ --radius 4
+# Plot specific method
+python plotter.py experiments/runs/dec_mcts/*/txt/ --radius 4
 
-# Plot MH-Dec-MCTS efficient results
-python plotter.py trials/mh_dec_mcts_gaussian_*_N4_*/txt/ --radius 4
+# Compare all methods (auto-discovers all experiments)
+python plotter.py --compare-methods --radius 4
 ```
 
-### Benchmark Methods
+### Method-Specific Plots
 
+**MH-Dec-MCTS (Full and Efficient):**
 ```bash
-# Dec-MCTS
-python plotter.py trials/dec_mcts_gaussian_*_N4_*/txt/ --radius 4
+python plotter.py experiments/runs/mh_dec_mcts_full/*/txt/ --radius 4
+python plotter.py experiments/runs/mh_dec_mcts_efficient/*/txt/ --radius 4
+```
 
-# Greedy IG
-python plotter.py trials/greedy_ig_gaussian_*_N4_IG_*/txt/ --radius 4
+**Benchmark Methods:**
+```bash
+python plotter.py experiments/runs/dec_mcts/*/txt/ --radius 4
+python plotter.py experiments/runs/greedy_ig/*/txt/ --radius 4
 ```
 
 ### Compare All Methods
@@ -110,27 +145,45 @@ python plotter.py trials/greedy_ig_gaussian_*_N4_IG_*/txt/ --radius 4
 # Basic comparison
 python plotter.py --compare-methods --radius 4
 
-# Filter by pairwise correlation and agent count
-python plotter.py --compare-methods --radius 4 --pairwise adaptive --num-agents 4
+# Filter by communication mode
+python plotter.py --compare-methods --radius 4 --news-mode IGd_BM
 
-# Compare specific communication mode
-python plotter.py --compare-methods --radius 4 --news-mode IG_BM
+# Filter by agent count
+python plotter.py --compare-methods --radius 4 --num-agents 4
 ```
 
 ### Planning Time Comparison
 
-Generate planning time comparison plots showing computational efficiency across methods:
+Generate planning time efficiency comparison plots across all methods:
 
 ```bash
-# Open analysis.ipynb in Jupyter and run the planning time analysis cells
-jupyter notebook analysis.ipynb
+# Generate timing comparison (mean planning time per step)
+python plotter.py --compare-timing
 
-# The notebook will generate plots comparing:
-# - Average Total Time per Run (total planning time across all steps)
-# - Average Time per Step (planning time per decision cycle)
-# 
-# Plots are saved to plots/ directory
+# Use convenience script
+./plot_timing.sh
+
+# Show plot interactively
+./plot_timing.sh --show
+
+# Compare P95 latency instead of mean
+python plotter.py --compare-timing --timing-metric P95_ms
+
+# Filter by communication mode
+python plotter.py --compare-timing --news-mode IGd_BM
 ```
+
+**Available Metrics:**
+- `Mean_ms`: Average planning time per step (default)
+- `Median_ms`: Median planning time (robust to outliers)
+- `P95_ms`: 95th percentile latency (captures worst-case performance)
+- `P99_ms`: 99th percentile latency (extreme cases)
+
+**Output:** Generates two plots side-by-side:
+1. **Evolution Plot**: Planning time across all steps (with confidence intervals)
+2. **Distribution Plot**: Box plots showing overall timing distributions per method
+
+All timing data is automatically collected from `timestamps.csv` files in each experiment run.
 
 **Communication Modes:**
 All strategies support 6 modes (configured in `master_config.json` under `mode_labels`):
@@ -160,9 +213,23 @@ multi-horizon/
 │   ├── hierarchical_dec_mcts.py  # MH-Dec-MCTS implementation
 │   ├── dec_mcts.py          # Dec-MCTS implementation
 │   └── ...
+├── web_interface/            # Optional web interface
+│   ├── web_interface.py     # Flask backend
+│   ├── templates/           # HTML templates
+│   ├── start_web_interface.sh  # Launch script
+│   └── web_requirements.txt # Web dependencies
 ├── docs/                     # Documentation
-├── trials/                   # Experiment results
-├── plots/                    # Generated plots
+├── experiments/              # Experiment results
+│   ├── temp/                # In-progress experiments
+│   ├── runs/                # Completed experiments by method
+│   │   ├── greedy_ig/       # run_<timestamp>_*/
+│   │   ├── dec_mcts/
+│   │   ├── mh_dec_mcts_efficient/
+│   │   └── mh_dec_mcts_full/
+│   └── failed/              # Failed/stopped experiments
+├── plots/                    # Generated comparison plots
+├── sweep.sh                  # Batch experiment runner
+├── sweep.json               # Parameter grid config
 ├── run_benchmark.py         # Example runner script
 └── plotter.py               # Visualization tool
 ```

@@ -1,445 +1,379 @@
 {
-  "base_config": "config.json",
+  "_comment": "Hyperparameter Sweep Configuration - All Methods",
+  "_description": "Tests multiple hyperparameter variations for each planning method across IG_BS (infinite comm) and IGd_BM (limited comm R5) settings",
+  "base_config": "configs/master_config.json",
   "experiments": [
-
     {
-      "name": "gaussian_edge_pd3_ni10_uc1.0_df0.95_pa1_to1.5",
+      "name": "greedy_ig_opw_0.0",
       "overrides": {
-        "field_type": "Gaussian",
-        "start_position": "edge",
-        "action_strategy": "mcts",
-        "params_in_path": true,
-        "n_steps": 100,
-        "iters": [
-          0,
-          20
-        ],
-        "mcts_params": {
-          "planning_depth": 3,
-          "num_iterations": 10,
-          "ucb1_c": 1.0,
-          "discount_factor": 0.95,
-          "timeout": 5,
-          "parallel": 1
+        "strategies": ["greedy_ig"],
+        "strategy_configs": {
+          "greedy_ig": "../../configs/strategies/sweeps/greedy_ig_opw_0.0.json"
+        },
+        "shared": {
+          "mode_labels": ["IG_BS", "IGd_BM"],
+          "cluster_radius": 4,
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [0, 20],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "correlation_types": ["adaptive"],
+          "enable_plotting": false,
+          "enable_logging": true,
+          "debug_logs": false
         }
       }
     },
     {
-      "name": "gaussian_edge_pd3_ni25_uc1.0_df0.95_pa8_to1.0",
+      "name": "greedy_ig_opw_0.1",
       "overrides": {
-        "field_type": "Gaussian",
-        "start_position": "edge",
-        "action_strategy": "mcts",
-        "params_in_path": true,
-        "n_steps": 100,
-        "iters": [
-          0,
-          20
-        ],
-        "mcts_params": {
-          "planning_depth": 3,
-          "num_iterations": 25,
-          "ucb1_c": 1.0,
-          "discount_factor": 0.95,
-          "timeout": 3,
-          "parallel": 8
+        "strategies": ["greedy_ig"],
+        "strategy_configs": {
+          "greedy_ig": "../../configs/strategies/sweeps/greedy_ig_opw_0.1.json"
+        },
+        "shared": {
+          "mode_labels": ["IG_BS", "IGd_BM"],
+          "cluster_radius": 4,
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [0, 20],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "correlation_types": ["adaptive"],
+          "enable_plotting": false,
+          "enable_logging": true,
+          "debug_logs": false
         }
       }
     },
     {
-      "name": "gaussian_edge_pd3_ni50_uc1.0_df0.95_pa4_to2.5",
+      "name": "greedy_ig_opw_0.3",
       "overrides": {
-        "field_type": "Gaussian",
-        "start_position": "edge",
-        "action_strategy": "mcts",
-        "params_in_path": true,
-        "n_steps": 100,
-        "iters": [
-          16,
-          20
-        ],
-        "mcts_params": {
-          "planning_depth": 3,
-          "num_iterations": 50,
-          "ucb1_c": 1.0,
-          "discount_factor": 0.95,
-          "timeout": 10,
-          "parallel": 4
+        "strategies": ["greedy_ig"],
+        "strategy_configs": {
+          "greedy_ig": "../../configs/strategies/sweeps/greedy_ig_opw_0.3.json"
+        },
+        "shared": {
+          "mode_labels": ["IG_BS", "IGd_BM"],
+          "cluster_radius": 4,
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [0, 20],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "correlation_types": ["adaptive"],
+          "enable_plotting": false,
+          "enable_logging": true,
+          "debug_logs": false
         }
       }
     },
     {
-      "name": "gaussian_edge_pd5_ni25_uc1.0_df0.95_pa4_to1.5",
+      "name": "greedy_ig_opw_0.5",
       "overrides": {
-        "field_type": "Gaussian",
-        "start_position": "edge",
-        "action_strategy": "mcts",
-        "params_in_path": true,
-        "n_steps": 100,
-        "iters": [
-          0,
-          20
-        ],
-        "mcts_params": {
-          "planning_depth": 5,
-          "num_iterations": 25,
-          "ucb1_c": 1.0,
-          "discount_factor": 0.95,
-          "timeout": 5,
-          "parallel": 4
+        "strategies": ["greedy_ig"],
+        "strategy_configs": {
+          "greedy_ig": "../../configs/strategies/sweeps/greedy_ig_opw_0.5.json"
+        },
+        "shared": {
+          "mode_labels": ["IG_BS", "IGd_BM"],
+          "cluster_radius": 4,
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [0, 20],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "correlation_types": ["adaptive"],
+          "enable_plotting": false,
+          "enable_logging": true,
+          "debug_logs": false
         }
       }
     },
     {
-      "name": "gaussian_edge_pd10_ni25_uc1.0_df0.95_pa4_to2.5",
+      "name": "dec_mcts_reactive_h5_i50",
       "overrides": {
-        "field_type": "Gaussian",
-        "start_position": "edge",
-        "action_strategy": "mcts",
-        "params_in_path": true,
-        "n_steps": 100,
-        "iters": [
-          0,
-          20
-        ],
-        "mcts_params": {
-          "planning_depth": 10,
-          "num_iterations": 25,
-          "ucb1_c": 1.0,
-          "discount_factor": 0.95,
-          "timeout": 10,
-          "parallel": 4
+        "strategies": ["dec_mcts"],
+        "strategy_configs": {
+          "dec_mcts": "../../configs/strategies/sweeps/dec_mcts_reactive_h5_i50.json"
+        },
+        "shared": {
+          "mode_labels": ["IG_BS", "IGd_BM"],
+          "cluster_radius": 4,
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [0, 20],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "correlation_types": ["adaptive"],
+          "enable_plotting": false,
+          "enable_logging": true,
+          "debug_logs": false
         }
       }
     },
     {
-      "name": "gaussian_edge_pd5_ni50_uc0.9_df0.95_pa4_to2.5",
+      "name": "dec_mcts_balanced_h10_i30",
       "overrides": {
-        "field_type": "Gaussian",
-        "start_position": "edge",
-        "action_strategy": "mcts",
-        "params_in_path": true,
-        "n_steps": 100,
-        "iters": [
-          0,
-          20
-        ],
-        "mcts_params": {
-          "planning_depth": 5,
-          "num_iterations": 50,
-          "ucb1_c": 0.9,
-          "discount_factor": 0.95,
-          "timeout": 10,
-          "parallel": 4
+        "strategies": ["dec_mcts"],
+        "strategy_configs": {
+          "dec_mcts": "../../configs/strategies/sweeps/dec_mcts_balanced_h10_i30.json"
+        },
+        "shared": {
+          "mode_labels": ["IG_BS", "IGd_BM"],
+          "cluster_radius": 4,
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [0, 20],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "correlation_types": ["adaptive"],
+          "enable_plotting": false,
+          "enable_logging": true,
+          "debug_logs": false
         }
       }
     },
     {
-      "name": "gaussian_edge_pd5_ni75_uc0.9_df0.95_pa1_to8.0",
+      "name": "dec_mcts_longlook_h15_i20",
       "overrides": {
-        "field_type": "Gaussian",
-        "start_position": "edge",
-        "action_strategy": "mcts",
-        "params_in_path": true,
-        "n_steps": 100,
-        "iters": [
-          0,
-          20
-        ],
-        "mcts_params": {
-          "planning_depth": 5,
-          "num_iterations": 75,
-          "ucb1_c": 0.9,
-          "discount_factor": 0.95,
-          "timeout": 15.0,
-          "parallel": 1
+        "strategies": ["dec_mcts"],
+        "strategy_configs": {
+          "dec_mcts": "../../configs/strategies/sweeps/dec_mcts_longlook_h15_i20.json"
+        },
+        "shared": {
+          "mode_labels": ["IG_BS", "IGd_BM"],
+          "cluster_radius": 4,
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [0, 20],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "correlation_types": ["adaptive"],
+          "enable_plotting": false,
+          "enable_logging": true,
+          "debug_logs": false
         }
       }
     },
     {
-      "name": "gaussian_edge_pd5_ni50_uc0.5_df0.95_pa4_to2.5",
+      "name": "dec_mcts_explore_ucb2.0",
       "overrides": {
-        "field_type": "Gaussian",
-        "start_position": "edge",
-        "action_strategy": "mcts",
-        "params_in_path": true,
-        "n_steps": 100,
-        "iters": [
-          14,
-          20
-        ],
-        "mcts_params": {
-          "planning_depth": 5,
-          "num_iterations": 50,
-          "ucb1_c": 0.5,
-          "discount_factor": 0.95,
-          "timeout": 10,
-          "parallel": 4
+        "strategies": ["dec_mcts"],
+        "strategy_configs": {
+          "dec_mcts": "../../configs/strategies/sweeps/dec_mcts_explore_ucb2.0.json"
+        },
+        "shared": {
+          "mode_labels": ["IG_BS", "IGd_BM"],
+          "cluster_radius": 4,
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [0, 20],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "correlation_types": ["adaptive"],
+          "enable_plotting": false,
+          "enable_logging": true,
+          "debug_logs": false
         }
       }
     },
     {
-      "name": "gaussian_edge_pd5_ni50_uc1.4_df0.95_pa4_to2.5",
+      "name": "dec_mcts_exploit_ucb1.0",
       "overrides": {
-        "field_type": "Gaussian",
-        "start_position": "edge",
-        "action_strategy": "mcts",
-        "params_in_path": true,
-        "n_steps": 100,
-        "iters": [
-          0,
-          20
-        ],
-        "mcts_params": {
-          "planning_depth": 5,
-          "num_iterations": 50,
-          "ucb1_c": 1.4,
-          "discount_factor": 0.95,
-          "timeout": 10,
-          "parallel": 4
+        "strategies": ["dec_mcts"],
+        "strategy_configs": {
+          "dec_mcts": "../../configs/strategies/sweeps/dec_mcts_exploit_ucb1.0.json"
+        },
+        "shared": {
+          "mode_labels": ["IG_BS", "IGd_BM"],
+          "cluster_radius": 4,
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [0, 20],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "correlation_types": ["adaptive"],
+          "enable_plotting": false,
+          "enable_logging": true,
+          "debug_logs": false
         }
       }
     },
     {
-      "name": "gaussian_edge_pd5_ni50_uc1.0_df1.0_pa4_to2.5",
+      "name": "mh_eff_fast_replan_hlp5_rep1",
       "overrides": {
-        "field_type": "Gaussian",
-        "start_position": "edge",
-        "action_strategy": "mcts",
-        "params_in_path": true,
-        "n_steps": 100,
-        "iters": [
-          0,
-          20
-        ],
-        "mcts_params": {
-          "planning_depth": 5,
-          "num_iterations": 50,
-          "ucb1_c": 1.0,
-          "discount_factor": 1.0,
-          "timeout": 10,
-          "parallel": 4
-        }
-      }
-    },
-    
-    {
-      "name": "ortomap_edge_pd3_ni10_uc1.0_df0.95_pa1_to1.5",
-      "overrides": {
-        "field_type": "Ortomap",
-        "start_position": "edge",
-        "action_strategy": "mcts",
-        "params_in_path": true,
-        "n_steps": 100,
-        "iters": [
-          0,
-          20
-        ],
-        "mcts_params": {
-          "planning_depth": 3,
-          "num_iterations": 10,
-          "ucb1_c": 1.0,
-          "discount_factor": 0.95,
-          "timeout": 5,
-          "parallel": 1
+        "strategies": ["mh_dec_mcts_efficient"],
+        "strategy_configs": {
+          "mh_dec_mcts_efficient": "../../configs/strategies/sweeps/mh_eff_fast_replan_hlp5_rep1.json"
+        },
+        "shared": {
+          "mode_labels": ["IG_BS", "IGd_BM"],
+          "cluster_radius": 4,
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [0, 20],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "correlation_types": ["adaptive"],
+          "enable_plotting": false,
+          "enable_logging": true,
+          "debug_logs": false
         }
       }
     },
     {
-      "name": "ortomap_edge_pd3_ni25_uc1.0_df0.95_pa8_to1.0",
+      "name": "mh_eff_balanced_hlp8_rep2",
       "overrides": {
-        "field_type": "Ortomap",
-        "start_position": "edge",
-        "action_strategy": "mcts",
-        "params_in_path": true,
-        "n_steps": 100,
-        "iters": [
-          0,
-          20
-        ],
-        "mcts_params": {
-          "planning_depth": 3,
-          "num_iterations": 25,
-          "ucb1_c": 1.0,
-          "discount_factor": 0.95,
-          "timeout": 3,
-          "parallel": 8
+        "strategies": ["mh_dec_mcts_efficient"],
+        "strategy_configs": {
+          "mh_dec_mcts_efficient": "../../configs/strategies/sweeps/mh_eff_balanced_hlp8_rep2.json"
+        },
+        "shared": {
+          "mode_labels": ["IG_BS", "IGd_BM"],
+          "cluster_radius": 4,
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [0, 20],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "correlation_types": ["adaptive"],
+          "enable_plotting": false,
+          "enable_logging": true,
+          "debug_logs": false
         }
       }
     },
     {
-      "name": "ortomap_edge_pd3_ni50_uc1.0_df0.95_pa4_to2.5",
+      "name": "mh_eff_strategic_hlp12_rep3",
       "overrides": {
-        "field_type": "Ortomap",
-        "start_position": "edge",
-        "action_strategy": "mcts",
-        "params_in_path": true,
-        "n_steps": 100,
-        "iters": [
-          0,
-          20
-        ],
-        "mcts_params": {
-          "planning_depth": 3,
-          "num_iterations": 50,
-          "ucb1_c": 1.0,
-          "discount_factor": 0.95,
-          "timeout": 10,
-          "parallel": 4
+        "strategies": ["mh_dec_mcts_efficient"],
+        "strategy_configs": {
+          "mh_dec_mcts_efficient": "../../configs/strategies/sweeps/mh_eff_strategic_hlp12_rep3.json"
+        },
+        "shared": {
+          "mode_labels": ["IG_BS", "IGd_BM"],
+          "cluster_radius": 4,
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [0, 20],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "correlation_types": ["adaptive"],
+          "enable_plotting": false,
+          "enable_logging": true,
+          "debug_logs": false
         }
       }
     },
     {
-      "name": "ortomap_edge_pd5_ni25_uc1.0_df0.95_pa4_to1.5",
+      "name": "mh_eff_llp_boost_h4_i50",
       "overrides": {
-        "field_type": "Ortomap",
-        "start_position": "edge",
-        "action_strategy": "mcts",
-        "params_in_path": true,
-        "n_steps": 100,
-        "iters": [
-          0,
-          20
-        ],
-        "mcts_params": {
-          "planning_depth": 5,
-          "num_iterations": 25,
-          "ucb1_c": 1.0,
-          "discount_factor": 0.95,
-          "timeout": 5,
-          "parallel": 4
+        "strategies": ["mh_dec_mcts_efficient"],
+        "strategy_configs": {
+          "mh_dec_mcts_efficient": "../../configs/strategies/sweeps/mh_eff_llp_boost_h4_i50.json"
+        },
+        "shared": {
+          "mode_labels": ["IG_BS", "IGd_BM"],
+          "cluster_radius": 4,
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [0, 20],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "correlation_types": ["adaptive"],
+          "enable_plotting": false,
+          "enable_logging": true,
+          "debug_logs": false
         }
       }
     },
     {
-      "name": "ortomap_edge_pd10_ni25_uc1.0_df0.95_pa4_to2.5",
+      "name": "mh_full_fast_tactical_llp3_i40",
       "overrides": {
-        "field_type": "Ortomap",
-        "start_position": "edge",
-        "action_strategy": "mcts",
-        "params_in_path": true,
-        "n_steps": 100,
-        "iters": [
-          0,
-          20
-        ],
-        "mcts_params": {
-          "planning_depth": 10,
-          "num_iterations": 25,
-          "ucb1_c": 1.0,
-          "discount_factor": 0.95,
-          "timeout": 10,
-          "parallel": 4
+        "strategies": ["mh_dec_mcts_full"],
+        "strategy_configs": {
+          "mh_dec_mcts_full": "../../configs/strategies/sweeps/mh_full_fast_tactical_llp3_i40.json"
+        },
+        "shared": {
+          "mode_labels": ["IG_BS", "IGd_BM"],
+          "cluster_radius": 4,
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [0, 20],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "correlation_types": ["adaptive"],
+          "enable_plotting": false,
+          "enable_logging": true,
+          "debug_logs": false
         }
       }
     },
     {
-      "name": "ortomap_edge_pd5_ni50_uc0.9_df0.95_pa4_to2.5",
+      "name": "mh_full_balanced_standard",
       "overrides": {
-        "field_type": "Ortomap",
-        "start_position": "edge",
-        "action_strategy": "mcts",
-        "params_in_path": true,
-        "n_steps": 100,
-        "iters": [
-          0,
-          20
-        ],
-        "mcts_params": {
-          "planning_depth": 5,
-          "num_iterations": 50,
-          "ucb1_c": 0.9,
-          "discount_factor": 0.95,
-          "timeout": 10,
-          "parallel": 4
+        "strategies": ["mh_dec_mcts_full"],
+        "strategy_configs": {
+          "mh_dec_mcts_full": "../../configs/strategies/sweeps/mh_full_balanced_standard.json"
+        },
+        "shared": {
+          "mode_labels": ["IG_BS", "IGd_BM"],
+          "cluster_radius": 4,
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [0, 20],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "correlation_types": ["adaptive"],
+          "enable_plotting": false,
+          "enable_logging": true,
+          "debug_logs": false
         }
       }
     },
     {
-      "name": "ortomap_edge_pd5_ni75_uc0.9_df0.95_pa1_to8.0",
+      "name": "mh_full_deep_llp_h5",
       "overrides": {
-        "field_type": "Ortomap",
-        "start_position": "edge",
-        "action_strategy": "mcts",
-        "params_in_path": true,
-        "n_steps": 100,
-        "iters": [
-          0,
-          20
-        ],
-        "mcts_params": {
-          "planning_depth": 5,
-          "num_iterations": 75,
-          "ucb1_c": 0.9,
-          "discount_factor": 0.95,
-          "timeout": 15.0,
-          "parallel": 1
+        "strategies": ["mh_dec_mcts_full"],
+        "strategy_configs": {
+          "mh_dec_mcts_full": "../../configs/strategies/sweeps/mh_full_deep_llp_h5.json"
+        },
+        "shared": {
+          "mode_labels": ["IG_BS", "IGd_BM"],
+          "cluster_radius": 4,
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [0, 20],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "correlation_types": ["adaptive"],
+          "enable_plotting": false,
+          "enable_logging": true,
+          "debug_logs": false
         }
       }
     },
     {
-      "name": "ortomap_edge_pd5_ni50_uc0.5_df0.95_pa4_to2.5",
+      "name": "mh_full_ucb_tune_llp1.8",
       "overrides": {
-        "field_type": "Ortomap",
-        "start_position": "edge",
-        "action_strategy": "mcts",
-        "params_in_path": true,
-        "n_steps": 100,
-        "iters": [
-          0,
-          20
-        ],
-        "mcts_params": {
-          "planning_depth": 5,
-          "num_iterations": 50,
-          "ucb1_c": 0.5,
-          "discount_factor": 0.95,
-          "timeout": 10,
-          "parallel": 4
-        }
-      }
-    },
-    {
-      "name": "ortomap_edge_pd5_ni50_uc1.4_df0.95_pa4_to2.5",
-      "overrides": {
-        "field_type": "Ortomap",
-        "start_position": "edge",
-        "action_strategy": "mcts",
-        "params_in_path": true,
-        "n_steps": 100,
-        "iters": [
-          0,
-          20
-        ],
-        "mcts_params": {
-          "planning_depth": 5,
-          "num_iterations": 50,
-          "ucb1_c": 1.4,
-          "discount_factor": 0.95,
-          "timeout": 10,
-          "parallel": 4
-        }
-      }
-    },
-    {
-      "name": "ortomap_edge_pd5_ni50_uc1.0_df1.0_pa4_to2.5",
-      "overrides": {
-        "field_type": "Ortomap",
-        "start_position": "edge",
-        "action_strategy": "mcts",
-        "params_in_path": true,
-        "n_steps": 100,
-        "iters": [
-          0,
-          20
-        ],
-        "mcts_params": {
-          "planning_depth": 5,
-          "num_iterations": 50,
-          "ucb1_c": 1.0,
-          "discount_factor": 1.0,
-          "timeout": 10,
-          "parallel": 4
+        "strategies": ["mh_dec_mcts_full"],
+        "strategy_configs": {
+          "mh_dec_mcts_full": "../../configs/strategies/sweeps/mh_full_ucb_tune_llp1.8.json"
+        },
+        "shared": {
+          "mode_labels": ["IG_BS", "IGd_BM"],
+          "cluster_radius": 4,
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [0, 20],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "correlation_types": ["adaptive"],
+          "enable_plotting": false,
+          "enable_logging": true,
+          "debug_logs": false
         }
       }
     }

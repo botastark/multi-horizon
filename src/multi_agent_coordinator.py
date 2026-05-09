@@ -276,6 +276,7 @@ class MultiAgentCoordinator:
         news_mode: Optional[str] = None,
         mode: Optional[str] = None,
         grid_info=None,
+        debug_logs: bool = False,
     ):
         """
         Initialize multi-agent coordinator.
@@ -306,8 +307,9 @@ class MultiAgentCoordinator:
             "correlation_type", ""
         )
         if self.correlation_type == "":
-            print(f"Warning: correlation_type not specified, defaulting to 'equal'")
-            breakpoint()
+            if debug_logs:
+                print(f"Warning: correlation_type not specified, defaulting to 'equal'")
+            self.correlation_type = "equal"
 
         # Prefer provided `news_mode` override, otherwise `multi_agent.news_mode`, fall back to `decentralized.news_mode`, default to BM
         if news_mode is not None:
@@ -333,27 +335,30 @@ class MultiAgentCoordinator:
             if radius_multiplier == -1:
                 # Unlimited range
                 self.communication_range = -1
-                print(f"Communication range: unlimited (radius_multiplier=-1)")
+                if debug_logs:
+                    print(f"Communication range: unlimited (radius_multiplier=-1)")
             else:
                 # Calculate h_displacement (matches reference: (field_len/2) / n_h_act)
                 n_h_act = 8 if self.num_agents == 8 else 5
                 h_displacement = (grid_info.x / 2) / n_h_act
                 self.communication_range = radius_multiplier * h_displacement
-                print(
-                    f"Communication range calculation: radius_multiplier={radius_multiplier}, "
-                    f"n_h_act={n_h_act}, field_len={grid_info.x}, "
-                    f"h_displacement={h_displacement:.3f}, "
-                    f"comm_range={self.communication_range:.3f}m"
-                )
+                if debug_logs:
+                    print(
+                        f"Communication range calculation: radius_multiplier={radius_multiplier}, "
+                        f"n_h_act={n_h_act}, field_len={grid_info.x}, "
+                        f"h_displacement={h_displacement:.3f}, "
+                        f"comm_range={self.communication_range:.3f}m"
+                    )
         else:
             # Fallback to direct communication_range specification
             self.communication_range = ma_config.get(
                 "communication_range",
                 dec_config.get("communication_range", -1),
             )  # -1 = unlimited
-            print(
-                f"Communication range: {self.communication_range}m (direct specification)"
-            )
+            if debug_logs:
+                print(
+                    f"Communication range: {self.communication_range}m (direct specification)"
+                )
 
         self.collision_distance = ma_config.get("collision_avoidance_distance", 5.0)
 
@@ -623,26 +628,17 @@ class MultiAgentCoordinator:
             )
             return neighbors
 
-        # Cell size for converting grid coordinates to meters
-        if self.grid_info is not None:
-            # Calculate cell size: field_length / num_cells
-            cell_size = self.grid_info.x / self.grid_info.shape[1]  # meters per cell
-        else:
-            # Fallback: assume 50m field with 400 cells
-            cell_size = 0.125
-
         with self._states_lock:
             for other_id, state in self._agent_states.items():
                 if other_id == agent_id:
                     continue
 
-                # Position is stored as (row, col) in grid coordinates
-                # Convert to meters for distance calculation
-                distance_cells = np.sqrt(
+                # Position is already stored in METERS (from reset_start_position)
+                # So we can calculate distance directly without cell_size conversion
+                distance_meters = np.sqrt(
                     (agent_state.position[0] - state.position[0]) ** 2
                     + (agent_state.position[1] - state.position[1]) ** 2
                 )
-                distance_meters = distance_cells * cell_size
 
                 if distance_meters <= self.communication_range:
                     neighbors.append(other_id)

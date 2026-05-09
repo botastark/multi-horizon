@@ -19,10 +19,10 @@
     "hlp": {
       "_comment": "High-Level Planner - strategic region allocation with MCTS tree search",
       "horizon": 8,
-      "iterations": 20,
+      "iterations": 30,
       "ucb_c": 1.0,
       "discount_factor": 0.98,
-      "tile_size": [50, 50],
+      "tile_size": [25, 25],
       "replan_interval": 2.0
     },
     
@@ -34,7 +34,8 @@
   },
   
   "decentralized": {
-    "overlap_penalty_weight": 0.3
+    "overlap_penalty_weight": 0.3,
+    "radius_multiplier": 5
   },
   
   "experiment": {

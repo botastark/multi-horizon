@@ -43,7 +43,7 @@ class MCTSNode:
     """
 
     def __init__(
-        self, state, camera, parent=None, action=None, conf_dict=None, plan_cfg=None
+        self, state, camera, parent=None, action=None, conf_dict=None, plan_cfg=None, seed=None
     ):
         self.state = copy_state(
             state
@@ -57,7 +57,14 @@ class MCTSNode:
         self.untried_actions = sorted(camera.permitted_actions(self.state["uav_pos"]))
         self.conf_dict = conf_dict  # Optional configuration dictionary for sensor model
         self.lock = threading.Lock()  # For thread-safe updates
-        self._rng = np.random.default_rng()
+        # Use provided seed or inherit from parent
+        if seed is not None:
+            self._rng = np.random.default_rng(seed)
+        elif parent is not None and hasattr(parent, '_rng'):
+            # Generate child seed from parent RNG for reproducibility
+            self._rng = np.random.default_rng(parent._rng.integers(2**31))
+        else:
+            self._rng = np.random.default_rng()
 
         self.plan_cfg = plan_cfg or {}
 
@@ -369,7 +376,7 @@ class MCTSPlanner:
             H, W = initial_state["belief"].shape[:2]
             initial_state["covered_mask"] = np.zeros((H, W), dtype=bool)
 
-        self.root = MCTSNode(initial_state, uav_camera, conf_dict=conf_dict)
+        self.root = MCTSNode(initial_state, uav_camera, conf_dict=conf_dict, plan_cfg=plan_cfg, seed=seed)
         self.discount_factor = discount_factor
         self.max_depth = max_depth
         self.parallel = parallel

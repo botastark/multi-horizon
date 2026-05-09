@@ -2,6 +2,7 @@ import os
 import json
 import numpy as np
 from tqdm import tqdm
+from datetime import datetime
 
 from helper import (
     FastLogger,
@@ -13,6 +14,65 @@ from uav_camera import Camera
 from multi_agent_coordinator import MultiAgentCoordinator
 from experiment_utils import initialize_agent
 from simulator import Simulator
+
+
+def _build_logged_hyperparams(config, action_strategy, mcts_params):
+    """Build a flat, method-specific hyperparameter dictionary for run.log headers."""
+    hyperparams = {}
+
+    # Keep legacy mcts_params fields when present
+    if isinstance(mcts_params, dict):
+        for key in ["horizon", "iterations", "ucb_c", "discount_factor", "timeout"]:
+            if key in mcts_params:
+                hyperparams[key] = mcts_params[key]
+
+    decentralized_cfg = config.get("decentralized", {})
+    for key in ["overlap_penalty_weight", "radius_multiplier"]:
+        if key in decentralized_cfg:
+            hyperparams[key] = decentralized_cfg[key]
+
+    if action_strategy == "greedy_ig":
+        greedy_cfg = config.get("greedy_ig", {})
+        if "overlap_penalty_weight" in greedy_cfg:
+            hyperparams["overlap_penalty_weight"] = greedy_cfg["overlap_penalty_weight"]
+
+    elif action_strategy == "dec_mcts":
+        dec_cfg = config.get("dec_mcts", {})
+        for key in ["horizon", "iterations", "ucb_c", "discount_factor", "timeout"]:
+            if key in dec_cfg:
+                hyperparams[key] = dec_cfg[key]
+
+    elif action_strategy in [
+        "hierarchical_dec_mcts",
+        "mh_dec_mcts",
+        "mh_dec_mcts_both",
+        "mh_dec_mcts_full",
+        "mh_dec_mcts_efficient",
+    ]:
+        hier_cfg = config.get("hierarchical_dec_mcts", {})
+        llp_cfg = hier_cfg.get("llp", {})
+        hlp_cfg = hier_cfg.get("hlp", {})
+
+        if llp_cfg:
+            for key in ["horizon", "iterations", "ucb_c", "discount_factor"]:
+                if key in llp_cfg:
+                    hyperparams[f"llp_{key}"] = llp_cfg[key]
+        if hlp_cfg:
+            for key in ["horizon", "iterations", "ucb_c", "discount_factor"]:
+                if key in hlp_cfg:
+                    hyperparams[f"hlp_{key}"] = hlp_cfg[key]
+            if "replan_interval" in hlp_cfg:
+                hyperparams["hlp_replan_interval"] = hlp_cfg["replan_interval"]
+
+        # flattened compatibility keys
+        for key, value in hier_cfg.items():
+            if key.startswith("llp_") or key.startswith("hlp_"):
+                hyperparams[key] = value
+
+        if "use_mcts_llp" in hier_cfg:
+            hyperparams["use_mcts_llp"] = hier_cfg["use_mcts_llp"]
+
+    return hyperparams
 
 
 def run_single_agent_experiment(
@@ -61,6 +121,9 @@ def run_single_agent_experiment(
 
     agents = [agent_state]
 
+    # Generate unique run ID for this iteration (timestamp-based for linking logs/plots)
+    run_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+
     simulator = Simulator(
         agents=agents,
         map_obj=map_obj,
@@ -78,6 +141,8 @@ def run_single_agent_experiment(
         action_strategy=action_strategy,
         coordinator=None,
         multi_agent_logger=None,
+        run_id=run_id,
+        debug_logs=False,
     )
 
     result = simulator.run()
@@ -119,6 +184,7 @@ def run_multi_agent_experiment(
     init_camera=None,
     init_planner=None,
     init_occupancy_map=None,
+    debug_logs=False,
 ):
     """
     Run a multi-agent experiment iteration with decentralized coordination.
@@ -127,9 +193,13 @@ def run_multi_agent_experiment(
     num_agents = config.get("num_agents", ma_config.get("num_agents", 1))
     start_position = config.get("start_position", "corner")
 
-    print(f"\n{'='*60}")
-    print(f"MULTI-AGENT EXPERIMENT: {num_agents} agents")
-    print(f"{'='*60}\n")
+    if debug_logs:
+        from experiment_config import get_main_logger
+
+        logger = get_main_logger()
+        logger.info(f"\n{'='*60}")
+        logger.info(f"MULTI-AGENT EXPERIMENT: {num_agents} agents")
+        logger.info(f"{'='*60}\n")
 
     # Create RNG
     rng = np.random.default_rng(seed)
@@ -215,6 +285,7 @@ def run_multi_agent_experiment(
                 seed=seed,
                 coordinator=None,
                 start_altitude=start_z,
+                debug_logs=debug_logs,
             )
             agents.append(agent_state)
 
@@ -237,6 +308,7 @@ def run_multi_agent_experiment(
             news_mode=coord_news_mode,
             mode=news_mode,
             grid_info=grid_info,
+            debug_logs=debug_logs,
         )
 
         # Generate start positions for all agents
@@ -247,7 +319,8 @@ def run_multi_agent_experiment(
             seed=seed,
             camera_hrange=camera_hrange,
         )
-        print(f"Start positions: {start_positions}")
+        if debug_logs:
+            logger.info(f"Start positions: {start_positions}")
 
         for agent_id in range(num_agents):
             sp = start_positions[agent_id]
@@ -269,6 +342,7 @@ def run_multi_agent_experiment(
                 seed=seed,
                 coordinator=coordinator,
                 start_altitude=start_z,
+                debug_logs=debug_logs,
             )
             agents.append(agent_state)
 
@@ -310,13 +384,28 @@ def run_multi_agent_experiment(
         coordinator.mode = news_mode
     except Exception:
         pass
+
+    # Generate unique run ID for this iteration (timestamp-based for linking logs/plots)
+    run_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+
     if ENABLE_LOGGING:
         log_folder = os.path.join(results_folder, "txt")
         init_positions = [agent["uav_pos"] for agent in agents]
-        
+        logged_hyperparams = _build_logged_hyperparams(
+            config=config,
+            action_strategy=action_strategy,
+            mcts_params=mcts_params,
+        )
+
         # Determine if hierarchical timing columns are needed
-        use_hierarchical_timing = action_strategy in ("hierarchical_dec_mcts", "mh_dec_mcts", "mh_dec_mcts_both", "mh_dec_mcts_full", "mh_dec_mcts_efficient")
-        
+        use_hierarchical_timing = action_strategy in (
+            "hierarchical_dec_mcts",
+            "mh_dec_mcts",
+            "mh_dec_mcts_both",
+            "mh_dec_mcts_full",
+            "mh_dec_mcts_efficient",
+        )
+
         multi_agent_logger = FastLogger(
             log_folder,
             strategy=action_strategy,
@@ -332,16 +421,19 @@ def run_multi_agent_experiment(
             multi_agent=True,
             news_mode=news_mode,
             use_hierarchical_timing=use_hierarchical_timing,
+            run_id=run_id,
             header_extras=[
+                ("hyperparams", json.dumps(logged_hyperparams, sort_keys=True)),
                 ("mcts_params", json.dumps(mcts_params, sort_keys=True)),
             ],
         )
 
     # Setup step-wise plotting directory
     if ENABLE_STEPWISE_PLOTTING:
+        # Use "plots" as folder name instead of correlation type pattern
+        plot_folder = os.path.join(results_folder, "plots")
         os.makedirs(
-            results_folder
-            + f"/{corr_type}_{action_strategy}_e{e_margin}_r{grf_r}/{iter_idx}/steps/",
+            f"{plot_folder}/{iter_idx}/steps/",
             exist_ok=True,
         )
 
@@ -362,24 +454,31 @@ def run_multi_agent_experiment(
         action_strategy=action_strategy,
         coordinator=coordinator,
         multi_agent_logger=multi_agent_logger,
+        run_id=run_id,
+        debug_logs=debug_logs,
     )
 
     result = simulator.run()
 
-    # Print coordination statistics when available
-    coord_stats = result.get("coordination_stats", {})
-    if coord_stats:
-        print(f"\n{'='*60}")
-        print("MULTI-AGENT COORDINATION STATISTICS")
-        print(f"{'='*60}")
-        print(f"Belief fusions: {coord_stats.get('belief_fusions', 0)}")
-        print(f"Region allocations: {coord_stats.get('region_allocations', 0)}")
-        print(f"Collision avoidances: {coord_stats.get('collision_avoidances', 0)}")
-        print(f"Communication stats: {coord_stats.get('comm_bus', {})}")
-        if "lbp_fusion" in coord_stats:
-            print(f"LBP Fusion stats: {coord_stats['lbp_fusion']}")
-        if "coverage_per_agent" in coord_stats:
-            print(f"Coverage per agent: {coord_stats['coverage_per_agent']}")
-        print(f"{'='*60}\n")
+    # Log coordination statistics when available (only if debug_logs enabled)
+    if debug_logs:
+        coord_stats = result.get("coordination_stats", {})
+        if coord_stats:
+            logger.info(f"\n{'='*60}")
+            logger.info("MULTI-AGENT COORDINATION STATISTICS")
+            logger.info(f"{'='*60}")
+            logger.info(f"Belief fusions: {coord_stats.get('belief_fusions', 0)}")
+            logger.info(
+                f"Region allocations: {coord_stats.get('region_allocations', 0)}"
+            )
+            logger.info(
+                f"Collision avoidances: {coord_stats.get('collision_avoidances', 0)}"
+            )
+            logger.info(f"Communication stats: {coord_stats.get('comm_bus', {})}")
+            if "lbp_fusion" in coord_stats:
+                logger.info(f"LBP Fusion stats: {coord_stats['lbp_fusion']}")
+            if "coverage_per_agent" in coord_stats:
+                logger.info(f"Coverage per agent: {coord_stats['coverage_per_agent']}")
+            logger.info(f"{'='*60}\n")
 
     return result

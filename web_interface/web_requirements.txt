@@ -1,0 +1,4 @@
+# Web Interface Requirements
+# Install with: pip install -r web_requirements.txt
+
+flask>=2.3.0

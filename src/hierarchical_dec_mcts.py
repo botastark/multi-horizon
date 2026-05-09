@@ -411,6 +411,7 @@ class LowLevelPlanner:
         intent_discount: float = 0.8,  # Discount for teammate intent influence
         use_mcts_llp: bool = False,  # Use MCTS for LLP instead of random rollouts
         use_g2: bool = False,  # Compute g2 mission time estimate (slower but more accurate)
+        seed: Optional[int] = None,
     ):
         """
         Initialize LLP.
@@ -464,6 +465,9 @@ class LowLevelPlanner:
 
         # Actions
         self.actions = ["front", "back", "left", "right", "up", "down", "hover"]
+
+        # RNG for reproducible randomization
+        self._rng = np.random.default_rng(seed)
 
         # Cache for teammate intent staleness (memoization)
         self._teammate_staleness_cache: Dict[int, bool] = {}
@@ -888,11 +892,11 @@ class LowLevelPlanner:
             """Select action using UCB1."""
             if state_k not in tree:
                 tree[state_k] = {}
-                return np.random.choice(self.actions)
+                return self._rng.choice(self.actions)
 
             node = tree[state_k]
             if not node or depth >= self.horizon:
-                return np.random.choice(self.actions)
+                return self._rng.choice(self.actions)
 
             # Get total visits at this state
             total_visits = sum(action_data["visits"] for action_data in node.values())
@@ -912,7 +916,7 @@ class LowLevelPlanner:
                     best_score = score
                     best_action = action
 
-            return best_action if best_action else np.random.choice(self.actions)
+            return best_action if best_action else self._rng.choice(self.actions)
 
         # Run MCTS iterations
         best_reward = float("-inf")
@@ -1040,7 +1044,7 @@ class LowLevelPlanner:
 
             for _ in range(self.num_iterations):
                 # Random action sequence
-                actions = [np.random.choice(self.actions) for _ in range(self.horizon)]
+                actions = [self._rng.choice(self.actions) for _ in range(self.horizon)]
 
                 # Simulate and evaluate
                 reward, states, footprints, igs = self._simulate_trajectory(
@@ -1117,6 +1121,7 @@ class HighLevelPlanner:
         horizon: int = 3,
         num_iterations: int = 50,
         replan_interval: float = 1.0,
+        seed: Optional[int] = None,
     ):
         """
         Initialize HLP.
@@ -1538,7 +1543,7 @@ class HighLevelPlanner:
 
             if unexplored:
                 # Expansion: pick random unexplored action
-                action = random.choice(unexplored)
+                action = self._rng.choice(unexplored)
                 node["children"][action] = {"visits": 0, "value": 0.0}
 
                 # Simulate from this new node
@@ -1635,7 +1640,7 @@ class HighLevelPlanner:
                 break
 
             # Pick random region (simple rollout policy)
-            region_id = random.choice(available)
+            region_id = self._rng.choice(available)
             sequence.append(region_id)
             visited.add(region_id)
             position = self.regions[region_id]["center"]
@@ -1764,6 +1769,7 @@ class HierarchicalDecMCTSPlanner:
         hlp_replan_interval: float = 1.0,
         use_mcts_llp: bool = False,
         use_g2: bool = False,
+        seed: Optional[int] = None,
     ):
         """
         Initialize hierarchical planner.
@@ -1798,6 +1804,7 @@ class HierarchicalDecMCTSPlanner:
             num_iterations=llp_iterations,
             use_mcts_llp=use_mcts_llp,
             use_g2=use_g2,
+            seed=seed,
         )
 
         # Create HLP
@@ -1809,6 +1816,7 @@ class HierarchicalDecMCTSPlanner:
             horizon=hlp_horizon,
             num_iterations=hlp_iterations,
             replan_interval=hlp_replan_interval,
+            seed=seed if seed is None else seed + 1000,  # Offset for HLP
         )
 
         # Current state
@@ -2070,6 +2078,7 @@ def create_hierarchical_planner(
     grid_info,
     intent_bus: Optional[IntentBus] = None,
     config: Optional[Dict[str, Any]] = None,
+    seed: Optional[int] = None,
 ) -> HierarchicalDecMCTSPlanner:
     """
     Factory function to create a hierarchical Dec-MCTS planner.
@@ -2115,4 +2124,5 @@ def create_hierarchical_planner(
         hlp_replan_interval=hlp_replan_interval,
         use_mcts_llp=use_mcts_llp,
         use_g2=use_g2,
+        seed=seed,
     )

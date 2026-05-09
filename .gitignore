@@ -94,11 +94,12 @@ cache
 # ignore temp result folders
 results_*
 trials/
+experiments/
 plots/
 logs/
 log*
 plots_*
-trials_*
+
 # ignore not relavant files
 src/tile_class.py
 src/classifier.py

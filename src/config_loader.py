@@ -20,10 +20,10 @@ logger = logging.getLogger(__name__)
 
 def load_config(config_file: str) -> List[Dict[str, Any]]:
     """
-    Load configuration from master config file.
+    Load configuration from master config file or standalone strategy config.
 
     Args:
-        config_file: Path to master config JSON file
+        config_file: Path to master config JSON file or standalone strategy config
 
     Returns:
         List of fully resolved configurations (one per strategy)
@@ -31,11 +31,47 @@ def load_config(config_file: str) -> List[Dict[str, Any]]:
     with open(config_file, "r") as f:
         config = json.load(f)
 
-    version = config.get("_version", "3.0")
-    if version != "3.0":
-        raise ValueError(f"Only v3.0 configs supported. Found version: {version}")
-
-    return _load_master_config(config, os.path.dirname(config_file))
+    # Check if this is a master config (has "strategies" key) or standalone strategy config
+    if "strategies" in config:
+        # Master config v3.0
+        version = config.get("_version", "3.0")
+        if version != "3.0":
+            raise ValueError(f"Only v3.0 configs supported. Found version: {version}")
+        return _load_master_config(config, os.path.dirname(config_file))
+    else:
+        # Standalone strategy config - merge shared section if present
+        logger.info(f"Loading standalone strategy config from: {config_file}")
+        
+        # Default shared values for standalone configs
+        default_shared = {
+            'project_path': './',
+            'field_type': 'Gaussian',
+            'cluster_radius': 4,
+            'start_position': 'corner',
+            'num_agents': 4,
+            'n_steps': 15,
+            'iters': [0, 20],
+            'correlation_types': ['adaptive'],
+            'error_margins': [None],
+            'enable_plotting': True,
+            'enable_logging': True,
+            'mode_labels': ['IGd_BM']
+        }
+        
+        # If config has a "shared" section, merge it with defaults
+        if "shared" in config:
+            shared = {**default_shared, **config.pop("shared")}
+        else:
+            shared = default_shared
+            
+        # Merge shared into config (config values take precedence)
+        for key, value in shared.items():
+            if key not in config:
+                config[key] = value
+        
+        # Flatten hierarchical configs
+        config = flatten_hierarchical_config(config)
+        return [config]
 
 
 def _load_master_config(master: Dict[str, Any], base_dir: str) -> List[Dict[str, Any]]:
@@ -80,7 +116,7 @@ def _load_master_config(master: Dict[str, Any], base_dir: str) -> List[Dict[str,
 
         # Merge: shared <- strategy overrides
         merged = _merge_configs(
-            shared, shared_decentralized, shared_experiment, strategy_cfg
+            shared, shared_decentralized, shared_experiment, strategy_cfg, master
         )
 
         # Filter comments
@@ -97,6 +133,7 @@ def _merge_configs(
     shared_decentralized: Dict[str, Any],
     shared_experiment: Dict[str, Any],
     strategy: Dict[str, Any],
+    master: Dict[str, Any] = None,
 ) -> Dict[str, Any]:
     """
     Merge shared and strategy-specific configs.
@@ -104,6 +141,10 @@ def _merge_configs(
     Strategy config takes precedence over shared config.
     """
     merged = copy.deepcopy(shared)
+    
+    # Copy limited_testing flag from master config if present
+    if master and "limited_testing" in master:
+        merged["limited_testing"] = master["limited_testing"]
 
     # Merge decentralized settings
     merged_decentralized = copy.deepcopy(shared_decentralized)
