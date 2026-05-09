@@ -130,6 +130,7 @@ class DecMCTSNode:
         action: str = None,
         conf_dict: Dict = None,
         config: Dict = None,
+        seed: int = None,
     ):
         self.state = copy_state(state)
         self.parent = parent
@@ -146,7 +147,13 @@ class DecMCTSNode:
 
         # Thread safety
         self.lock = threading.Lock()
-        self._rng = np.random.default_rng()
+        # Use provided seed or inherit from parent for reproducibility
+        if seed is not None:
+            self._rng = np.random.default_rng(seed)
+        elif parent is not None and hasattr(parent, '_rng'):
+            self._rng = np.random.default_rng(parent._rng.integers(2**31))
+        else:
+            self._rng = np.random.default_rng()
 
     def is_fully_expanded(self) -> bool:
         """Check if all actions have been tried."""
@@ -187,6 +194,7 @@ class DecMCTSNode:
             action=action,
             conf_dict=self.conf_dict,
             config=self.config,
+            seed=None,  # Will inherit from parent
         )
         self.children[action] = child
         return child
@@ -420,6 +428,7 @@ class DecMCTSPlanner:
         grid_info,
         conf_dict: Optional[Dict] = None,
         config: Optional[Dict] = None,
+        seed: Optional[int] = None,
     ):
         """
         Initialize Dec-MCTS planner.
@@ -473,8 +482,9 @@ class DecMCTSPlanner:
         self._mcts_action_values: Dict[str, float] = {}
         self._mcts_action_visits: Dict[str, int] = {}
 
-        # RNG
-        self._rng = np.random.default_rng()
+        # RNG with seed
+        self._rng = np.random.default_rng(seed)
+        self._seed = seed
 
     def update_state(
         self,
@@ -551,6 +561,7 @@ class DecMCTSPlanner:
             camera=self.camera,
             conf_dict=self.conf_dict,
             config=self.config,
+            seed=self._seed,
         )
 
         # Run MCTS iterations

@@ -285,6 +285,7 @@ class FastLogger:
         iteration=None,
         news_mode=None,
         use_hierarchical_timing=False,
+        run_id=None,
     ):
         os.makedirs(log_folder, exist_ok=True)
         self.path = os.path.join(log_folder, filename)
@@ -295,6 +296,8 @@ class FastLogger:
 
         # Header
         self._w(f"[{_dt.datetime.now().isoformat(timespec='seconds')}]\n")
+        if run_id is not None:
+            self._w(f"Run ID: {run_id}\n")
         self._w(f"Strategy: {strategy}\n")
         self._w(f"Pairwise: {pairwise}\n")
 

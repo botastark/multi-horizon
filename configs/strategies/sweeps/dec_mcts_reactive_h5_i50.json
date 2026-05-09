@@ -1,7 +1,7 @@
 {
   "_comment": "Dec-MCTS - Reactive: Short horizon, more iterations",
   "action_strategy": "dec_mcts",
-
+  
   "dec_mcts": {
     "horizon": 5,
     "iterations": 50,
@@ -10,15 +10,18 @@
     "timeout": 5.0,
     "parallel": 1
   },
-
+  
   "decentralized": {
     "overlap_penalty_weight": 0.3,
     "radius_multiplier": 5
   },
-
+  
   "experiment": {
-    "name": "dec_mcts_reactive_h5_i50_notsweeprun",
+    "name": "dec_mcts_reactive_h5_i50",
     "log_dir_suffix": "dec_mcts",
-    "strategy_metrics": ["mcts_iterations", "planning_time_ms"]
+    "strategy_metrics": [
+      "mcts_iterations",
+      "planning_time_ms"
+    ]
   }
 }

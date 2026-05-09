@@ -36,6 +36,7 @@ def initialize_agent(
     seed: int,
     coordinator=None,
     start_altitude: Optional[float] = None,
+    debug_logs: bool = False,
 ) -> Dict[str, Any]:
     """
     Initialize a single agent with camera, planner, and state.
@@ -80,6 +81,8 @@ def initialize_agent(
         mcts_params=mcts_params,
         agent_id=agent_id,
         coordinator=coordinator,
+        seed=seed + agent_id,
+        debug_logs=debug_logs,
     )
 
     # Initialize UAV position

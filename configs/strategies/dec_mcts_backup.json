@@ -1,0 +1,29 @@
+{
+  "_comment": "Strategy 2: Dec-MCTS - Single-level MCTS with multi-step trajectory planning",
+  "_description": "UCB tree search over action sequences with D-UCT intent sharing",
+  
+  "action_strategy": "dec_mcts",
+  
+  "dec_mcts": {
+    "horizon": 10,
+    "iterations": 30,
+    "ucb_c": 1.4,
+    "discount_factor": 0.95,
+    "timeout": 5.0,
+    "parallel": 1
+  },
+  
+  "decentralized": {
+    "overlap_penalty_weight": 0.3,
+    "radius_multiplier": 5
+  },
+  
+  "experiment": {
+    "name": "dec_mcts_benchmark",
+    "log_dir_suffix": "dec_mcts",
+    "strategy_metrics": [
+      "mcts_iterations",
+      "planning_time_ms"
+    ]
+  }
+}

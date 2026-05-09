@@ -173,7 +173,7 @@ class Field:
 
         filepath = self._cache_filepath()
         if os.path.exists(filepath):
-            print("loading cache for predictions")
+            # Silently load cache
             with open(filepath, "rb") as f:
                 return pickle.load(f)
         self.predictions_cache = {}
@@ -184,7 +184,7 @@ class Field:
     def _save_cache(self):
         with open(self._cache_filepath(), "wb") as f:
             pickle.dump(self.predictions_cache, f)
-        print("saved cache for predictions")
+        # Cache saved silently
 
     def _initialize_predictions(self):
         """
@@ -503,11 +503,11 @@ class Field:
         for i in range(rows):
             for j in range(cols):
                 if true_matrix[i, j] == 1:
-                    observation_matrix[i, j] = np.random.choice(
+                    observation_matrix[i, j] = self.rng.choice(
                         [1, 0], p=[P_z_equals_m, P_z_not_equals_m]
                     )
                 else:
-                    observation_matrix[i, j] = np.random.choice(
+                    observation_matrix[i, j] = self.rng.choice(
                         [0, 1], p=[P_z_equals_m, P_z_not_equals_m]
                     )
 

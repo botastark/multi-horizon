@@ -16,6 +16,7 @@ class planning:
         agent_id: int = 0,
         coordinator=None,
         seed=None,
+        debug_logs=False,
     ):
         # Initialize belief map (each cell has a default probability of 0.5) and set UAV planning parameters
         self.M = np.full((grid_info.shape[0], grid_info.shape[1], 2), 0.5)
@@ -27,6 +28,8 @@ class planning:
         self.sweep_direction = None
         self.agent_id = agent_id
         self.coordinator = coordinator
+        self.seed = seed
+        self.debug_logs = debug_logs
         # MCTS parameters with defaults
         if mcts_params is None:
             mcts_params = {}
@@ -57,7 +60,11 @@ class planning:
     def finalize_episode(self):
         """Finalize episode and log statistics for planners."""
         # Log Dec-MCTS stats
-        if self.strategy == "dec_mcts" and hasattr(self, "_dec_mcts_planner"):
+        if (
+            self.debug_logs
+            and self.strategy == "dec_mcts"
+            and hasattr(self, "_dec_mcts_planner")
+        ):
             stats = self._dec_mcts_planner.get_statistics()
             print(f"\n[DEC-MCTS] Final Stats for Agent {self.agent_id}:")
             print(f"  Plans generated: {stats['plans_generated']}")
@@ -66,8 +73,10 @@ class planning:
             print(f"  Intent updates received: {stats['intent_updates_received']}\n")
 
         # Log Multi-Horizon Dec-MCTS stats
-        if self.strategy == "hierarchical_dec_mcts" and hasattr(
-            self, "_hierarchical_planner"
+        if (
+            self.debug_logs
+            and self.strategy == "hierarchical_dec_mcts"
+            and hasattr(self, "_hierarchical_planner")
         ):
             stats = self._hierarchical_planner.get_statistics()
             print(f"\n[MH DEC-MCTS] Final Stats for Agent {self.agent_id}:")
@@ -87,7 +96,11 @@ class planning:
             print(f"  Intent Bus: {stats['intent_bus']}\n")
 
         # Log Greedy IG stats
-        if self.strategy == "greedy_ig" and hasattr(self, "_greedy_ig_planner"):
+        if (
+            self.debug_logs
+            and self.strategy == "greedy_ig"
+            and hasattr(self, "_greedy_ig_planner")
+        ):
             stats = self._greedy_ig_planner.get_statistics()
             mode = "IGd" if self._greedy_ig_planner.enable_discounting else "IG"
             print(f"\n[GREEDY {mode}] Final Stats for Agent {self.agent_id}:")
@@ -275,6 +288,7 @@ class planning:
                 grid_info=self.uav.grid,
                 conf_dict=self.conf_dict,
                 config=config,
+                seed=self.seed,
             )
 
             mode = (
@@ -282,10 +296,11 @@ class planning:
                 if config["enable_discounting"]
                 else "IG"
             )
-            print(f"\n[GREEDY {mode}] Agent {self.agent_id} initialized")
-            print(
-                f"  Paper approach: pure belief-based IG (no penalties, no intents)\n"
-            )
+            if self.debug_logs:
+                print(f"\n[GREEDY {mode}] Agent {self.agent_id} initialized")
+                print(
+                    f"  Paper approach: pure belief-based IG (no penalties, no intents)\n"
+                )
 
         planner = self._greedy_ig_planner
 
@@ -378,8 +393,6 @@ class planning:
             DecMCTSCoordinator,
         )
 
-
-
         # Create or get Dec-MCTS planner
         if not hasattr(self, "_dec_mcts_planner"):
             # Check if coordinator has a shared Dec-MCTS coordinator
@@ -431,14 +444,18 @@ class planning:
                 grid_info=self.uav.grid,
                 conf_dict=self.conf_dict,
                 config=config,
+                seed=self.seed,
             )
             self._dec_mcts_coordinator = dec_mcts_coordinator
 
-            print(f"\n[DEC-MCTS] Agent {self.agent_id} initialized")
-            print(f"  Horizon: {config['horizon']}, Iterations: {config['iterations']}")
-            print(
-                f"  D-UCT decay: {config['d_uct_decay']}, threshold: {config['d_uct_threshold']}s\n"
-            )
+            if self.debug_logs:
+                print(f"\n[DEC-MCTS] Agent {self.agent_id} initialized")
+                print(
+                    f"  Horizon: {config['horizon']}, Iterations: {config['iterations']}"
+                )
+                print(
+                    f"  D-UCT decay: {config['d_uct_decay']}, threshold: {config['d_uct_threshold']}s\n"
+                )
 
         planner = self._dec_mcts_planner
 
@@ -557,16 +574,18 @@ class planning:
                 grid_info=self.uav.grid,
                 intent_bus=intent_bus,
                 config=config,
+                seed=self.seed,
             )
 
             llp_mode = "MCTS tree search" if use_mcts_llp else "random rollouts"
-            print(f"\n[HIERARCHICAL DEC-MCTS] Agent {self.agent_id} initialized")
-            print(
-                f"  LLP: {llp_mode}, horizon: {config['llp_horizon']}, iterations: {config['llp_iterations']}"
-            )
-            print(
-                f"  HLP: MCTS, horizon: {config['hlp_horizon']}, tile_size: {config['tile_size']}\n"
-            )
+            if self.debug_logs:
+                print(f"\n[HIERARCHICAL DEC-MCTS] Agent {self.agent_id} initialized")
+                print(
+                    f"  LLP: {llp_mode}, horizon: {config['llp_horizon']}, iterations: {config['llp_iterations']}"
+                )
+                print(
+                    f"  HLP: MCTS, horizon: {config['hlp_horizon']}, tile_size: {config['tile_size']}\n"
+                )
 
         planner = self._hierarchical_planner
 
@@ -637,6 +656,7 @@ class planning:
             max_depth=params["planning_depth"],
             parallel=params["parallel"],
             ucb1_c=params["ucb1_c"],
+            seed=self.seed,
         )
         if action_seq:
             action_seq = mcts_planner.extract_solution(

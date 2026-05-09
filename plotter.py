@@ -945,6 +945,21 @@ def plot_news_mode_comparison(
     available_modes = sorted(data["NewsMode"].unique())
     print(f"Plotting news modes: {available_modes}")
 
+    # Get strategy name for labels if available
+    strategy_name = ""
+    if "Strategy" in data.columns:
+        strategies = data["Strategy"].unique()
+        if len(strategies) == 1:
+            # Format strategy name (e.g., "greedy_ig" -> "Greedy-IG")
+            strat = strategies[0]
+            strategy_name = (
+                strat.replace("_", "-")
+                .replace("greedy-ig", "Greedy-IG")
+                .replace("dec-mcts", "Dec-MCTS")
+                .replace("mh-dec-mcts", "MH-Dec-MCTS")
+            )
+            strategy_name = strategy_name + " "
+
     # Create figure: 1 row, 2 columns (MSE, Coverage)
     fig, axes = plt.subplots(1, 2, figsize=(16, 6), constrained_layout=True)
 
@@ -956,16 +971,19 @@ def plot_news_mode_comparison(
             if mode_data.empty:
                 continue
 
-            # Limit to 100 steps
-            mode_data = mode_data[mode_data["Step"] <= 100]
+            # Limit to 100 steps and sort by Step to prevent line wrapping
+            mode_data = mode_data[mode_data["Step"] <= 100].sort_values("Step")
 
-            steps = mode_data["Step"]
-            mean_vals = mode_data[(metric, "mean")]
-            std_vals = mode_data[(metric, "std")]
+            steps = mode_data["Step"].values
+            mean_vals = mode_data[(metric, "mean")].values
+            std_vals = mode_data[(metric, "std")].values
 
             props = mode_props.get(
                 mode, {"color": "gray", "linestyle": "-", "marker": "", "label": mode}
             )
+
+            # Create label with strategy name if available
+            plot_label = strategy_name + props["label"]
 
             # Plot with markers every 5 steps for better visibility
             ax.plot(
@@ -974,7 +992,7 @@ def plot_news_mode_comparison(
                 color=props["color"],
                 linestyle=props["linestyle"],
                 linewidth=props.get("linewidth", 2.5),
-                label=props["label"],
+                label=plot_label,
                 markevery=5,
                 marker=props.get("marker", ""),
                 markersize=8,
@@ -1258,9 +1276,7 @@ def plot_method_comparison(
     # Metrics to plot: Entropy, Height, MSE, Coverage -> 2x2 grid
     metrics = ["Entropy", "Height", "MSE", "Coverage"]
     nrows, ncols = 2, 2
-    fig, axes = plt.subplots(
-        nrows=nrows, ncols=ncols, figsize=(14, 10), constrained_layout=True
-    )
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(14, 10))
     axes = axes.flatten()
 
     colors = [
@@ -1317,16 +1333,21 @@ def plot_method_comparison(
         ax.set_title(metric + " over Steps")
         ax.grid(True, linestyle="--", alpha=0.5)
 
-    # Add a single shared legend at the bottom
-    handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(
-        handles,
-        labels,
-        loc="lower center",
-        ncol=4,
-        bbox_to_anchor=(0.5, -0.02),
-        frameon=True,
-    )
+        # Add legend only to Coverage plot (bottom right)
+        if metric == "Coverage":
+            ax.legend(loc="lower right", fontsize=10, framealpha=0.9)
+
+    # Add main title with news_mode and num_agents info
+    title_parts = [f"Multi-Agent Planning Comparison (r={radius}, {pairwise})"]
+    if news_mode:
+        title_parts.append(f"News Mode: {news_mode}")
+    if na_val != "unknown":
+        title_parts.append(f"Agents: {na_val}")
+    main_title = " | ".join(title_parts)
+    fig.suptitle(main_title, fontsize=13, fontweight="bold", y=0.995)
+
+    # Adjust subplot spacing to accommodate title
+    plt.subplots_adjust(top=0.91)
 
     os.makedirs(save_dir, exist_ok=True)
 
@@ -1405,7 +1426,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--compare-methods",
         action="store_true",
-        help="Compare Greedy-IG, Dec-MCTS, MH-Efficient and MH-Full methods (auto-discovers trials/ folders)",
+        help="Compare Greedy-IG, Dec-MCTS, MH-Efficient and MH-Full methods (auto-discovers experiments/runs/ folders)",
     )
 
     parser.add_argument(
@@ -1426,22 +1447,11 @@ if __name__ == "__main__":
             paths, args.show, args.radius, args.pairwise, args.comm_range
         )
     elif args.compare_methods:
-        # Auto-discover trial folders for the three methods and compare them
+        # Auto-discover experiment folders and compare methods
         script_dir = os.path.dirname(os.path.realpath(__file__))
-        # Patterns under trials/
-        greedy_pattern = os.path.join(script_dir, "trials", "greedy_ig*")
-        dec_pattern = os.path.join(script_dir, "trials", "dec_mcts_*")
-        mh_full_pattern = os.path.join(script_dir, "trials", "mh_dec_mcts_both*")
-        mh_efficient_pattern = os.path.join(script_dir, "trials", "mh_dec_mcts_*")
 
-        greedy_dirs = sorted(glob.glob(greedy_pattern))
-        dec_dirs = sorted(glob.glob(dec_pattern))
-        mh_full_dirs = sorted(glob.glob(mh_full_pattern))
-        # MH-Efficient: get mh_dec_mcts_* but exclude mh_dec_mcts_both*
-        all_mh_dirs = sorted(glob.glob(mh_efficient_pattern))
-        mh_efficient_dirs = [
-            d for d in all_mh_dirs if "_both" not in os.path.basename(d)
-        ]
+        # Search: experiments/runs/ structure
+        experiments_base = os.path.join(script_dir, "experiments", "runs")
 
         method_paths = {
             "Greedy-IG": [],
@@ -1450,24 +1460,48 @@ if __name__ == "__main__":
             "MH-Full": [],
         }
 
-        for d in greedy_dirs:
-            txtp = os.path.join(d, "txt")
-            method_paths["Greedy-IG"].append(txtp if os.path.exists(txtp) else d)
-        for d in dec_dirs:
-            txtp = os.path.join(d, "txt")
-            method_paths["Dec-MCTS"].append(txtp if os.path.exists(txtp) else d)
-        for d in mh_efficient_dirs:
-            txtp = os.path.join(d, "txt")
-            method_paths["MH-Efficient"].append(txtp if os.path.exists(txtp) else d)
-        for d in mh_full_dirs:
-            txtp = os.path.join(d, "txt")
-            method_paths["MH-Full"].append(txtp if os.path.exists(txtp) else d)
+        # Search experiments/runs/ for all methods
+        if os.path.exists(experiments_base):
+            # Greedy IG
+            greedy_dir = os.path.join(experiments_base, "greedy_ig")
+            if os.path.exists(greedy_dir):
+                for run_dir in glob.glob(os.path.join(greedy_dir, "run_*")):
+                    txt_path = os.path.join(run_dir, "txt")
+                    if os.path.exists(txt_path):
+                        method_paths["Greedy-IG"].append(txt_path)
+
+            # Dec-MCTS
+            dec_dir = os.path.join(experiments_base, "dec_mcts")
+            if os.path.exists(dec_dir):
+                for run_dir in glob.glob(os.path.join(dec_dir, "run_*")):
+                    txt_path = os.path.join(run_dir, "txt")
+                    if os.path.exists(txt_path):
+                        method_paths["Dec-MCTS"].append(txt_path)
+
+            # MH-Full
+            mh_full_dir = os.path.join(experiments_base, "mh_dec_mcts_full")
+            if os.path.exists(mh_full_dir):
+                for run_dir in glob.glob(os.path.join(mh_full_dir, "run_*")):
+                    txt_path = os.path.join(run_dir, "txt")
+                    if os.path.exists(txt_path):
+                        method_paths["MH-Full"].append(txt_path)
+
+            # MH-Efficient
+            mh_eff_dir = os.path.join(experiments_base, "mh_dec_mcts_efficient")
+            if os.path.exists(mh_eff_dir):
+                for run_dir in glob.glob(os.path.join(mh_eff_dir, "run_*")):
+                    txt_path = os.path.join(run_dir, "txt")
+                    if os.path.exists(txt_path):
+                        method_paths["MH-Efficient"].append(txt_path)
+        else:
+            print(f"⚠️  Warning: experiments/runs/ directory not found at {experiments_base}")
+            print("   Run some experiments first!")
 
         # Aggregate per-method stats
         per_method_stats = {}
         for method, paths_list in method_paths.items():
             if not paths_list:
-                print(f"No trials found for {method}")
+                print(f"No experiments found for {method}")
                 continue
             try:
                 stats = pd.DataFrame()
