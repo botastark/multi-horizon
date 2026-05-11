@@ -1,17 +1,17 @@
 {
-  "_comment": "Greedy IG - Overlap Penalty Sweep",
+  "_comment": "Greedy IG baseline. No planner hyperparameter sweep: overlap_penalty_weight is not used by the PA-aligned greedy path.",
   "action_strategy": "greedy_ig",
-  
+
   "greedy_ig": {
     "overlap_penalty_weight": 0.0
   },
-  
+
   "decentralized": {
     "radius_multiplier": 5
   },
-  
+
   "experiment": {
-    "name": "greedy_ig_opw_0.0",
+    "name": "greedy_ig_baseline",
     "log_dir_suffix": "greedy_ig",
     "strategy_metrics": []
   }

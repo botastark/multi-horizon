@@ -1,18 +1,18 @@
 {
   "_comment": "MH-Full - Deep LLP: Longer LLP horizon for better tactical planning",
   "action_strategy": "mh_dec_mcts_both",
-  
+
   "hierarchical_dec_mcts": {
     "use_mcts_llp": true,
     "use_g2": true,
-    
+
     "llp": {
       "horizon": 5,
       "iterations": 30,
       "ucb_c": 1.4,
       "discount_factor": 0.95
     },
-    
+
     "hlp": {
       "horizon": 8,
       "iterations": 30,
@@ -21,19 +21,19 @@
       "tile_size": [25, 25],
       "replan_interval": 2.0
     },
-    
+
     "intent_sharing": {
       "ll_broadcast_interval": 0.1,
       "hl_broadcast_interval": 0.5,
       "max_history": 10
     }
   },
-  
+
   "decentralized": {
     "overlap_penalty_weight": 0.3,
     "radius_multiplier": 5
   },
-  
+
   "experiment": {
     "name": "mh_full_deep_llp_h5",
     "log_dir_suffix": "mh_dec_mcts_full",

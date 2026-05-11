@@ -1,7 +1,7 @@
 {
   "_comment": "Dec-MCTS - Long Look: Long horizon, fewer iterations",
   "action_strategy": "dec_mcts",
-  
+
   "dec_mcts": {
     "horizon": 15,
     "iterations": 20,
@@ -10,18 +10,15 @@
     "timeout": 5.0,
     "parallel": 1
   },
-  
+
   "decentralized": {
     "overlap_penalty_weight": 0.3,
     "radius_multiplier": 5
   },
-  
+
   "experiment": {
     "name": "dec_mcts_longlook_h15_i20",
     "log_dir_suffix": "dec_mcts",
-    "strategy_metrics": [
-      "mcts_iterations",
-      "planning_time_ms"
-    ]
+    "strategy_metrics": ["mcts_iterations", "planning_time_ms"]
   }
 }

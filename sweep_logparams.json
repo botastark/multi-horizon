@@ -1,36 +1,13 @@
 {
-  "_comment": "Hyperparameter Sweep Configuration - All Methods",
-  "_description": "Tests multiple hyperparameter variations for each planning method across IG_BS (infinite comm) and IGd_BM (limited comm R5) settings",
+  "_comment": "Fresh sweep using strategy sweep configs. New runs log method-specific hyperparams in txt/run.log via 'hyperparams: {...}'.",
   "base_config": "configs/master_config.json",
   "experiments": [
     {
-      "name": "greedy_ig_baseline",
-      "overrides": {
-        "strategies": ["greedy_ig"],
-        "strategy_configs": {
-          "greedy_ig": "../../configs/strategies/sweeps/greedy_ig_baseline.json"
-        },
-        "shared": {
-          "mode_labels": ["IG_BS", "IGd_BM"],
-          "cluster_radius": 4,
-          "num_agents": 4,
-          "n_steps": 100,
-          "iters": [0, 20],
-          "field_type": "Gaussian",
-          "start_position": "corner",
-          "correlation_types": ["adaptive"],
-          "enable_plotting": false,
-          "enable_logging": true,
-          "debug_logs": false
-        }
-      }
-    },
-    {
-      "name": "dec_mcts_reactive_h5_i50",
+      "name": "dec_mcts_reactive",
       "overrides": {
         "strategies": ["dec_mcts"],
         "strategy_configs": {
-          "dec_mcts": "../../configs/strategies/sweeps/dec_mcts_reactive_h5_i50.json"
+          "dec_mcts": "../../configs/strategies/sweeps/dec_mcts_reactive.json"
         },
         "shared": {
           "mode_labels": ["IG_BS", "IGd_BM"],
@@ -48,11 +25,11 @@
       }
     },
     {
-      "name": "dec_mcts_balanced_h10_i30",
+      "name": "dec_mcts_balanced",
       "overrides": {
         "strategies": ["dec_mcts"],
         "strategy_configs": {
-          "dec_mcts": "../../configs/strategies/sweeps/dec_mcts_balanced_h10_i30.json"
+          "dec_mcts": "../../configs/strategies/sweeps/dec_mcts_balanced.json"
         },
         "shared": {
           "mode_labels": ["IG_BS", "IGd_BM"],
@@ -70,11 +47,11 @@
       }
     },
     {
-      "name": "dec_mcts_longlook_h15_i20",
+      "name": "dec_mcts_longlook",
       "overrides": {
         "strategies": ["dec_mcts"],
         "strategy_configs": {
-          "dec_mcts": "../../configs/strategies/sweeps/dec_mcts_longlook_h15_i20.json"
+          "dec_mcts": "../../configs/strategies/sweeps/dec_mcts_longlook.json"
         },
         "shared": {
           "mode_labels": ["IG_BS", "IGd_BM"],
@@ -92,55 +69,11 @@
       }
     },
     {
-      "name": "dec_mcts_explore_ucb2.0",
-      "overrides": {
-        "strategies": ["dec_mcts"],
-        "strategy_configs": {
-          "dec_mcts": "../../configs/strategies/sweeps/dec_mcts_explore_ucb2.0.json"
-        },
-        "shared": {
-          "mode_labels": ["IG_BS", "IGd_BM"],
-          "cluster_radius": 4,
-          "num_agents": 4,
-          "n_steps": 100,
-          "iters": [0, 20],
-          "field_type": "Gaussian",
-          "start_position": "corner",
-          "correlation_types": ["adaptive"],
-          "enable_plotting": false,
-          "enable_logging": true,
-          "debug_logs": false
-        }
-      }
-    },
-    {
-      "name": "dec_mcts_exploit_ucb1.0",
-      "overrides": {
-        "strategies": ["dec_mcts"],
-        "strategy_configs": {
-          "dec_mcts": "../../configs/strategies/sweeps/dec_mcts_exploit_ucb1.0.json"
-        },
-        "shared": {
-          "mode_labels": ["IG_BS", "IGd_BM"],
-          "cluster_radius": 4,
-          "num_agents": 4,
-          "n_steps": 100,
-          "iters": [0, 20],
-          "field_type": "Gaussian",
-          "start_position": "corner",
-          "correlation_types": ["adaptive"],
-          "enable_plotting": false,
-          "enable_logging": true,
-          "debug_logs": false
-        }
-      }
-    },
-    {
-      "name": "mh_eff_fast_replan_hlp5_rep1",
+      "name": "mh_eff_fast_replan",
       "overrides": {
         "strategies": ["mh_dec_mcts_efficient"],
         "strategy_configs": {
-          "mh_dec_mcts_efficient": "../../configs/strategies/sweeps/mh_eff_fast_replan_hlp5_rep1.json"
+          "mh_dec_mcts_efficient": "../../configs/strategies/sweeps/mh_dec_mcts_efficient_fast_replan.json"
         },
         "shared": {
           "mode_labels": ["IG_BS", "IGd_BM"],
@@ -158,11 +91,11 @@
       }
     },
     {
-      "name": "mh_eff_balanced_hlp8_rep2",
+      "name": "mh_eff_balanced",
       "overrides": {
         "strategies": ["mh_dec_mcts_efficient"],
         "strategy_configs": {
-          "mh_dec_mcts_efficient": "../../configs/strategies/sweeps/mh_eff_balanced_hlp8_rep2.json"
+          "mh_dec_mcts_efficient": "../../configs/strategies/sweeps/mh_dec_mcts_efficient_balanced.json"
         },
         "shared": {
           "mode_labels": ["IG_BS", "IGd_BM"],
@@ -180,11 +113,11 @@
       }
     },
     {
-      "name": "mh_eff_strategic_hlp12_rep3",
+      "name": "mh_eff_strategic",
       "overrides": {
         "strategies": ["mh_dec_mcts_efficient"],
         "strategy_configs": {
-          "mh_dec_mcts_efficient": "../../configs/strategies/sweeps/mh_eff_strategic_hlp12_rep3.json"
+          "mh_dec_mcts_efficient": "../../configs/strategies/sweeps/mh_dec_mcts_efficient_strategic.json"
         },
         "shared": {
           "mode_labels": ["IG_BS", "IGd_BM"],
@@ -202,33 +135,11 @@
       }
     },
     {
-      "name": "mh_eff_llp_boost_h4_i50",
-      "overrides": {
-        "strategies": ["mh_dec_mcts_efficient"],
-        "strategy_configs": {
-          "mh_dec_mcts_efficient": "../../configs/strategies/sweeps/mh_eff_llp_boost_h4_i50.json"
-        },
-        "shared": {
-          "mode_labels": ["IG_BS", "IGd_BM"],
-          "cluster_radius": 4,
-          "num_agents": 4,
-          "n_steps": 100,
-          "iters": [0, 20],
-          "field_type": "Gaussian",
-          "start_position": "corner",
-          "correlation_types": ["adaptive"],
-          "enable_plotting": false,
-          "enable_logging": true,
-          "debug_logs": false
-        }
-      }
-    },
-    {
-      "name": "mh_full_fast_tactical_llp3_i40",
+      "name": "mh_full_tactical",
       "overrides": {
         "strategies": ["mh_dec_mcts_full"],
         "strategy_configs": {
-          "mh_dec_mcts_full": "../../configs/strategies/sweeps/mh_full_fast_tactical_llp3_i40.json"
+          "mh_dec_mcts_full": "../../configs/strategies/sweeps/mh_dec_mcts_full_tactical.json"
         },
         "shared": {
           "mode_labels": ["IG_BS", "IGd_BM"],
@@ -246,11 +157,11 @@
       }
     },
     {
-      "name": "mh_full_balanced_standard",
+      "name": "mh_full_balanced",
       "overrides": {
         "strategies": ["mh_dec_mcts_full"],
         "strategy_configs": {
-          "mh_dec_mcts_full": "../../configs/strategies/sweeps/mh_full_balanced_standard.json"
+          "mh_dec_mcts_full": "../../configs/strategies/sweeps/mh_dec_mcts_full_balanced.json"
         },
         "shared": {
           "mode_labels": ["IG_BS", "IGd_BM"],
@@ -268,33 +179,11 @@
       }
     },
     {
-      "name": "mh_full_deep_llp_h5",
+      "name": "mh_full_deep_search",
       "overrides": {
         "strategies": ["mh_dec_mcts_full"],
         "strategy_configs": {
-          "mh_dec_mcts_full": "../../configs/strategies/sweeps/mh_full_deep_llp_h5.json"
-        },
-        "shared": {
-          "mode_labels": ["IG_BS", "IGd_BM"],
-          "cluster_radius": 4,
-          "num_agents": 4,
-          "n_steps": 100,
-          "iters": [0, 20],
-          "field_type": "Gaussian",
-          "start_position": "corner",
-          "correlation_types": ["adaptive"],
-          "enable_plotting": false,
-          "enable_logging": true,
-          "debug_logs": false
-        }
-      }
-    },
-    {
-      "name": "mh_full_ucb_tune_llp1.8",
-      "overrides": {
-        "strategies": ["mh_dec_mcts_full"],
-        "strategy_configs": {
-          "mh_dec_mcts_full": "../../configs/strategies/sweeps/mh_full_ucb_tune_llp1.8.json"
+          "mh_dec_mcts_full": "../../configs/strategies/sweeps/mh_dec_mcts_full_deep_search.json"
         },
         "shared": {
           "mode_labels": ["IG_BS", "IGd_BM"],

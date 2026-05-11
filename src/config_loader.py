@@ -122,6 +122,9 @@ def _load_master_config(master: Dict[str, Any], base_dir: str) -> List[Dict[str,
         # Filter comments
         merged = {k: v for k, v in merged.items() if not k.startswith("_")}
 
+        # Normalize nested strategy configs before the planner sees them.
+        merged = flatten_hierarchical_config(merged)
+
         configs.append(merged)
         logger.info(f"Loaded config for strategy: {strategy_name}")
 
@@ -199,7 +202,7 @@ def flatten_hierarchical_config(config: Dict[str, Any]) -> Dict[str, Any]:
     flattened = {}
 
     # Copy top-level settings
-    for key in ["use_mcts_llp", "mode_labels", "intent_sharing"]:
+    for key in ["use_mcts_llp", "use_g2", "mode_labels", "intent_sharing"]:
         if key in hier:
             flattened[key] = hier[key]
 
@@ -215,6 +218,8 @@ def flatten_hierarchical_config(config: Dict[str, Any]) -> Dict[str, Any]:
         if not key.startswith("_"):
             if key == "replan_interval":
                 flattened["hlp_replan_interval"] = value
+            elif key == "tile_size":
+                flattened["tile_size"] = value
             else:
                 flattened[f"hlp_{key}"] = value
 

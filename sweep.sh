@@ -65,7 +65,7 @@ run_one() {
   # Will be moved to experiments/runs/<method>/ by main.py on completion
   local PROJECT STRAT TIMESTAMP
   PROJECT="$(jq -r '.project_path // "./"' "$MERGED")"; PROJECT="${PROJECT%/}"
-  STRAT="$(jq -r '.action_strategy' "$MERGED")"
+  STRAT="$(jq -r '.action_strategy // (.strategies[0] // "unknown")' "$MERGED")"
   TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
   
   # Use experiments/temp/ - main.py will handle moving to runs/<method>/ on completion

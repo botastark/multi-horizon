@@ -1120,6 +1120,7 @@ class HighLevelPlanner:
         tile_size: Tuple[int, int] = (100, 100),
         horizon: int = 3,
         num_iterations: int = 50,
+        ucb_c: float = 1.0,
         replan_interval: float = 1.0,
         seed: Optional[int] = None,
     ):
@@ -1133,6 +1134,7 @@ class HighLevelPlanner:
             tile_size: Size of region tiles
             horizon: Number of regions to plan ahead
             num_iterations: MCTS iterations per cycle
+            ucb_c: UCB exploration constant
             replan_interval: Minimum time between replans
         """
         self.agent_id = agent_id
@@ -1141,6 +1143,7 @@ class HighLevelPlanner:
         self.tile_size = tile_size
         self.horizon = horizon
         self.num_iterations = num_iterations
+        self.ucb_c = ucb_c
         self.replan_interval = replan_interval
 
         # Partition grid into regions
@@ -1584,7 +1587,6 @@ class HighLevelPlanner:
     def _select_best_region_ucb(self, node: Dict, available_regions: List[int]) -> int:
         """Select region using UCB formula."""
         parent_visits = node["visits"]
-        ucb_c = 1.0  # Exploration constant for HLP
 
         best_score = float("-inf")
         best_region = available_regions[0]
@@ -1601,7 +1603,9 @@ class HighLevelPlanner:
                 ucb_score = float("inf")
             else:
                 exploitation = child_value / child_visits
-                exploration = ucb_c * np.sqrt(np.log(parent_visits) / child_visits)
+                exploration = self.ucb_c * np.sqrt(
+                    np.log(parent_visits) / child_visits
+                )
                 ucb_score = exploitation + exploration
 
             if ucb_score > best_score:
@@ -1763,8 +1767,11 @@ class HierarchicalDecMCTSPlanner:
         intent_bus: IntentBus,
         llp_horizon: int = 5,
         llp_iterations: int = 100,
+        llp_ucb_c: float = 1.41,
+        llp_discount_factor: float = 0.95,
         hlp_horizon: int = 3,
         hlp_iterations: int = 50,
+        hlp_ucb_c: float = 1.0,
         tile_size: Tuple[int, int] = (100, 100),
         hlp_replan_interval: float = 1.0,
         use_mcts_llp: bool = False,
@@ -1782,8 +1789,11 @@ class HierarchicalDecMCTSPlanner:
             intent_bus: Shared intent bus for communication
             llp_horizon: LLP planning horizon (steps)
             llp_iterations: LLP MCTS iterations
+            llp_ucb_c: LLP UCB exploration constant
+            llp_discount_factor: LLP reward discount factor
             hlp_horizon: HLP planning horizon (regions)
             hlp_iterations: HLP MCTS iterations
+            hlp_ucb_c: HLP UCB exploration constant
             tile_size: Region tile size for HLP
             hlp_replan_interval: Minimum time between HLP replans
             use_mcts_llp: If True, use MCTS tree search for LLP; if False, use random rollouts
@@ -1802,6 +1812,8 @@ class HierarchicalDecMCTSPlanner:
             grid_info=grid_info,
             horizon=llp_horizon,
             num_iterations=llp_iterations,
+            ucb_c=llp_ucb_c,
+            discount=llp_discount_factor,
             use_mcts_llp=use_mcts_llp,
             use_g2=use_g2,
             seed=seed,
@@ -1815,6 +1827,7 @@ class HierarchicalDecMCTSPlanner:
             tile_size=tile_size,
             horizon=hlp_horizon,
             num_iterations=hlp_iterations,
+            ucb_c=hlp_ucb_c,
             replan_interval=hlp_replan_interval,
             seed=seed if seed is None else seed + 1000,  # Offset for HLP
         )
@@ -2103,8 +2116,11 @@ def create_hierarchical_planner(
     # Extract config
     llp_horizon = config.get("llp_horizon", 5)
     llp_iterations = config.get("llp_iterations", 100)
+    llp_ucb_c = config.get("llp_ucb_c", 1.41)
+    llp_discount_factor = config.get("llp_discount_factor", 0.95)
     hlp_horizon = config.get("hlp_horizon", 3)
     hlp_iterations = config.get("hlp_iterations", 50)
+    hlp_ucb_c = config.get("hlp_ucb_c", 1.0)
     tile_size = tuple(config.get("tile_size", [100, 100]))
     hlp_replan_interval = config.get("hlp_replan_interval", 1.0)
     use_mcts_llp = config.get("use_mcts_llp", False)
@@ -2118,8 +2134,11 @@ def create_hierarchical_planner(
         intent_bus=intent_bus,
         llp_horizon=llp_horizon,
         llp_iterations=llp_iterations,
+        llp_ucb_c=llp_ucb_c,
+        llp_discount_factor=llp_discount_factor,
         hlp_horizon=hlp_horizon,
         hlp_iterations=hlp_iterations,
+        hlp_ucb_c=hlp_ucb_c,
         tile_size=tile_size,
         hlp_replan_interval=hlp_replan_interval,
         use_mcts_llp=use_mcts_llp,
