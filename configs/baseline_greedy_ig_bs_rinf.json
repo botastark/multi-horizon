@@ -1,0 +1,48 @@
+{
+  "_comment": "Baseline Config 1: Greedy IG with IG_BS mode and infinite communication",
+  "_description": "For validation before refactoring - Rinf + IG_BS",
+
+  "action_strategy": "greedy_ig",
+  "enable_plotting": false,
+  "enable_logging": true,
+
+  "shared": {
+    "project_path": "./",
+    "field_type": "Gaussian",
+    "cluster_radius": 4,
+    "start_position": "corner",
+    "num_agents": 4,
+    "n_steps": 100,
+    "iters": [0, 20],
+    "correlation_types": ["adaptive"],
+    "error_margins": [null],
+    "mode_labels": ["IG_BS"],
+    "debug_logs": false
+  },
+
+  "greedy_ig": {
+    "overlap_penalty_weight": 0.0
+  },
+
+  "decentralized": {
+    "_comment": "Infinite communication range (all agents can communicate)",
+    "radius_multiplier": 16
+  },
+
+  "multi_agent": {
+    "num_agents": 4,
+    "news_mode": "BS",
+    "news_inference_type": "OG",
+    "fusion_eps": 0.0,
+    "shared_observation_rng": true,
+    "metric_aggregation": "fused_mean",
+    "clip_metric_beliefs": false
+  },
+
+  "experiment": {
+    "name": "baseline_greedy_ig_bs_rinf",
+    "base_log_dir": "experiments/baseline",
+    "save_trajectory": true,
+    "save_belief_maps": false
+  }
+}

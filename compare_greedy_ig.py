@@ -129,7 +129,7 @@ def run_mh(
         dec_config["news_sharing"] = True
         ma_config = config.setdefault("multi_agent", {})
         ma_config["news_mode"] = "BS"
-        ma_config["news_update_rule"] = "bayesian"
+        ma_config["news_inference_type"] = "OG"
         ma_config["fusion_eps"] = 0.0
         ma_config["metric_aggregation"] = "fused_mean"
         ma_config["clip_metric_beliefs"] = False
@@ -139,7 +139,7 @@ def run_mh(
         dec_config["position_sharing"] = True
         dec_config["news_sharing"] = False
         ma_config = config.setdefault("multi_agent", {})
-        ma_config["news_update_rule"] = "none"
+        ma_config["news_inference_type"] = "Bypass"
         ma_config["fusion_eps"] = 0.0
         ma_config["metric_aggregation"] = "fused_mean"
         ma_config["clip_metric_beliefs"] = False

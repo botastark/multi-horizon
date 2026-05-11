@@ -27,10 +27,6 @@ from experiment_runner import run_multi_agent_experiment
 VALID_MODE_LABELS = {"IG", "IG_BS", "IG_BM", "IGd", "IGd_BS", "IGd_BM"}
 
 
-def _explicit_news_update_rule(ma_config: dict):
-    return ma_config.get("news_update_rule", ma_config.get("news_inference_type"))
-
-
 def _apply_mh_mode_label(config: dict, mode_label: str):
     """Translate experiment labels into MH-native switches."""
     dec_config = config.setdefault("decentralized", {})
@@ -50,10 +46,9 @@ def _apply_mh_mode_label(config: dict, mode_label: str):
     if has_news:
         actual_news_mode = mode_label.split("_", 1)[1]
         ma_config["news_mode"] = actual_news_mode
-        if _explicit_news_update_rule(ma_config) is None:
-            ma_config["news_update_rule"] = "belief_propagation"
+        ma_config.setdefault("news_inference_type", "LBP")
     else:
-        ma_config["news_update_rule"] = "none"
+        ma_config["news_inference_type"] = "Bypass"
 
     if config.get("limited_testing", False):
         if mode_label == "IG_BS":
