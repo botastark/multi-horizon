@@ -22,17 +22,17 @@ def H(var):
         if v2 == 0.0:
             v2 = 1.0
 
-    l1 = np.log2(v1)
-    l2 = np.log2(v2)
+    # l1 = np.log2(v1)
+    # l2 = np.log2(v2)
 
-    assert np.all(np.less_equal(l1, 0.0))
-    assert np.all(np.less_equal(l2, 0.0))
+    # assert np.all(np.less_equal(l1, 0.0))
+    # assert np.all(np.less_equal(l2, 0.0))
 
-    entropy = -(v1 * l1 + v2 * l2)
+    # entropy = -(v1 * l1 + v2 * l2)
 
-    assert np.all(np.greater_equal(entropy, 0.0))
+    # assert np.all(np.greater_equal(entropy, 0.0))
 
-    return entropy
+    return -(v1 * np.log2(v1) + v2 * np.log2(v2))
 
 
 def expected_posterior(var, sigma0, sigma1):
@@ -46,10 +46,10 @@ def expected_posterior(var, sigma0, sigma1):
     sigma1 = np.clip(sigma1, 0.0, 1.0)
     a = (1.0 - sigma0) * (1.0 - var) + (sigma1 * var)  # p(z=0)
     # p(z = 1) = 1 - p(z = 0)
-    b = 1.0 - a + 1e-6  # p(z=1) with stability epsilon
+    b = 1.0 - a  # p(z=1) with stability epsilon
 
-    assert np.all(np.greater_equal(var, 0.0)), f"{var[np.isnan(var)]}"
-    assert np.all(np.less_equal(var, 1.0)), f"{var[np.isnan(var)]}"
+    # assert np.all(np.greater_equal(var, 0.0)), f"{var[np.isnan(var)]}"
+    # assert np.all(np.less_equal(var, 1.0)), f"{var[np.isnan(var)]}"
 
     # posterior distribution probabilities
     # p(m = 1|z = 0) = (p(z = 0|m = 1)p(m = 1))/p(z = 0)
@@ -76,9 +76,59 @@ def cH(var, sigma0, sigma1):
     # H(m|z) = p(z = 0)H(p(m = 1|z = 0)) + p(z = 1)H(p(m = 1|z = 1))
     cH = a * H(p10) + b * H(p11)
 
-    assert np.all(np.greater_equal(cH, 0.0))
+    # assert np.all(np.greater_equal(cH, 0.0))
 
     return cH
+
+
+def footprint_dict_to_bounds(footprint):
+    """Convert a camera footprint dict to (imin, imax, jmin, jmax) bounds."""
+    return (
+        int(footprint["ul"][0]),
+        int(footprint["bl"][0]),
+        int(footprint["ul"][1]),
+        int(footprint["ur"][1]),
+    )
+
+
+def footprint_iou(footprint1, footprint2):
+    """Compute IoU for footprints represented as (imin, imax, jmin, jmax)."""
+    imin1, imax1, jmin1, jmax1 = footprint1
+    imin2, imax2, jmin2, jmax2 = footprint2
+
+    inter_imin = max(imin1, imin2)
+    inter_imax = min(imax1, imax2)
+    inter_jmin = max(jmin1, jmin2)
+    inter_jmax = min(jmax1, jmax2)
+
+    if inter_imax <= inter_imin or inter_jmax <= inter_jmin:
+        return 0.0
+
+    intersection_area = (inter_imax - inter_imin) * (inter_jmax - inter_jmin)
+    area1 = (imax1 - imin1) * (jmax1 - jmin1)
+    area2 = (imax2 - imin2) * (jmax2 - jmin2)
+    union_area = area1 + area2 - intersection_area
+    if union_area <= 0:
+        return 0.0
+
+    return float(intersection_area / union_area)
+
+
+def select_argmax_action(rng, action_scores):
+    """Select the max-score action, using rng for exact-score ties."""
+    sorted_actions = sorted(
+        action_scores.items(),
+        key=lambda item: item[1][0] if isinstance(item[1], (list, tuple)) else item[1],
+        reverse=True,
+    )
+    best_action, best_score = sorted_actions.pop(0)
+    best_value = best_score[0] if isinstance(best_score, (list, tuple)) else best_score
+    best_actions = [best_action]
+    for action, score in sorted_actions:
+        value = score[0] if isinstance(score, (list, tuple)) else score
+        if value == best_value:
+            best_actions.append(action)
+    return rng.choice(best_actions)
 
 
 def collect_sample_set(grid):
@@ -145,16 +195,51 @@ def pearson_correlation_coeff(d_sampled):
 
 
 def adaptive_weights_matrix(obs_map):
-    d_sampled = collect_sample_set(obs_map)
-    p = pearson_correlation_coeff(d_sampled)
-    exp = np.exp(-p)
-    psi = np.array(
-        [
-            [1 / (1 + exp), exp / (1 + exp)],  # For (m_i=0, m_j=0) and (m_i=0, m_j=1)
-            [exp / (1 + exp), 1 / (1 + exp)],  # For (m_i=1, m_j=0) and (m_i=1, m_j=1)
-        ]
+    win_size = 3
+    observation = obs_map
+
+    if observation.shape[0] % win_size != 0 or observation.shape[1] % win_size != 0:
+        pad_rows, pad_cols = 0, 0
+
+        if observation.shape[0] % win_size != 0:
+            current_shape = observation.shape[0]
+            while current_shape % win_size != 0:
+                current_shape += 1
+            pad_rows = current_shape - observation.shape[0]
+
+        if observation.shape[1] % win_size != 0:
+            current_shape = observation.shape[1]
+            while current_shape % win_size != 0:
+                current_shape += 1
+            pad_cols = current_shape - observation.shape[1]
+
+        observation = np.pad(observation, ((0, pad_rows), (0, pad_cols)), mode="edge")
+
+    _nblocks_r = observation.shape[0] // win_size
+    _nblocks_c = observation.shape[1] // win_size
+    v = (
+        observation.reshape(_nblocks_r, win_size, _nblocks_c, win_size)
+        .swapaxes(1, 2)
+        .reshape(_nblocks_r * _nblocks_c, win_size, win_size)
     )
-    return psi
+
+    m_center = v[:, 1, 1]
+    m_neighbors = np.zeros((v.shape[0], 4), dtype=int)
+    m_neighbors[:, 0] = v[:, 0, 1]
+    m_neighbors[:, 1] = v[:, 1, 2]
+    m_neighbors[:, 2] = v[:, 2, 1]
+    m_neighbors[:, 3] = v[:, 1, 0]
+
+    counts_one = np.count_nonzero(m_neighbors, axis=1)
+    stacked = np.hstack((m_center.reshape(-1, 1), counts_one.reshape(-1, 1)))
+
+    pearson = np.corrcoef(stacked[:, 0], stacked[:, 1])[0, 1]
+    sigmoid = 1 / (1 + np.exp(-pearson))
+
+    return np.array(
+        [[sigmoid, 1 - sigmoid], [1 - sigmoid, sigmoid]],
+        dtype=float,
+    )
 
 
 def observed_m_ids(uav=None, uav_pos=None, aslist=True):

@@ -346,17 +346,21 @@ def run_multi_agent_experiment(
             )
             agents.append(agent_state)
 
-            # Update coordinator with initial position
-            camera = agent_state["camera"]
             uav_pos = agent_state["uav_pos"]
-            current_row, current_col = camera.convert_xy_ij(
-                uav_pos.position[0], uav_pos.position[1], camera.grid.center
-            )
             coordinator.update_agent_state(
                 agent_id=agent_id,
-                position=(current_row, current_col),
+                position=(uav_pos.position[0], uav_pos.position[1]),
                 altitude=uav_pos.altitude,
             )
+
+        if (
+            action_strategy == "greedy_ig"
+            and config.get("multi_agent", {}).get("pa_reference_compat", False)
+        ):
+            shared_obs_rng = np.random.default_rng(seed)
+            map_obj.rng = shared_obs_rng
+            for agent_state in agents:
+                agent_state["camera"].rng = shared_obs_rng
 
     # Get news_mode and sharing options for logging
     dec_config = config.get("decentralized", {})
