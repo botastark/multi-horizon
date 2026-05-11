@@ -4,38 +4,6 @@ from typing import Dict, List, Tuple, Optional, Any
 from mapper_LBP import OccupancyMap
 
 
-NEWS_UPDATE_ALIASES = {
-    None: "belief_propagation",
-    "": "belief_propagation",
-    "belief_propagation": "belief_propagation",
-    "lbp": "belief_propagation",
-    "LBP": "belief_propagation",
-    "bayesian": "bayesian",
-    "og": "bayesian",
-    "OG": "bayesian",
-    "none": "none",
-    "off": "none",
-    "disabled": "none",
-    "bypass": "none",
-    "Bypass": "none",
-}
-
-
-def normalize_news_update_rule(news_update_rule: Optional[str]) -> str:
-    """Normalize old config spellings to MH-native news update rules."""
-    if news_update_rule in NEWS_UPDATE_ALIASES:
-        return NEWS_UPDATE_ALIASES[news_update_rule]
-
-    normalized = str(news_update_rule).strip()
-    if normalized in NEWS_UPDATE_ALIASES:
-        return NEWS_UPDATE_ALIASES[normalized]
-
-    raise ValueError(
-        f"Unknown news update rule {news_update_rule!r}. "
-        "Use 'belief_propagation', 'bayesian', or 'none'."
-    )
-
-
 class MultiAgentMapper:
     """
     Multi-agent mapper that wraps multiple OccupancyMap instances
@@ -69,8 +37,7 @@ class MultiAgentMapper:
         correlation_type: Optional[str] = None,
         news_mode: str = "BM",  # "BS" or "BM"
         lbp_iterations: int = 5,
-        news_update_rule: str = "belief_propagation",
-        news_inference_type: Optional[str] = None,
+        news_inference_type: str = "LBP",  # "OG", "LBP", or "Bypass"
         clip_probs: bool = False,
         eps: float = 1e-20,
     ):
@@ -82,18 +49,15 @@ class MultiAgentMapper:
             correlation_type: 'equal' | 'biased' | 'adaptive' used by OccupancyMap.
             news_mode: "BS" (single news per agent) or "BM" (per-neighbor news).
             lbp_iterations: number of LBP iterations in local mapping.
-            news_update_rule: MH-native news update rule: "bayesian",
-                "belief_propagation", or "none".
-            news_inference_type: Legacy alias for news_update_rule.
+            news_inference_type: "OG" (Bayesian update), "LBP" (OG + 1 LBP
+                iteration), or "Bypass" (no news belief update).
             clip_probs: Whether to clip probabilities to [0.001, 0.999] (default False).
         """
         self.grid_size = grid_size
         self.num_agents = num_agents
         self.news_mode = news_mode
         self.lbp_iterations = lbp_iterations
-        if news_inference_type is not None:
-            news_update_rule = news_inference_type
-        self.news_update_rule = normalize_news_update_rule(news_update_rule)
+        self.news_inference_type = news_inference_type
         self.correlation_type = correlation_type
         self.clip_probs = clip_probs
 
@@ -446,8 +410,8 @@ class MultiAgentMapper:
         BM mode:
             - Update news_map_beliefs[agent_id, target_id, ...] for all target_id != agent_id
 
-        If the news update rule is "belief_propagation", also runs 1 iteration
-        of spatial propagation on news beliefs.
+        If news_inference_type is "LBP", also runs 1 iteration of spatial
+        propagation on news beliefs.
         """
         omap = self.maps[agent_id]
         sigma0, sigma1 = omap.sigma0, omap.sigma1
@@ -456,7 +420,7 @@ class MultiAgentMapper:
             # Mapping not updated yet; nothing to do
             return
 
-        if self.news_mode in ["IG", "IGd"] or self.news_update_rule == "none":
+        if self.news_mode in ["IG", "IGd"] or self.news_inference_type == "Bypass":
             return
 
         if self.news_mode == "BS":
@@ -470,7 +434,7 @@ class MultiAgentMapper:
                 sigma1=sigma1,
             )
             # Run spatial propagation on news if enabled.
-            if self.news_update_rule == "belief_propagation":
+            if self.news_inference_type == "LBP":
                 self._propagate_news_lbp(agent_id, agent_id, fp_vertices_ij, z)
         else:
             # BM mode: separate news per neighbor
@@ -486,7 +450,7 @@ class MultiAgentMapper:
                     sigma1=sigma1,
                 )
                 # Run spatial propagation on news if enabled.
-                if self.news_update_rule == "belief_propagation":
+                if self.news_inference_type == "LBP":
                     self._propagate_news_lbp(agent_id, target_id, fp_vertices_ij, z)
 
     # -------------------------------------------------------------------------
