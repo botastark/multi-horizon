@@ -14,16 +14,12 @@ from sklearn.metrics import confusion_matrix
 from helper import gaussian_random_field
 
 
-# Add project path and import the classifier
+# Add project path for optional classifier imports.
 # Get the project root directory (parent of src/)
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
-from binary_classifier.classifier import Predicter
 
 from PIL import Image, ImageFilter
-from osgeo import gdal
-
-gdal.UseExceptions()  # Enable GDAL exceptions
 
 
 class ImageSampler:
@@ -224,6 +220,11 @@ class Field:
         """
         Load the orthomosaic image, tile information, and annotations.
         """
+        from binary_classifier.classifier import Predicter
+        from osgeo import gdal
+
+        gdal.UseExceptions()
+
         self.predictor = Predicter(model_weights_path=self.model_path, num_classes=2)
         dataset = gdal.Open(self.ortomap_path)
         band1 = dataset.GetRasterBand(1)  # Red channel

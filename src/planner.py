@@ -264,15 +264,20 @@ class planning:
 
         # Create or get greedy IG planner
         if not hasattr(self, "_greedy_ig_planner"):
-            # Extract config - paper approach uses 0.0 for penalties
-            greedy_config = (
-                self.conf_dict.get("greedy_ig", {}) if self.conf_dict else {}
-            )
+            # Read greedy_ig config from the full config (via coordinator) not from
+            # conf_dict which is the sensor model dict (altitude -> (s0, s1))
+            full_config = {}
+            if self.coordinator is not None and hasattr(self.coordinator, "config"):
+                full_config = self.coordinator.config
+            greedy_config = full_config.get("greedy_ig", {})
 
-            # Auto-detect IGd mode from coordinator's mode attribute
             enable_discounting = greedy_config.get("enable_discounting", False)
-            if self.coordinator is not None and hasattr(self.coordinator, "mode"):
-                # If mode contains "IGd", enable discounting
+            # Also auto-detect from coordinator mode as a fallback
+            if (
+                not enable_discounting
+                and self.coordinator is not None
+                and hasattr(self.coordinator, "mode")
+            ):
                 if "IGd" in self.coordinator.mode:
                     enable_discounting = True
 
@@ -288,7 +293,7 @@ class planning:
                 grid_info=self.uav.grid,
                 conf_dict=self.conf_dict,
                 config=config,
-                seed=self.seed,
+                seed=0,
             )
 
             mode = (
@@ -311,9 +316,11 @@ class planning:
         if self.coordinator is not None and planner.enable_discounting:
             # Get teammate current positions and altitudes (null policy assumption)
             teammate_states = {}
+            neighbor_ids = set(self.coordinator.get_neighbors_in_range(self.agent_id))
             other_agents = self.coordinator.get_other_agent_positions(self.agent_id)
             for tid, pos, alt in other_agents:
-                teammate_states[tid] = (pos, alt)
+                if tid in neighbor_ids:
+                    teammate_states[tid] = (pos, alt)
 
             planner.update_teammate_states(teammate_states)
 

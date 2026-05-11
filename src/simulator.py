@@ -4,7 +4,15 @@ import csv
 import os
 from tqdm import tqdm
 from typing import Dict, List, Any, Tuple
-from helper import compute_metrics, observed_m_ids, uav_position
+from helper import (
+    H,
+    compute_metrics,
+    footprint_dict_to_bounds,
+    footprint_iou,
+    observed_m_ids,
+    select_argmax_action,
+    uav_position,
+)
 from experiment_utils import (
     extract_region_metadata,
     finalize_planners,
@@ -140,63 +148,41 @@ class Simulator:
             leave=False,
             file=get_tqdm_file(),
         ):
-            if step == 0:
-                if self.debug_logs:
-                    print(f"Map Sum: {self.ground_truth_map.sum()}")
-                # Special case for step 0: observe at starting positions BEFORE any actions
-                if self.debug_logs:
-                    print(
-                        f"step {step}: Processing initial observations at starting positions..."
-                    )
-                agent_observations = self._process_agent_observations()
-
-                # Perform belief fusion for initial observations
-                if self.coordinator is not None:
-                    dec_config = self.coordinator.config.get("decentralized", {})
-                    news_sharing = dec_config.get("news_sharing", True)
-                    self._perform_belief_fusion(
-                        agent_observations,
-                        step,
-                        news_sharing=news_sharing,
-                    )
-
-                # Plot initial state with observations at starting positions
-                self._plot_step(step, agent_observations)
-
-            # 1. Compute metrics and log (BEFORE observations, matching reference paper)
-            # At step 0, this logs the prior state before any observations
+            # 1. Compute metrics and log (BEFORE any observations, including step 0)
+            # This ensures step 0 records the pure prior state (all beliefs = 0.5)
             self._compute_metrics(step)
             self._log_step(step)
 
-            if self.debug_logs:
-                print(f"step {step}: Planning...")
-
-            # 2. Plan (using current belief)
-            self._select_agent_actions(step)
-
-            # 3. Act (Update positions)
-            self._update_agent_positions()
+            if step == 0 and self.debug_logs:
+                print(f"Map Sum: {self.ground_truth_map.sum()}")
 
             if self.debug_logs:
                 print(f"step {step}: Processing agent observations...")
 
-            # 4. Observe (at new position)
-            if (
-                step > 0
-            ):  # Skip for step 0 since we already observed at starting position
-                agent_observations = self._process_agent_observations()
+            # 2. Observe at the current position, then fuse. This mirrors the
+            # PA reference loop: metrics -> observe/update/fuse -> plan -> move.
+            agent_observations = self._process_agent_observations()
 
-                # 5. Fusion (skip when no coordinator provided)
-                if self.coordinator is not None:
-                    dec_config = self.coordinator.config.get("decentralized", {})
-                    news_sharing = dec_config.get("news_sharing", True)
-                    self._perform_belief_fusion(
-                        agent_observations,
-                        step,
-                        news_sharing=news_sharing,
-                    )
+            if self.coordinator is not None:
+                dec_config = self.coordinator.config.get("decentralized", {})
+                news_sharing = dec_config.get("news_sharing", True)
+                self._perform_belief_fusion(
+                    agent_observations,
+                    step,
+                    news_sharing=news_sharing,
+                )
 
-                self._plot_step(step, agent_observations)
+            self._plot_step(step, agent_observations)
+
+            if self.debug_logs:
+                print(f"step {step}: Planning...")
+
+            # 3. Plan using the post-observation belief.
+            self._select_agent_actions(step)
+
+            # 4. Act (update positions). The new position will be observed at
+            # the beginning of the next iteration, matching PA.
+            self._update_agent_positions()
 
             if self.debug_logs:
                 print(f"{'─'*40}")
@@ -376,6 +362,14 @@ class Simulator:
         """
         Phase 3: Compute metrics, select actions for all agents.
         """
+        if (
+            self.action_strategy == "greedy_ig"
+            and self.coordinator is not None
+            and getattr(self.coordinator, "mode", None) in {"IG_BS", "IGd_BM"}
+        ):
+            self._select_pa_compatible_greedy_actions(step)
+            return
+
         for agent in self.agents:
             agent_id = agent["agent_id"]
             camera = agent["camera"]
@@ -557,8 +551,10 @@ class Simulator:
             if next_action is None:
                 continue
 
+            future_state = camera.x_future(next_action)
+
             # Update UAV position
-            uav_pos = uav_position(camera.x_future(next_action))
+            uav_pos = uav_position(future_state)
             agent["actions"].append(next_action)
             agent["uav_positions"].append(uav_pos)
             agent["uav_pos"] = uav_pos
@@ -567,17 +563,171 @@ class Simulator:
 
             # Update coordinator with new position
             if self.coordinator:
-                current_row, current_col = camera.convert_xy_ij(
-                    uav_pos.position[0], uav_pos.position[1], camera.grid.center
-                )
                 self.coordinator.update_agent_state(
                     agent_id=agent_id,
-                    position=(current_row, current_col),
+                    position=(uav_pos.position[0], uav_pos.position[1]),
                     altitude=uav_pos.altitude,
                 )
 
             # Clean up temporary action
             agent.pop("_next_action", None)
+
+    def _greedy_ig_planner_for_agent(self, agent, enable_discounting=False):
+        planner = agent["planner"]
+        if hasattr(planner, "_greedy_ig_planner"):
+            return planner._greedy_ig_planner
+
+        from greedy_ig_planner import create_greedy_ig_planner
+
+        planner._greedy_ig_planner = create_greedy_ig_planner(
+            agent_id=agent["agent_id"],
+            camera=agent["camera"],
+            grid_info=self.grid_info,
+            conf_dict=self.conf_dict,
+            config={
+                "intent_discount": 0.0,
+                "overlap_penalty_weight": 0.0,
+                "enable_discounting": enable_discounting,
+            },
+            seed=0,
+        )
+        return planner._greedy_ig_planner
+
+    def _greedy_ig_selfish_data(self):
+        actions = []
+        data = []
+        enable_discounting = getattr(self.coordinator, "mode", None) == "IGd_BM"
+
+        for agent in self.agents:
+            camera = agent["camera"]
+            uav_pos = agent["uav_pos"]
+            greedy_planner = self._greedy_ig_planner_for_agent(
+                agent,
+                enable_discounting=enable_discounting,
+            )
+            greedy_planner.update_belief(agent["belief_map"])
+            scored_actions = greedy_planner.score_admissible_actions(
+                uav_pos.position,
+                uav_pos.altitude,
+            )
+            admissible_action_to_ig = {
+                action: [action_data["ig"]]
+                for action, action_data in scored_actions.items()
+            }
+            admissible_action_to_fp = {
+                action: action_data["footprint_ij"]
+                for action, action_data in scored_actions.items()
+            }
+
+            selected = select_argmax_action(camera.rng, admissible_action_to_ig)
+            actions.append(selected)
+            data.append(
+                {
+                    "admissible_action_to_IG": admissible_action_to_ig,
+                    "admissible_action_to_fp_ij": admissible_action_to_fp,
+                }
+            )
+
+        return actions, data
+
+    def _select_pa_compatible_greedy_actions(self, step: int = 0) -> None:
+        for agent in self.agents:
+            camera = agent["camera"]
+            uav_pos = agent["uav_pos"]
+            belief_map = agent["belief_map"]
+            agent["observed_ids"].update(observed_m_ids(camera, uav_pos))
+            entropy_val, mse_val, coverage_val = compute_metrics(
+                self.ground_truth_map, belief_map, agent["observed_ids"], self.grid_info
+            )
+            agent["entropy"].append(entropy_val)
+            agent["mse"].append(mse_val)
+            agent["coverage"].append(coverage_val)
+            agent["height"].append(uav_pos.altitude)
+
+        selfish_actions, data = self._greedy_ig_selfish_data()
+        mode = getattr(self.coordinator, "mode", None)
+
+        if mode == "IGd_BM" and len(self.agents) > 1:
+            if not hasattr(self, "_pa_agent_decision_order_rng"):
+                self._pa_agent_decision_order_rng = np.random.default_rng(17)
+
+            predicted_states = np.array(
+                [
+                    [
+                        agent["uav_pos"].position[0],
+                        agent["uav_pos"].position[1],
+                        agent["uav_pos"].altitude,
+                    ]
+                    for agent in self.agents
+                ],
+                dtype=float,
+            )
+            selected_actions = ["hover"] * len(self.agents)
+            decision_order = self._pa_agent_decision_order_rng.permutation(
+                len(self.agents)
+            )
+            h_disp = self.agents[0]["camera"].xy_step
+            v_disp = self.agents[0]["camera"].h_step
+            radius_multiplier = self.coordinator.config.get("decentralized", {}).get(
+                "radius_multiplier", 5
+            )
+            max_distances = radius_multiplier * np.array(
+                [h_disp, h_disp, v_disp], dtype=float
+            )
+            action_to_direction = {
+                "up": np.array([0, 0, v_disp], dtype=float),
+                "down": np.array([0, 0, -v_disp], dtype=float),
+                "front": np.array([0, h_disp, 0], dtype=float),
+                "back": np.array([0, -h_disp, 0], dtype=float),
+                "right": np.array([h_disp, 0, 0], dtype=float),
+                "left": np.array([-h_disp, 0, 0], dtype=float),
+                "hover": np.array([0, 0, 0], dtype=float),
+            }
+
+            for agent_id in decision_order:
+                check = np.prod(
+                    np.where(
+                        np.abs(predicted_states - predicted_states[agent_id])
+                        > max_distances,
+                        0,
+                        1,
+                    ),
+                    axis=1,
+                )
+                neighbors = [idx for idx in np.flatnonzero(check) if idx != agent_id]
+                for neighbor_id in neighbors:
+                    neighbor_state = predicted_states[neighbor_id]
+                    neighbor_fp = self.agents[neighbor_id][
+                        "camera"
+                    ].get_footprint_vertices_ij(
+                        (neighbor_state[0], neighbor_state[1]),
+                        neighbor_state[2],
+                    )
+                    for action, agent_fp in data[agent_id][
+                        "admissible_action_to_fp_ij"
+                    ].items():
+                        overlap = footprint_iou(
+                            footprint_dict_to_bounds(neighbor_fp),
+                            footprint_dict_to_bounds(agent_fp),
+                        )
+                        data[agent_id]["admissible_action_to_IG"][action][
+                            0
+                        ] *= 1.0 - overlap
+
+                action = select_argmax_action(
+                    self.agents[agent_id]["camera"].rng,
+                    data[agent_id]["admissible_action_to_IG"],
+                )
+                selected_actions[agent_id] = action
+                predicted_states[agent_id, :] += action_to_direction[action]
+        else:
+            selected_actions = selfish_actions
+
+        for agent, action, action_data in zip(self.agents, selected_actions, data):
+            agent["info_gain_action"] = {
+                k: v[0] for k, v in action_data["admissible_action_to_IG"].items()
+            }
+            agent["_next_action"] = action
 
     def _compute_metrics(self, step):
         combined_observed_ids = set()
@@ -589,12 +739,25 @@ class Simulator:
             agent_belief = agent["belief_map"][:, :, 1]
             agent_mse = np.mean((self.ground_truth_map - agent_belief) ** 2)
             per_agent_mses.append(agent_mse)
-        fused_mse_val = np.mean(per_agent_mses)
 
         fused_local = np.mean(
             [agent["belief_map"][:, :, 1] for agent in self.agents], axis=0
         )
-        fused_local = np.clip(fused_local, 0.001, 0.999)
+        pa_reference_greedy_ig = (
+            self.action_strategy == "greedy_ig"
+            and self.coordinator is not None
+            and getattr(self.coordinator, "mode", None) in {"IG_BS", "IGd_BM"}
+            and self.coordinator.config.get("multi_agent", {}).get(
+                "pa_reference_compat", False
+            )
+        )
+        if not pa_reference_greedy_ig:
+            fused_local = np.clip(fused_local, 0.001, 0.999)
+
+        if pa_reference_greedy_ig:
+            fused_mse_val = float(np.mean((self.ground_truth_map - fused_local) ** 2))
+        else:
+            fused_mse_val = np.mean(per_agent_mses)
 
         if self.debug_logs and (step == 0 or step % 10 == 0):
             flat = fused_local.ravel()
@@ -613,12 +776,17 @@ class Simulator:
         self.display_belief[:, :, 1] = fused_local
         self.display_belief[:, :, 0] = 1 - fused_local
 
-        fused_entropy_val, _, combined_coverage_val = compute_metrics(
-            self.ground_truth_map,
-            self.display_belief,
-            combined_observed_ids,
-            self.grid_info,
-        )
+        if pa_reference_greedy_ig:
+            fused_entropy_val = float(np.sum(H(fused_local)))
+            decided = (fused_local > 0.55) | (fused_local < 0.45)
+            combined_coverage_val = float(decided.mean())
+        else:
+            fused_entropy_val, _, combined_coverage_val = compute_metrics(
+                self.ground_truth_map,
+                self.display_belief,
+                combined_observed_ids,
+                self.grid_info,
+            )
 
         # Get action of first agent
         action = self.agents[0]["actions"][-1] if self.agents[0]["actions"] else "None"

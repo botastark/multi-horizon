@@ -39,6 +39,7 @@ class MultiAgentMapper:
         lbp_iterations: int = 5,
         news_inference_type: str = "LBP",  # "OG" or "LBP" - paper uses "LBP"
         clip_probs: bool = False,
+        eps: float = 1e-20,
     ):
         """
         Args:
@@ -82,8 +83,9 @@ class MultiAgentMapper:
         self.news_msgs_buffer = np.ones((5, H, W), dtype=float) * 0.5
         self._init_news_lbp_slicing()
 
-        # Small epsilon for numerical stability
-        self.eps = 1e-20
+        # Small epsilon for numerical stability. PA-reference validation sets
+        # this to 0.0 to preserve exact product-of-experts arithmetic.
+        self.eps = eps
 
         # Statistics
         self._fusion_count = 0
@@ -294,7 +296,9 @@ class MultiAgentMapper:
         post_m_zero = likelihood_m_zero * (1.0 - prior_news)
         post_m_one = likelihood_m_one * prior_news
 
-        denom = post_m_zero + post_m_one + self.eps
+        denom = post_m_zero + post_m_one
+        if self.eps:
+            denom = denom + self.eps
         post_m_one_norm = post_m_one / denom
         if self.clip_probs:
             post_m_one_norm = np.clip(post_m_one_norm, 0.001, 0.999)
@@ -357,7 +361,10 @@ class MultiAgentMapper:
             msg_1 = psi[1, 0] * mul_0 + psi[1, 1] * mul_1
 
             # normalize
-            norm_msg_1 = msg_1 / (msg_0 + msg_1 + self.eps)
+            norm_denominator = msg_0 + msg_1
+            if self.eps:
+                norm_denominator = norm_denominator + self.eps
+            norm_msg_1 = msg_1 / norm_denominator
 
             # buffering
             self.news_msgs_buffer[write_slice] = norm_msg_1[read_slice]
@@ -374,7 +381,10 @@ class MultiAgentMapper:
         )
         bel_1 = np.prod(self.news_msgs[:, product_slice[1], product_slice[2]], axis=0)
 
-        updated_belief = bel_1 / (bel_0 + bel_1 + self.eps)
+        updated_denominator = bel_0 + bel_1
+        if self.eps:
+            updated_denominator = updated_denominator + self.eps
+        updated_belief = bel_1 / updated_denominator
         if self.clip_probs:
             updated_belief = np.clip(updated_belief, 0.001, 0.999)
 
@@ -457,7 +467,9 @@ class MultiAgentMapper:
         Both inputs are probabilities in [0,1].
         """
         mul = b1 * b2
-        denom = mul + (1.0 - b1) * (1.0 - b2) + self.eps
+        denom = mul + (1.0 - b1) * (1.0 - b2)
+        if self.eps:
+            denom = denom + self.eps
         fused = mul / denom
         if self.clip_probs:
             return np.clip(fused, 0.001, 0.999)

@@ -255,6 +255,25 @@ class Camera:
         i_min, j_max = self.convert_xy_ij(x_max, y_max, self.grid.center)
         return [[i_min, i_max], [j_min, j_max]]
 
+    def get_footprint_vertices_ij(self, position=None, altitude=None):
+        """
+        Return footprint corner vertices in grid-index form.
+
+        The returned dictionary uses the common map convention:
+        ul/bl/ur/br -> [row, col] index pairs.
+        """
+        [[i_min, i_max], [j_min, j_max]] = self.get_range(
+            position=position,
+            altitude=altitude,
+            index_form=True,
+        )
+        return {
+            "ul": np.array([i_min, j_min]),
+            "bl": np.array([i_max, j_min]),
+            "ur": np.array([i_min, j_max]),
+            "br": np.array([i_max, j_max]),
+        }
+
     def get_observations(self, ground_truth_map, sigmas=None):
         """
         Simulate camera observations over the ground truth map.
@@ -275,7 +294,11 @@ class Camera:
         """
 
         # Get grid indices corresponding to the camera footprint.
-        [[i_min, i_max], [j_min, j_max]] = self.get_range(index_form=True)
+        fp_vertices_ij = self.get_footprint_vertices_ij()
+        i_min = fp_vertices_ij["ul"][0]
+        i_max = fp_vertices_ij["bl"][0]
+        j_min = fp_vertices_ij["ul"][1]
+        j_max = fp_vertices_ij["ur"][1]
 
         submap = ground_truth_map[i_min:i_max, j_min:j_max]
         """
@@ -298,14 +321,6 @@ class Camera:
         z1 = np.where(np.logical_and(success1, submap == 1), 1, 0)
         z = np.where(submap == 0, z0, z1)
 
-        # Define footprint vertices in grid indices.
-        fp_vertices_ij = {
-            "ul": np.array([i_min, j_min]),
-            "bl": np.array([i_max, j_min]),
-            "ur": np.array([i_min, j_max]),
-            "br": np.array([i_max, j_max]),
-        }
-
         return fp_vertices_ij, z
 
     def x_future(self, action, x=None):
@@ -324,24 +339,38 @@ class Camera:
         """
         if x is None:
             x = self.get_x()
-        # Compute future state based on action and ensure movement is within allowed ranges.
-        if action == "up" and (x.altitude + self.h_step) <= self.h_range[1]:
-            return (x.position, x.altitude + self.h_step)
-        elif action == "down" and (x.altitude - self.h_step) >= self.h_range[0]:
-            return (x.position, x.altitude - self.h_step)
-        elif action == "front" and (x.position[1] + self.xy_step) <= self.y_range[1]:
-            return (x.position[0], x.position[1] + self.xy_step), x.altitude
-        elif action == "back" and (x.position[1] - self.xy_step) >= self.y_range[0]:
-            return (x.position[0], x.position[1] - self.xy_step), x.altitude
-        elif action == "right" and (x.position[0] + self.xy_step) <= self.x_range[1]:
-            return (x.position[0] + self.xy_step, x.position[1]), x.altitude
-        elif action == "left" and (x.position[0] - self.xy_step) >= self.x_range[0]:
-            return (x.position[0] - self.xy_step, x.position[1]), x.altitude
-        elif action == "hover":
-            return x.position, x.altitude
-        else:
-            # If action is not permitted, exception is raised.
+        action_to_direction = {
+            "up": np.array([0, 0, self.h_step], dtype=float),
+            "down": np.array([0, 0, -self.h_step], dtype=float),
+            "front": np.array([0, self.xy_step, 0], dtype=float),
+            "back": np.array([0, -self.xy_step, 0], dtype=float),
+            "right": np.array([self.xy_step, 0, 0], dtype=float),
+            "left": np.array([-self.xy_step, 0, 0], dtype=float),
+            "hover": np.array([0, 0, 0], dtype=float),
+        }
+        if action not in action_to_direction:
             return None
+
+        current = np.array([x.position[0], x.position[1], x.altitude], dtype=float)
+        next_state = np.clip(
+            current + action_to_direction[action],
+            [self.x_range[0], self.y_range[0], self.h_range[0]],
+            [self.x_range[1], self.y_range[1], self.h_range[1]],
+        )
+        admissible = (
+            np.any(
+                np.not_equal(
+                    np.array([current[0], current[1], np.round(current[2], 8)]),
+                    np.array(
+                        [next_state[0], next_state[1], np.round(next_state[2], 8)]
+                    ),
+                )
+            )
+            or action == "hover"
+        )
+        if not admissible:
+            return None
+        return (next_state[0], next_state[1]), next_state[2]
 
     def permitted_actions(self, x):
         """

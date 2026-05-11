@@ -219,7 +219,9 @@ class OccupancyMap:
         posterior_m_one = likelihood_m_one * prior
 
         # Normalize
-        denominator = posterior_m_zero + posterior_m_one + self.eps
+        denominator = posterior_m_zero + posterior_m_one
+        if self.eps:
+            denominator = denominator + self.eps
         assert np.all(np.greater_equal(denominator, 0.0))
         posterior_m_one_norm = posterior_m_one / denominator
 
@@ -284,7 +286,10 @@ class OccupancyMap:
                 msg_1 = psi[1, 0] * mul_0 + psi[1, 1] * mul_1
 
                 # normalize the first coordinate of the msg
-                norm_msg_1 = msg_1 / (msg_0 + msg_1 + self.eps)
+                norm_denominator = msg_0 + msg_1
+                if self.eps:
+                    norm_denominator = norm_denominator + self.eps
+                norm_msg_1 = msg_1 / norm_denominator
                 # buffering
                 self.msgs_buffer[write_slice] = norm_msg_1[read_slice]
 
@@ -310,8 +315,11 @@ class OccupancyMap:
         bel_0 = np.prod(1 - msgs_slice, axis=0)
         bel_1 = np.prod(msgs_slice, axis=0)
 
-        self.map_beliefs[spatial_slice[1], spatial_slice[2]] = bel_1 / (
-            bel_0 + bel_1 + self.eps
+        belief_denominator = bel_0 + bel_1
+        if self.eps:
+            belief_denominator = belief_denominator + self.eps
+        self.map_beliefs[spatial_slice[1], spatial_slice[2]] = (
+            bel_1 / belief_denominator
         )
 
         assert np.all(

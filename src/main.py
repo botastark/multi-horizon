@@ -207,6 +207,26 @@ def run_experiment_with_config(config: dict, args):
             # Unknown mode, use defaults
             actual_news_mode = news_mode
 
+        pa_reference_greedy_ig = (
+            config.get("action_strategy") == "greedy_ig"
+            and config.get("multi_agent", {}).get("pa_reference_compat", False)
+        )
+        if pa_reference_greedy_ig:
+            config.setdefault("multi_agent", {})
+            config.setdefault("greedy_ig", {})
+            if news_mode == "IG_BS":
+                config["decentralized"]["position_sharing"] = False
+                config["decentralized"]["news_sharing"] = True
+                config["multi_agent"]["news_mode"] = "BS"
+                config["multi_agent"]["news_inference_type"] = "OG"
+                actual_news_mode = "BS"
+            elif news_mode == "IGd_BM":
+                config["decentralized"]["position_sharing"] = True
+                config["decentralized"]["news_sharing"] = False
+                config["multi_agent"]["news_mode"] = "BM"
+                config["greedy_ig"]["enable_discounting"] = True
+                actual_news_mode = "BM"
+
         # Get communication range for folder naming
         # Check if radius_multiplier is specified (preferred, matches reference paper)
         # Read from config dict directly to get modified values

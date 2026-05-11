@@ -360,7 +360,7 @@ class MultiAgentCoordinator:
                     f"Communication range: {self.communication_range}m (direct specification)"
                 )
 
-        self.collision_distance = ma_config.get("collision_avoidance_distance", 5.0)
+        self.collision_distance = ma_config.get("collision_avoidance_distance", 0.0)
 
         # Initialize communication bus
         self.comm_bus = CommunicationBus(self.num_agents)
@@ -368,6 +368,7 @@ class MultiAgentCoordinator:
         # Initialize multi-agent mapper (handles all belief mapping)
         # Use LBP news inference by default (matches paper's LBP_single/LBP_multi)
         news_inference = ma_config.get("news_inference_type", "LBP")
+        pa_reference_compat = ma_config.get("pa_reference_compat", False)
         self.map = MultiAgentMapper(
             self.grid_shape,
             self.num_agents,
@@ -376,6 +377,7 @@ class MultiAgentCoordinator:
             news_mode=self.news_mode,
             lbp_iterations=self.lbp_iterations,
             news_inference_type=news_inference,
+            eps=0.0 if pa_reference_compat else 1e-20,
         )
 
         # Agent states tracking
