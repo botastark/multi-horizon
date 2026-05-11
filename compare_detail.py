@@ -29,6 +29,7 @@ from uav_camera import Camera
 from multi_agent_coordinator import MultiAgentCoordinator
 from experiment_utils import initialize_agent
 from config_loader import load_config
+from simulator import Simulator
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -163,14 +164,19 @@ def load_mh(seed, n_steps, cluster_radius=4, mode="IG_BS"):
         dec["news_sharing"] = False
         dec["radius_multiplier"] = 5
         config.setdefault("multi_agent", {})["news_mode"] = "BM"
-        config["multi_agent"]["news_inference_type"] = "OG"
+        config["multi_agent"]["news_inference_type"] = "Bypass"
         config.setdefault("greedy_ig", {})["enable_discounting"] = True
+        coord_news_mode = "BM"
     else:  # IG_BS
         dec["position_sharing"] = False
         dec["news_sharing"] = True
         dec.setdefault("radius_multiplier", -1)
         config.setdefault("multi_agent", {})["news_mode"] = "BS"
         config["multi_agent"]["news_inference_type"] = "OG"
+        coord_news_mode = "BS"
+    config["multi_agent"]["fusion_eps"] = 0.0
+    config["multi_agent"]["metric_aggregation"] = "fused_mean"
+    config["multi_agent"]["clip_metric_beliefs"] = False
 
     grid_info = MHGrid()
     cam1 = Camera(
@@ -196,8 +202,8 @@ def load_mh(seed, n_steps, cluster_radius=4, mode="IG_BS"):
         config=config,
         conf_dict=conf_dict,
         correlation_type="pairwise",
-        news_mode="BS",
-        mode="IG_BS",
+        news_mode=coord_news_mode,
+        mode=mode,
         grid_info=grid_info,
         debug_logs=False,
     )
@@ -232,12 +238,39 @@ def load_mh(seed, n_steps, cluster_radius=4, mode="IG_BS"):
         agents.append(agent_state)
         cam = agent_state["camera"]
         uv = agent_state["uav_pos"]
-        r, c = cam.convert_xy_ij(uv.position[0], uv.position[1], cam.grid.center)
         coordinator.update_agent_state(
-            agent_id=aid, position=(r, c), altitude=uv.altitude
+            agent_id=aid,
+            position=(uv.position[0], uv.position[1]),
+            altitude=uv.altitude,
         )
 
-    return config, grid_info, coordinator, agents, gt, conf_dict, hrange
+    shared_obs_rng = np.random.default_rng(seed)
+    map_obj.rng = shared_obs_rng
+    for agent_state in agents:
+        agent_state["camera"].rng = shared_obs_rng
+
+    simulator = Simulator(
+        agents=agents,
+        map_obj=map_obj,
+        ground_truth_map=gt,
+        conf_dict=conf_dict,
+        grid_info=grid_info,
+        n_steps=n_steps,
+        results_folder="/tmp/compare_detail",
+        corr_type="pairwise",
+        e_margin=None,
+        grf_r=cluster_radius,
+        iter_idx=0,
+        enable_stepwise_plotting=False,
+        enable_logging=False,
+        action_strategy="greedy_ig",
+        coordinator=coordinator,
+        multi_agent_logger=None,
+        run_id="compare_detail",
+        debug_logs=False,
+    )
+
+    return config, grid_info, coordinator, agents, gt, conf_dict, hrange, map_obj, simulator
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -304,9 +337,19 @@ def mh_fuse(coordinator, agents, agent_obs, news_sharing=True):
             agent["occupancy_map"].map_beliefs = fb.copy()
 
 
-def mh_select_actions(agents, coordinator, grid_info):
+def mh_select_actions(agents, coordinator, grid_info, simulator=None, step=0):
     """One round of greedy IG planning for all agents."""
     from helper import uav_position
+
+    if simulator is not None:
+        simulator._select_agent_actions(step)
+        actions = {}
+        for agent in agents:
+            aid = agent["agent_id"]
+            action = agent.get("_next_action")
+            agent["actions"].append(action)
+            actions[aid] = action
+        return actions
 
     actions = {}
     for agent in agents:
@@ -342,11 +385,10 @@ def mh_step(agents, actions, coordinator, grid_info):
         cam.set_position(uav_pos.position)
 
         if coordinator:
-            r, c = cam.convert_xy_ij(
-                uav_pos.position[0], uav_pos.position[1], cam.grid.center
-            )
             coordinator.update_agent_state(
-                agent_id=aid, position=(r, c), altitude=uav_pos.altitude
+                agent_id=aid,
+                position=(uav_pos.position[0], uav_pos.position[1]),
+                altitude=uav_pos.altitude,
             )
 
 
@@ -451,7 +493,17 @@ def main():
     )
 
     print(f"Loading MH  [{args.mode}]...")
-    config, grid_info, coordinator, mh_agents, mh_gt, conf_dict, hrange = load_mh(
+    (
+        config,
+        grid_info,
+        coordinator,
+        mh_agents,
+        mh_gt,
+        conf_dict,
+        hrange,
+        map_obj,
+        mh_simulator,
+    ) = load_mh(
         args.seed, args.steps, mode=args.mode
     )
 
@@ -501,7 +553,7 @@ def main():
 
     # ── Step-by-step loop ─────────────────────────────────────────────────────
     pa_observations = []  # PA observations from previous step
-    mh_news_sharing = True  # IG_BS uses news sharing
+    mh_news_sharing = config.get("decentralized", {}).get("news_sharing", True)
 
     for step in range(args.steps):
         print_step_header(step)
@@ -523,49 +575,6 @@ def main():
                 print(
                     f"  ⚠ Agent {ag.id} per-agent belief diff before planning: max={max_diff:.6e}"
                 )
-
-        # ── MH: plan first, then reuse actions for PA to avoid tie-breaking drift ──
-        mh_actions = mh_select_actions(mh_agents, coordinator, grid_info)
-        # PA uses same actions as MH (beliefs identical, IG values identical)
-        pa_actions = list(mh_actions[aid] for aid in range(len(env.agents)))
-        pa_plan_data = [{} for _ in env.agents]
-        mh_ig_scores = {}
-        for agent in mh_agents:
-            aid = agent["agent_id"]
-            p = agent["planner"]
-            if hasattr(p, "_greedy_ig_planner") and hasattr(
-                p._greedy_ig_planner, "_action_scores"
-            ):
-                mh_ig_scores[aid] = dict(p._greedy_ig_planner._action_scores)
-
-        print(f"\n  Actions chosen:")
-        for aid in range(4):
-            pa_act = pa_actions[aid] if pa_actions else "?"
-            mh_act = mh_actions[aid] if mh_actions else "?"
-            same = "✓" if pa_act == mh_act else "✗"
-            print(f"    Agent {aid}: PA={pa_act:10s}  MH={mh_act:10s}  {same}")
-
-        # ── No tie-breaking divergence possible (PA reuses MH actions) ───────
-
-        # ── PA: step (move agents) ────────────────────────────────────────────
-        pa_step(env, pa_actions)
-
-        # ── MH: step (move agents) ────────────────────────────────────────────
-        mh_step(mh_agents, mh_actions, coordinator, grid_info)
-
-        print(f"\n  Positions after step:")
-        for ag in env.agents:
-            mh_ag = mh_agents[ag.id]
-            pa_p = ag.state.position
-            mh_p = mh_ag["uav_pos"]
-            same = np.isclose(pa_p[0], mh_p.position[0]) and np.isclose(
-                pa_p[1], mh_p.position[1]
-            )
-            print(
-                f"    Agent {ag.id}: PA=({pa_p[0]:+6.2f},{pa_p[1]:+6.2f},z={pa_p[2]:.3f})  "
-                f"MH=({mh_p.position[0]:+6.2f},{mh_p.position[1]:+6.2f},z={mh_p.altitude:.3f})  "
-                f"same_xy={'✓' if same else '✗'}"
-            )
 
         # ── PA: observe + fuse ────────────────────────────────────────────────
         obs_raw = env.get_observations(pa_gt)  # returns list of dicts per agent
@@ -605,7 +614,6 @@ def main():
             a["agent_id"]: a["belief_map"][:, :, 1].copy() for a in mh_agents
         }
 
-        map_obj = _get_map_obj(args.seed, grid_info, hrange)
         mh_obs_raw = mh_observe(coordinator, mh_agents, map_obj, conf_dict)
 
         mh_ent_after_local = mh_entropy_total(mh_agents)
@@ -613,6 +621,32 @@ def main():
         mh_fuse(coordinator, mh_agents, mh_obs_raw, news_sharing=mh_news_sharing)
 
         mh_ent_after_fuse = mh_entropy_total(mh_agents)
+
+        # ── Plan after observation/fusion, matching compare_greedy_ig.py ─────
+        planner.compute_map_belief_entropies()
+        pa_actions, pa_plan_data = planner.get_actions(env.agents, obs_raw)
+        mh_actions = mh_select_actions(
+            mh_agents, coordinator, grid_info, simulator=mh_simulator, step=step
+        )
+        mh_ig_scores = {}
+        for agent in mh_agents:
+            aid = agent["agent_id"]
+            p = agent["planner"]
+            if hasattr(p, "_greedy_ig_planner") and hasattr(
+                p._greedy_ig_planner, "_action_scores"
+            ):
+                mh_ig_scores[aid] = dict(p._greedy_ig_planner._action_scores)
+
+        print(f"\n  Actions chosen:")
+        for aid in range(4):
+            pa_act = pa_actions[aid] if pa_actions else "?"
+            mh_act = mh_actions[aid] if mh_actions else "?"
+            same = "✓" if pa_act == mh_act else "✗"
+            print(f"    Agent {aid}: PA={pa_act:10s}  MH={mh_act:10s}  {same}")
+
+        # ── Move after planning ───────────────────────────────────────────────
+        pa_step(env, pa_actions)
+        mh_step(mh_agents, mh_actions, coordinator, grid_info)
 
         for aid, obs in mh_obs_raw.items():
             fp = obs["fp_ij"]
@@ -666,20 +700,6 @@ def main():
                 print(
                     f"      Agent entropy: PA={pa_ent_ag:.2f}  MH={mh_ent_ag:.2f}  Δ={mh_ent_ag-pa_ent_ag:+.2f}"
                 )
-
-
-# helper: cache the map object
-_map_cache = {}
-
-
-def _get_map_obj(seed, grid_info, hrange):
-    if seed not in _map_cache:
-        from orthomap import Field
-
-        m = Field(grid_info, 4, sweep="greedy_ig", h_range=hrange, seed=seed)
-        m.reset(seed=seed)
-        _map_cache[seed] = m
-    return _map_cache[seed]
 
 
 if __name__ == "__main__":
