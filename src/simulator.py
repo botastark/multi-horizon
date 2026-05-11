@@ -367,7 +367,7 @@ class Simulator:
             and self.coordinator is not None
             and getattr(self.coordinator, "mode", None) in {"IG_BS", "IGd_BM"}
         ):
-            self._select_pa_compatible_greedy_actions(step)
+            self._select_greedy_baseline_actions(step)
             return
 
         for agent in self.agents:
@@ -630,7 +630,7 @@ class Simulator:
 
         return actions, data
 
-    def _select_pa_compatible_greedy_actions(self, step: int = 0) -> None:
+    def _select_greedy_baseline_actions(self, step: int = 0) -> None:
         for agent in self.agents:
             camera = agent["camera"]
             uav_pos = agent["uav_pos"]
@@ -648,8 +648,8 @@ class Simulator:
         mode = getattr(self.coordinator, "mode", None)
 
         if mode == "IGd_BM" and len(self.agents) > 1:
-            if not hasattr(self, "_pa_agent_decision_order_rng"):
-                self._pa_agent_decision_order_rng = np.random.default_rng(17)
+            if not hasattr(self, "_baseline_agent_decision_order_rng"):
+                self._baseline_agent_decision_order_rng = np.random.default_rng(17)
 
             predicted_states = np.array(
                 [
@@ -663,7 +663,7 @@ class Simulator:
                 dtype=float,
             )
             selected_actions = ["hover"] * len(self.agents)
-            decision_order = self._pa_agent_decision_order_rng.permutation(
+            decision_order = self._baseline_agent_decision_order_rng.permutation(
                 len(self.agents)
             )
             h_disp = self.agents[0]["camera"].xy_step
@@ -743,18 +743,21 @@ class Simulator:
         fused_local = np.mean(
             [agent["belief_map"][:, :, 1] for agent in self.agents], axis=0
         )
-        pa_reference_greedy_ig = (
+        ma_config = (
+            self.coordinator.config.get("multi_agent", {})
+            if self.coordinator is not None
+            else {}
+        )
+        use_fused_mean_metrics = (
             self.action_strategy == "greedy_ig"
             and self.coordinator is not None
             and getattr(self.coordinator, "mode", None) in {"IG_BS", "IGd_BM"}
-            and self.coordinator.config.get("multi_agent", {}).get(
-                "pa_reference_compat", False
-            )
+            and ma_config.get("metric_aggregation") == "fused_mean"
         )
-        if not pa_reference_greedy_ig:
+        if ma_config.get("clip_metric_beliefs", not use_fused_mean_metrics):
             fused_local = np.clip(fused_local, 0.001, 0.999)
 
-        if pa_reference_greedy_ig:
+        if use_fused_mean_metrics:
             fused_mse_val = float(np.mean((self.ground_truth_map - fused_local) ** 2))
         else:
             fused_mse_val = np.mean(per_agent_mses)
@@ -776,7 +779,7 @@ class Simulator:
         self.display_belief[:, :, 1] = fused_local
         self.display_belief[:, :, 0] = 1 - fused_local
 
-        if pa_reference_greedy_ig:
+        if use_fused_mean_metrics:
             fused_entropy_val = float(np.sum(H(fused_local)))
             decided = (fused_local > 0.55) | (fused_local < 0.45)
             combined_coverage_val = float(decided.mean())

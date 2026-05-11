@@ -127,15 +127,22 @@ def run_mh(
     if news_mode == "IG_BS":
         dec_config["position_sharing"] = False
         dec_config["news_sharing"] = True
-        config.setdefault("multi_agent", {})["news_mode"] = "BS"
-        config.setdefault("multi_agent", {})["news_inference_type"] = "OG"
-        config.setdefault("multi_agent", {})["pa_reference_compat"] = True
+        ma_config = config.setdefault("multi_agent", {})
+        ma_config["news_mode"] = "BS"
+        ma_config["news_update_rule"] = "bayesian"
+        ma_config["fusion_eps"] = 0.0
+        ma_config["metric_aggregation"] = "fused_mean"
+        ma_config["clip_metric_beliefs"] = False
         coord_news_mode = "BS"
         dec_config.setdefault("radius_multiplier", -1)  # infinite comm
     elif news_mode == "IGd_BM":
         dec_config["position_sharing"] = True
         dec_config["news_sharing"] = False
-        config.setdefault("multi_agent", {})["pa_reference_compat"] = True
+        ma_config = config.setdefault("multi_agent", {})
+        ma_config["news_update_rule"] = "none"
+        ma_config["fusion_eps"] = 0.0
+        ma_config["metric_aggregation"] = "fused_mean"
+        ma_config["clip_metric_beliefs"] = False
         coord_news_mode = "BM"
         greedy_cfg["enable_discounting"] = True
         dec_config.setdefault("radius_multiplier", 5)  # R=5

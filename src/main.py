@@ -1,5 +1,6 @@
 import os
 import json
+import copy
 import numpy as np
 from tqdm import tqdm
 import matplotlib
@@ -21,6 +22,46 @@ from experiment_config import (
     parse_args,
 )
 from experiment_runner import run_multi_agent_experiment
+
+
+VALID_MODE_LABELS = {"IG", "IG_BS", "IG_BM", "IGd", "IGd_BS", "IGd_BM"}
+
+
+def _explicit_news_update_rule(ma_config: dict):
+    return ma_config.get("news_update_rule", ma_config.get("news_inference_type"))
+
+
+def _apply_mh_mode_label(config: dict, mode_label: str):
+    """Translate experiment labels into MH-native switches."""
+    dec_config = config.setdefault("decentralized", {})
+    ma_config = config.setdefault("multi_agent", {})
+    greedy_config = config.setdefault("greedy_ig", {})
+
+    is_discounted = mode_label.startswith("IGd")
+    has_news = "_" in mode_label
+
+    dec_config["position_sharing"] = is_discounted
+    dec_config["news_sharing"] = has_news
+
+    if config.get("action_strategy") == "greedy_ig":
+        greedy_config["enable_discounting"] = is_discounted
+
+    actual_news_mode = None
+    if has_news:
+        actual_news_mode = mode_label.split("_", 1)[1]
+        ma_config["news_mode"] = actual_news_mode
+        if _explicit_news_update_rule(ma_config) is None:
+            ma_config["news_update_rule"] = "belief_propagation"
+    else:
+        ma_config["news_update_rule"] = "none"
+
+    if config.get("limited_testing", False):
+        if mode_label == "IG_BS":
+            dec_config["radius_multiplier"] = 16
+        elif mode_label == "IGd_BM":
+            dec_config["radius_multiplier"] = 5
+
+    return actual_news_mode
 
 
 def run_experiment_with_config(config: dict, args):
@@ -115,29 +156,27 @@ def run_experiment_with_config(config: dict, args):
 
     # If strategy-specific `mode_label` is a list, run experiments for each label.
     # Otherwise resolve a single mode_label and run once.
-    valid_labels = {"IG", "IG_BS", "IG_BM", "IGd", "IGd_BS", "IGd_BM"}
-
     if isinstance(explicit_label, list):
         # Filter valid labels from the list
         mode_labels = [
-            l for l in explicit_label if isinstance(l, str) and l in valid_labels
+            l for l in explicit_label if isinstance(l, str) and l in VALID_MODE_LABELS
         ]
         if not mode_labels:
             # No valid labels in list, fall back to inferred
-            if inferred_label in valid_labels:
+            if inferred_label in VALID_MODE_LABELS:
                 mode_labels = [inferred_label]
             else:
                 mode_labels = ["IG"]
     elif (
         explicit_label
         and isinstance(explicit_label, str)
-        and explicit_label in valid_labels
+        and explicit_label in VALID_MODE_LABELS
     ):
         # Single explicit label provided
         mode_labels = [explicit_label]
     else:
         # Use inferred label
-        if inferred_label in valid_labels:
+        if inferred_label in VALID_MODE_LABELS:
             mode_labels = [inferred_label]
         else:
             # try to normalize forms like 'BM' or 'BS'
@@ -146,86 +185,12 @@ def run_experiment_with_config(config: dict, args):
             else:
                 mode_labels = [inferred_label]
 
+    base_config = copy.deepcopy(config)
+
     # Loop over mode labels (allows batch runs via greedy_ig.mode_label = [...])
     for news_mode in mode_labels:
-        # Parse the mode label to set config flags for this run
-        # IG = no sharing (position_sharing=False, news_sharing=False)
-        # IGd = position only (position_sharing=True, news_sharing=False)
-        # IG_BS/IG_BM = IG with news sharing (position_sharing=False, news_sharing=True, news_mode=BS/BM)
-        # IGd_BS/IGd_BM = IGd with news sharing (position_sharing=True, news_sharing=True, news_mode=BS/BM)
-
-        if news_mode == "IG":
-            # No sharing
-            config["decentralized"]["position_sharing"] = False
-            config["decentralized"]["news_sharing"] = False
-            actual_news_mode = None
-        elif news_mode == "IGd":
-            # Position sharing only
-            config["decentralized"]["position_sharing"] = True
-            config["decentralized"]["news_sharing"] = False
-            actual_news_mode = None
-        elif news_mode in ["IG_BS", "IG_BM"]:
-            # IG with news sharing
-            config["decentralized"]["position_sharing"] = False
-            config["decentralized"]["news_sharing"] = True
-            actual_news_mode = news_mode.split("_")[1]  # "BS" or "BM"
-            if "multi_agent" not in config:
-                config["multi_agent"] = {}
-            config["multi_agent"]["news_mode"] = actual_news_mode
-
-            # Limited testing mode: IG_BS uses infinite communication
-            if config.get("limited_testing", False) and news_mode == "IG_BS":
-                if (
-                    "radius_multiplier" in dec_config
-                    or config.get("action_strategy") == "greedy_ig"
-                ):
-                    config["decentralized"]["radius_multiplier"] = -1
-                else:
-                    config["decentralized"]["communication_range"] = -1
-
-        elif news_mode in ["IGd_BS", "IGd_BM"]:
-            # IGd with news sharing
-            config["decentralized"]["position_sharing"] = True
-            config["decentralized"]["news_sharing"] = True
-            actual_news_mode = news_mode.split("_")[1]  # "BS" or "BM"
-            if "multi_agent" not in config:
-                config["multi_agent"] = {}
-            config["multi_agent"]["news_mode"] = actual_news_mode
-
-            # Limited testing mode: IGd_BM uses limited communication (5x multiplier)
-            if config.get("limited_testing", False) and news_mode == "IGd_BM":
-                if (
-                    "radius_multiplier" in dec_config
-                    or config.get("action_strategy") == "greedy_ig"
-                ):
-                    config["decentralized"]["radius_multiplier"] = 5
-                else:
-                    config["decentralized"]["communication_range"] = (
-                        5 * 3.125
-                    )  # 5x grid_step
-        else:
-            # Unknown mode, use defaults
-            actual_news_mode = news_mode
-
-        pa_reference_greedy_ig = (
-            config.get("action_strategy") == "greedy_ig"
-            and config.get("multi_agent", {}).get("pa_reference_compat", False)
-        )
-        if pa_reference_greedy_ig:
-            config.setdefault("multi_agent", {})
-            config.setdefault("greedy_ig", {})
-            if news_mode == "IG_BS":
-                config["decentralized"]["position_sharing"] = False
-                config["decentralized"]["news_sharing"] = True
-                config["multi_agent"]["news_mode"] = "BS"
-                config["multi_agent"]["news_inference_type"] = "OG"
-                actual_news_mode = "BS"
-            elif news_mode == "IGd_BM":
-                config["decentralized"]["position_sharing"] = True
-                config["decentralized"]["news_sharing"] = False
-                config["multi_agent"]["news_mode"] = "BM"
-                config["greedy_ig"]["enable_discounting"] = True
-                actual_news_mode = "BM"
+        config = copy.deepcopy(base_config)
+        actual_news_mode = _apply_mh_mode_label(config, news_mode)
 
         # Get communication range for folder naming
         # Check if radius_multiplier is specified (preferred, matches reference paper)
