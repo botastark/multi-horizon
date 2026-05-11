@@ -355,7 +355,7 @@ def run_multi_agent_experiment(
 
         if (
             action_strategy == "greedy_ig"
-            and config.get("multi_agent", {}).get("pa_reference_compat", False)
+            and config.get("multi_agent", {}).get("shared_observation_rng", False)
         ):
             shared_obs_rng = np.random.default_rng(seed)
             map_obj.rng = shared_obs_rng

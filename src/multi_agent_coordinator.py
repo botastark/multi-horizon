@@ -365,10 +365,14 @@ class MultiAgentCoordinator:
         # Initialize communication bus
         self.comm_bus = CommunicationBus(self.num_agents)
 
-        # Initialize multi-agent mapper (handles all belief mapping)
-        # Use LBP news inference by default (matches paper's LBP_single/LBP_multi)
-        news_inference = ma_config.get("news_inference_type", "LBP")
-        pa_reference_compat = ma_config.get("pa_reference_compat", False)
+        # Initialize multi-agent mapper (handles all belief mapping).
+        # Prefer MH-native `news_update_rule`; accept legacy `news_inference_type`
+        # so older configs keep working.
+        news_update_rule = ma_config.get(
+            "news_update_rule",
+            ma_config.get("news_inference_type", "belief_propagation"),
+        )
+        fusion_eps = ma_config.get("fusion_eps", ma_config.get("eps", 1e-20))
         self.map = MultiAgentMapper(
             self.grid_shape,
             self.num_agents,
@@ -376,8 +380,8 @@ class MultiAgentCoordinator:
             correlation_type=self.correlation_type,
             news_mode=self.news_mode,
             lbp_iterations=self.lbp_iterations,
-            news_inference_type=news_inference,
-            eps=0.0 if pa_reference_compat else 1e-20,
+            news_update_rule=news_update_rule,
+            eps=fusion_eps,
         )
 
         # Agent states tracking
