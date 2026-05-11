@@ -69,8 +69,9 @@ def _build_logged_hyperparams(config, action_strategy, mcts_params):
             if key.startswith("llp_") or key.startswith("hlp_"):
                 hyperparams[key] = value
 
-        if "use_mcts_llp" in hier_cfg:
-            hyperparams["use_mcts_llp"] = hier_cfg["use_mcts_llp"]
+        for key in ["use_mcts_llp", "use_g2"]:
+            if key in hier_cfg:
+                hyperparams[key] = hier_cfg[key]
 
     return hyperparams
 

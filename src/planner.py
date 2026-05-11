@@ -559,15 +559,22 @@ class planning:
                 "llp_iterations": hier_config.get(
                     "llp_iterations", self.mcts_params.get("num_iterations", 50)
                 ),
+                "llp_discount_factor": hier_config.get("llp_discount_factor", 0.95),
                 "hlp_horizon": hier_config.get(
                     "hlp_horizon", horizon_weights.get("long_horizon_depth", 3) // 5
                 ),  # Regions, not steps
                 "hlp_iterations": hier_config.get("hlp_iterations", 30),
                 "tile_size": hier_config.get(
-                    "tile_size", horizon_weights.get("tile_size", [100, 100])
+                    "tile_size",
+                    hier_config.get(
+                        "hlp_tile_size", horizon_weights.get("tile_size", [100, 100])
+                    ),
                 ),
                 "hlp_replan_interval": hier_config.get("hlp_replan_interval", 1.0),
+                "llp_ucb_c": hier_config.get("llp_ucb_c", 1.41),
+                "hlp_ucb_c": hier_config.get("hlp_ucb_c", 1.0),
                 "use_mcts_llp": use_mcts_llp,
+                "use_g2": hier_config.get("use_g2", False),
             }
 
             num_agents = 1

@@ -4,77 +4,11 @@
   "base_config": "configs/master_config.json",
   "experiments": [
     {
-      "name": "greedy_ig_opw_0.0",
+      "name": "greedy_ig_baseline",
       "overrides": {
         "strategies": ["greedy_ig"],
         "strategy_configs": {
-          "greedy_ig": "../../configs/strategies/sweeps/greedy_ig_opw_0.0.json"
-        },
-        "shared": {
-          "mode_labels": ["IG_BS", "IGd_BM"],
-          "cluster_radius": 4,
-          "num_agents": 4,
-          "n_steps": 100,
-          "iters": [0, 20],
-          "field_type": "Gaussian",
-          "start_position": "corner",
-          "correlation_types": ["adaptive"],
-          "enable_plotting": false,
-          "enable_logging": true,
-          "debug_logs": false
-        }
-      }
-    },
-    {
-      "name": "greedy_ig_opw_0.1",
-      "overrides": {
-        "strategies": ["greedy_ig"],
-        "strategy_configs": {
-          "greedy_ig": "../../configs/strategies/sweeps/greedy_ig_opw_0.1.json"
-        },
-        "shared": {
-          "mode_labels": ["IG_BS", "IGd_BM"],
-          "cluster_radius": 4,
-          "num_agents": 4,
-          "n_steps": 100,
-          "iters": [0, 20],
-          "field_type": "Gaussian",
-          "start_position": "corner",
-          "correlation_types": ["adaptive"],
-          "enable_plotting": false,
-          "enable_logging": true,
-          "debug_logs": false
-        }
-      }
-    },
-    {
-      "name": "greedy_ig_opw_0.3",
-      "overrides": {
-        "strategies": ["greedy_ig"],
-        "strategy_configs": {
-          "greedy_ig": "../../configs/strategies/sweeps/greedy_ig_opw_0.3.json"
-        },
-        "shared": {
-          "mode_labels": ["IG_BS", "IGd_BM"],
-          "cluster_radius": 4,
-          "num_agents": 4,
-          "n_steps": 100,
-          "iters": [0, 20],
-          "field_type": "Gaussian",
-          "start_position": "corner",
-          "correlation_types": ["adaptive"],
-          "enable_plotting": false,
-          "enable_logging": true,
-          "debug_logs": false
-        }
-      }
-    },
-    {
-      "name": "greedy_ig_opw_0.5",
-      "overrides": {
-        "strategies": ["greedy_ig"],
-        "strategy_configs": {
-          "greedy_ig": "../../configs/strategies/sweeps/greedy_ig_opw_0.5.json"
+          "greedy_ig": "../../configs/strategies/sweeps/greedy_ig_baseline.json"
         },
         "shared": {
           "mode_labels": ["IG_BS", "IGd_BM"],

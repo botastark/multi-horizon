@@ -3,7 +3,12 @@
   "_description": "When limited_testing=true: only IG_BS (inf comm = Rinf) and IGd_BM (limited comm = R5)",
   "limited_testing": true,
 
-  "strategies": ["dec_mcts"],
+  "strategies": [
+    "greedy_ig",
+    "dec_mcts",
+    "mh_dec_mcts_full",
+    "mh_dec_mcts_efficient"
+  ],
   "_comment_strategies": "Define the strategy configurations and their corresponding config file paths (greedy_ig, dec_mcts, mh_dec_mcts_full, mh_dec_mcts_efficient)",
 
   "strategy_configs": {

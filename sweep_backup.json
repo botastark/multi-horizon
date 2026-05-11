@@ -1,0 +1,1723 @@
+{
+  "_comment": "Hyperparameter Sweep Configuration - All Methods",
+  "_description": "Tests multiple hyperparameter variations for each planning method across IG_BS (infinite comm) and IGd_BM (limited comm R5) settings",
+  "base_config": "configs/master_config.json",
+  "experiments": [
+    {
+      "name": "greedy_ig_opw_0.0",
+      "overrides": {
+        "strategies": ["greedy_ig"],
+        "strategy_configs": {
+          "greedy_ig": "configs/strategies/sweeps/greedy_ig_opw_0.0.json"
+        },
+        "shared": {
+          "mode_labels": ["IG_BS", "IGd_BM"],
+          "cluster_radius": 4,
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [0, 20],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "correlation_types": ["adaptive"],
+          "enable_plotting": false,
+          "enable_logging": true,
+          "debug_logs": false
+        }
+      }
+    },
+    {
+      "name": "dec_mcts_balanced",
+      "overrides": {
+        "strategies": ["dec_mcts"],
+        "strategy_configs": {
+          "dec_mcts": "../../configs/strategies/sweeps/dec_mcts_balanced.json"
+        },
+        "shared": {
+          "mode_labels": ["IG_BS", "IGd_BM"],
+          "cluster_radius": 4,
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [0, 20],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "correlation_types": ["adaptive"],
+          "enable_plotting": false,
+          "enable_logging": true,
+          "debug_logs": false
+        }
+      }
+    },
+    {
+      "name": "dec_mcts_longlook",
+      "overrides": {
+        "strategies": ["dec_mcts"],
+        "strategy_configs": {
+          "dec_mcts": "../../configs/strategies/sweeps/dec_mcts_longlook.json"
+        },
+        "shared": {
+          "mode_labels": ["IG_BS", "IGd_BM"],
+          "cluster_radius": 4,
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [0, 20],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "correlation_types": ["adaptive"],
+          "enable_plotting": false,
+          "enable_logging": true,
+          "debug_logs": false
+        }
+      }
+    },
+    {
+      "name": "mh_eff_fast_replan",
+      "overrides": {
+        "strategies": ["mh_dec_mcts_efficient"],
+        "strategy_configs": {
+          "mh_dec_mcts_efficient": "../../configs/strategies/sweeps/mh_dec_mcts_efficient_fast_replan.json"
+        },
+        "shared": {
+          "mode_labels": ["IG_BS", "IGd_BM"],
+          "cluster_radius": 4,
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [0, 20],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "correlation_types": ["adaptive"],
+          "enable_plotting": false,
+          "enable_logging": true,
+          "debug_logs": false
+        }
+      }
+    },
+    {
+      "name": "mh_eff_balanced",
+      "overrides": {
+        "strategies": ["mh_dec_mcts_efficient"],
+        "strategy_configs": {
+          "mh_dec_mcts_efficient": "../../configs/strategies/sweeps/mh_dec_mcts_efficient_balanced.json"
+        },
+        "shared": {
+          "mode_labels": ["IG_BS", "IGd_BM"],
+          "cluster_radius": 4,
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [0, 20],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "correlation_types": ["adaptive"],
+          "enable_plotting": false,
+          "enable_logging": true,
+          "debug_logs": false
+        }
+      }
+    },
+    {
+      "name": "mh_eff_strategic",
+      "overrides": {
+        "strategies": ["mh_dec_mcts_efficient"],
+        "strategy_configs": {
+          "mh_dec_mcts_efficient": "../../configs/strategies/sweeps/mh_dec_mcts_efficient_strategic.json"
+        },
+        "shared": {
+          "mode_labels": ["IG_BS", "IGd_BM"],
+          "cluster_radius": 4,
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [0, 20],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "correlation_types": ["adaptive"],
+          "enable_plotting": false,
+          "enable_logging": true,
+          "debug_logs": false
+        }
+      }
+    },
+    {
+      "name": "mh_full_tactical",
+      "overrides": {
+        "strategies": ["mh_dec_mcts_full"],
+        "strategy_configs": {
+          "mh_dec_mcts_full": "../../configs/strategies/sweeps/mh_dec_mcts_full_tactical.json"
+        },
+        "shared": {
+          "mode_labels": ["IG_BS", "IGd_BM"],
+          "cluster_radius": 4,
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [0, 20],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "correlation_types": ["adaptive"],
+          "enable_plotting": false,
+          "enable_logging": true,
+          "debug_logs": false
+        }
+      }
+    },
+    {
+      "name": "mh_full_balanced",
+      "overrides": {
+        "strategies": ["mh_dec_mcts_full"],
+        "strategy_configs": {
+          "mh_dec_mcts_full": "../../configs/strategies/sweeps/mh_dec_mcts_full_balanced.json"
+        },
+        "shared": {
+          "mode_labels": ["IG_BS", "IGd_BM"],
+          "cluster_radius": 4,
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [0, 20],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "correlation_types": ["adaptive"],
+          "enable_plotting": false,
+          "enable_logging": true,
+          "debug_logs": false
+        }
+      }
+    },
+    {
+      "name": "mh_full_deep_search",
+      "overrides": {
+        "strategies": ["mh_dec_mcts_full"],
+        "strategy_configs": {
+          "mh_dec_mcts_full": "../../configs/strategies/sweeps/mh_dec_mcts_full_deep_search.json"
+        },
+        "shared": {
+          "mode_labels": ["IG_BS", "IGd_BM"],
+          "cluster_radius": 4,
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [0, 20],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "correlation_types": ["adaptive"],
+          "enable_plotting": false,
+          "enable_logging": true,
+          "debug_logs": false
+    }
+  }
+},
+{
+  "name": "dmcts_short_h_many_i",
+  "_note": "dec_mcts | horizon=5 iter=50 ucb=1.4 df=0.95 pen=0.3 | shorter horizon compensated by more iterations",
+      "overrides": {
+        "action_strategy": "dec_mcts",
+        "strategies": [
+          "dec_mcts"
+        ],
+        "shared": {
+          "mode_labels": [
+          "debug_logs": false
+    },
+      }
+    }
+      "_note": "dec_mcts | horizon=10 iter=30 ucb=1.8 df=0.95 pen=0.3 | higher UCB (broader exploration of action space)",
+      "overrides": {
+        "action_strategy": "dec_mcts",
+        "strategies": [
+          "dec_mcts"
+        ],
+        "shared": {
+          "mode_labels": [
+            "IG_BS",
+            "IGd_BM"
+          ],
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [
+            0,
+            20
+          ],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "enable_plotting": false,
+          "enable_logging": true
+        },
+        "decentralized": {
+          "communication_range": 15.625,
+          "communication_delay": 0.05,
+          "message_drop_probability": 0.0,
+          "d_uct": {
+            "decay_factor": 0.9,
+            "threshold_sec": 2.0
+          },
+          "overlap_penalty_weight": 0.3,
+          "radius_multiplier": 5
+        },
+        "dec_mcts": {
+          "horizon": 10,
+          "iterations": 30,
+          "ucb_c": 1.8,
+          "discount_factor": 0.95,
+          "timeout": 5.0,
+          "parallel": 1
+        },
+        "strategy_configs": {
+          "greedy_ig": "../../configs/strategies/greedy_ig.json",
+          "dec_mcts": "../../configs/strategies/dec_mcts.json",
+          "mh_dec_mcts_full": "../../configs/strategies/mh_dec_mcts_full.json",
+          "mh_dec_mcts_efficient": "../../configs/strategies/mh_dec_mcts_efficient.json"
+        }
+      }
+    },
+    {
+      "name": "dmcts_no_discount",
+      "_note": "dec_mcts | horizon=10 iter=50 ucb=1.0 df=1.0 pen=0.3 | no future discount \u2014 equal weighting across horizon",
+      "overrides": {
+        "action_strategy": "dec_mcts",
+        "strategies": [
+          "dec_mcts"
+        ],
+        "shared": {
+          "mode_labels": [
+            "IG_BS",
+            "IGd_BM"
+          ],
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [
+            0,
+            20
+          ],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "enable_plotting": false,
+          "enable_logging": true
+        },
+        "decentralized": {
+          "communication_range": 15.625,
+          "communication_delay": 0.05,
+          "message_drop_probability": 0.0,
+          "d_uct": {
+            "decay_factor": 0.9,
+            "threshold_sec": 2.0
+          },
+          "overlap_penalty_weight": 0.3,
+          "radius_multiplier": 5
+        },
+        "dec_mcts": {
+          "horizon": 10,
+          "iterations": 50,
+          "ucb_c": 1.0,
+          "discount_factor": 1.0,
+          "timeout": 5.0,
+          "parallel": 1
+        },
+        "strategy_configs": {
+          "greedy_ig": "../../configs/strategies/greedy_ig.json",
+          "dec_mcts": "../../configs/strategies/dec_mcts.json",
+          "mh_dec_mcts_full": "../../configs/strategies/mh_dec_mcts_full.json",
+          "mh_dec_mcts_efficient": "../../configs/strategies/mh_dec_mcts_efficient.json"
+        }
+      }
+    },
+    {
+      "name": "dmcts_low_overlap",
+      "_note": "dec_mcts | horizon=10 iter=30 ucb=1.4 df=0.95 pen=0.1 | weak overlap penalty \u2014 allow agents to share regions",
+      "overrides": {
+        "action_strategy": "dec_mcts",
+        "strategies": [
+          "dec_mcts"
+        ],
+        "shared": {
+          "mode_labels": [
+            "IG_BS",
+            "IGd_BM"
+          ],
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [
+            0,
+            20
+          ],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "enable_plotting": false,
+          "enable_logging": true
+        },
+        "decentralized": {
+          "communication_range": 15.625,
+          "communication_delay": 0.05,
+          "message_drop_probability": 0.0,
+          "d_uct": {
+            "decay_factor": 0.9,
+            "threshold_sec": 2.0
+          },
+          "overlap_penalty_weight": 0.1,
+          "radius_multiplier": 5
+        },
+        "dec_mcts": {
+          "horizon": 10,
+          "iterations": 30,
+          "ucb_c": 1.4,
+          "discount_factor": 0.95,
+          "timeout": 5.0,
+          "parallel": 1
+        },
+        "strategy_configs": {
+          "greedy_ig": "../../configs/strategies/greedy_ig.json",
+          "dec_mcts": "../../configs/strategies/dec_mcts.json",
+          "mh_dec_mcts_full": "../../configs/strategies/mh_dec_mcts_full.json",
+          "mh_dec_mcts_efficient": "../../configs/strategies/mh_dec_mcts_efficient.json"
+        }
+      }
+    },
+    {
+      "name": "dmcts_high_overlap",
+      "_note": "dec_mcts | horizon=10 iter=30 ucb=1.4 df=0.95 pen=0.5 | strong overlap penalty \u2014 force spatial separation",
+      "overrides": {
+        "action_strategy": "dec_mcts",
+        "strategies": [
+          "dec_mcts"
+        ],
+        "shared": {
+          "mode_labels": [
+            "IG_BS",
+            "IGd_BM"
+          ],
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [
+            0,
+            20
+          ],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "enable_plotting": false,
+          "enable_logging": true
+        },
+        "decentralized": {
+          "communication_range": 15.625,
+          "communication_delay": 0.05,
+          "message_drop_probability": 0.0,
+          "d_uct": {
+            "decay_factor": 0.9,
+            "threshold_sec": 2.0
+          },
+          "overlap_penalty_weight": 0.5,
+          "radius_multiplier": 5
+        },
+        "dec_mcts": {
+          "horizon": 10,
+          "iterations": 30,
+          "ucb_c": 1.4,
+          "discount_factor": 0.95,
+          "timeout": 5.0,
+          "parallel": 1
+        },
+        "strategy_configs": {
+          "greedy_ig": "../../configs/strategies/greedy_ig.json",
+          "dec_mcts": "../../configs/strategies/dec_mcts.json",
+          "mh_dec_mcts_full": "../../configs/strategies/mh_dec_mcts_full.json",
+          "mh_dec_mcts_efficient": "../../configs/strategies/mh_dec_mcts_efficient.json"
+        }
+      }
+    },
+    {
+      "name": "mhfull_base",
+      "_note": "mh_dec_mcts_full | all defaults \u2014 reference point",
+      "overrides": {
+        "action_strategy": "mh_dec_mcts_both",
+        "strategies": [
+          "mh_dec_mcts_full"
+        ],
+        "shared": {
+          "mode_labels": [
+            "IG_BS",
+            "IGd_BM"
+          ],
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [
+            0,
+            20
+          ],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "enable_plotting": false,
+          "enable_logging": true
+        },
+        "decentralized": {
+          "communication_range": 15.625,
+          "communication_delay": 0.05,
+          "message_drop_probability": 0.0,
+          "d_uct": {
+            "decay_factor": 0.9,
+            "threshold_sec": 2.0
+          },
+          "overlap_penalty_weight": 0.3,
+          "radius_multiplier": 5
+        },
+        "hierarchical_dec_mcts": {
+          "use_mcts_llp": true,
+          "use_g2": true,
+          "llp": {
+            "horizon": 3,
+            "iterations": 30,
+            "ucb_c": 1.4,
+            "discount_factor": 0.95
+          },
+          "hlp": {
+            "horizon": 8,
+            "iterations": 30,
+            "ucb_c": 1.0,
+            "discount_factor": 0.98,
+            "tile_size": [
+              25,
+              25
+            ],
+            "replan_interval": 2.0
+          },
+          "intent_sharing": {
+            "ll_broadcast_interval": 0.1,
+            "hl_broadcast_interval": 0.5,
+            "max_history": 10
+          }
+        },
+        "strategy_configs": {
+          "greedy_ig": "../../configs/strategies/greedy_ig.json",
+          "dec_mcts": "../../configs/strategies/dec_mcts.json",
+          "mh_dec_mcts_full": "../../configs/strategies/mh_dec_mcts_full.json",
+          "mh_dec_mcts_efficient": "../../configs/strategies/mh_dec_mcts_efficient.json"
+        }
+      }
+    },
+    {
+      "name": "mhfull_coarse_tiles",
+      "_note": "mh_dec_mcts_full | coarser HLP tiles + deeper horizon (broad strategy)",
+      "overrides": {
+        "action_strategy": "mh_dec_mcts_both",
+        "strategies": [
+          "mh_dec_mcts_full"
+        ],
+        "shared": {
+          "mode_labels": [
+            "IG_BS",
+            "IGd_BM"
+          ],
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [
+            0,
+            20
+          ],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "enable_plotting": false,
+          "enable_logging": true
+        },
+        "decentralized": {
+          "communication_range": 15.625,
+          "communication_delay": 0.05,
+          "message_drop_probability": 0.0,
+          "d_uct": {
+            "decay_factor": 0.9,
+            "threshold_sec": 2.0
+          },
+          "overlap_penalty_weight": 0.3,
+          "radius_multiplier": 5
+        },
+        "hierarchical_dec_mcts": {
+          "use_mcts_llp": true,
+          "use_g2": true,
+          "llp": {
+            "horizon": 3,
+            "iterations": 30,
+            "ucb_c": 1.4,
+            "discount_factor": 0.95
+          },
+          "hlp": {
+            "horizon": 12,
+            "iterations": 30,
+            "ucb_c": 1.0,
+            "discount_factor": 0.98,
+            "tile_size": [
+              50,
+              50
+            ],
+            "replan_interval": 2.0
+          },
+          "intent_sharing": {
+            "ll_broadcast_interval": 0.1,
+            "hl_broadcast_interval": 0.5,
+            "max_history": 10
+          }
+        },
+        "strategy_configs": {
+          "greedy_ig": "../../configs/strategies/greedy_ig.json",
+          "dec_mcts": "../../configs/strategies/dec_mcts.json",
+          "mh_dec_mcts_full": "../../configs/strategies/mh_dec_mcts_full.json",
+          "mh_dec_mcts_efficient": "../../configs/strategies/mh_dec_mcts_efficient.json"
+        }
+      }
+    },
+    {
+      "name": "mhfull_fine_tiles",
+      "_note": "mh_dec_mcts_full | finer HLP tiles + shorter horizon (precise strategy)",
+      "overrides": {
+        "action_strategy": "mh_dec_mcts_both",
+        "strategies": [
+          "mh_dec_mcts_full"
+        ],
+        "shared": {
+          "mode_labels": [
+            "IG_BS",
+            "IGd_BM"
+          ],
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [
+            0,
+            20
+          ],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "enable_plotting": false,
+          "enable_logging": true
+        },
+        "decentralized": {
+          "communication_range": 15.625,
+          "communication_delay": 0.05,
+          "message_drop_probability": 0.0,
+          "d_uct": {
+            "decay_factor": 0.9,
+            "threshold_sec": 2.0
+          },
+          "overlap_penalty_weight": 0.3,
+          "radius_multiplier": 5
+        },
+        "hierarchical_dec_mcts": {
+          "use_mcts_llp": true,
+          "use_g2": true,
+          "llp": {
+            "horizon": 3,
+            "iterations": 30,
+            "ucb_c": 1.4,
+            "discount_factor": 0.95
+          },
+          "hlp": {
+            "horizon": 5,
+            "iterations": 30,
+            "ucb_c": 1.0,
+            "discount_factor": 0.98,
+            "tile_size": [
+              15,
+              15
+            ],
+            "replan_interval": 2.0
+          },
+          "intent_sharing": {
+            "ll_broadcast_interval": 0.1,
+            "hl_broadcast_interval": 0.5,
+            "max_history": 10
+          }
+        },
+        "strategy_configs": {
+          "greedy_ig": "../../configs/strategies/greedy_ig.json",
+          "dec_mcts": "../../configs/strategies/dec_mcts.json",
+          "mh_dec_mcts_full": "../../configs/strategies/mh_dec_mcts_full.json",
+          "mh_dec_mcts_efficient": "../../configs/strategies/mh_dec_mcts_efficient.json"
+        }
+      }
+    },
+    {
+      "name": "mhfull_more_llp_iter",
+      "_note": "mh_dec_mcts_full | more LLP iterations (richer tactical tree)",
+      "overrides": {
+        "action_strategy": "mh_dec_mcts_both",
+        "strategies": [
+          "mh_dec_mcts_full"
+        ],
+        "shared": {
+          "mode_labels": [
+            "IG_BS",
+            "IGd_BM"
+          ],
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [
+            0,
+            20
+          ],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "enable_plotting": false,
+          "enable_logging": true
+        },
+        "decentralized": {
+          "communication_range": 15.625,
+          "communication_delay": 0.05,
+          "message_drop_probability": 0.0,
+          "d_uct": {
+            "decay_factor": 0.9,
+            "threshold_sec": 2.0
+          },
+          "overlap_penalty_weight": 0.3,
+          "radius_multiplier": 5
+        },
+        "hierarchical_dec_mcts": {
+          "use_mcts_llp": true,
+          "use_g2": true,
+          "llp": {
+            "horizon": 3,
+            "iterations": 50,
+            "ucb_c": 1.4,
+            "discount_factor": 0.95
+          },
+          "hlp": {
+            "horizon": 8,
+            "iterations": 30,
+            "ucb_c": 1.0,
+            "discount_factor": 0.98,
+            "tile_size": [
+              25,
+              25
+            ],
+            "replan_interval": 2.0
+          },
+          "intent_sharing": {
+            "ll_broadcast_interval": 0.1,
+            "hl_broadcast_interval": 0.5,
+            "max_history": 10
+          }
+        },
+        "strategy_configs": {
+          "greedy_ig": "../../configs/strategies/greedy_ig.json",
+          "dec_mcts": "../../configs/strategies/dec_mcts.json",
+          "mh_dec_mcts_full": "../../configs/strategies/mh_dec_mcts_full.json",
+          "mh_dec_mcts_efficient": "../../configs/strategies/mh_dec_mcts_efficient.json"
+        }
+      }
+    },
+    {
+      "name": "mhfull_more_hlp_iter",
+      "_note": "mh_dec_mcts_full | more HLP iterations (better strategic allocation)",
+      "overrides": {
+        "action_strategy": "mh_dec_mcts_both",
+        "strategies": [
+          "mh_dec_mcts_full"
+        ],
+        "shared": {
+          "mode_labels": [
+            "IG_BS",
+            "IGd_BM"
+          ],
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [
+            0,
+            20
+          ],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "enable_plotting": false,
+          "enable_logging": true
+        },
+        "decentralized": {
+          "communication_range": 15.625,
+          "communication_delay": 0.05,
+          "message_drop_probability": 0.0,
+          "d_uct": {
+            "decay_factor": 0.9,
+            "threshold_sec": 2.0
+          },
+          "overlap_penalty_weight": 0.3,
+          "radius_multiplier": 5
+        },
+        "hierarchical_dec_mcts": {
+          "use_mcts_llp": true,
+          "use_g2": true,
+          "llp": {
+            "horizon": 3,
+            "iterations": 30,
+            "ucb_c": 1.4,
+            "discount_factor": 0.95
+          },
+          "hlp": {
+            "horizon": 8,
+            "iterations": 50,
+            "ucb_c": 1.0,
+            "discount_factor": 0.98,
+            "tile_size": [
+              25,
+              25
+            ],
+            "replan_interval": 2.0
+          },
+          "intent_sharing": {
+            "ll_broadcast_interval": 0.1,
+            "hl_broadcast_interval": 0.5,
+            "max_history": 10
+          }
+        },
+        "strategy_configs": {
+          "greedy_ig": "../../configs/strategies/greedy_ig.json",
+          "dec_mcts": "../../configs/strategies/dec_mcts.json",
+          "mh_dec_mcts_full": "../../configs/strategies/mh_dec_mcts_full.json",
+          "mh_dec_mcts_efficient": "../../configs/strategies/mh_dec_mcts_efficient.json"
+        }
+      }
+    },
+    {
+      "name": "mhfull_fast_replan",
+      "_note": "mh_dec_mcts_full | frequent HLP replan (adaptive to new observations)",
+      "overrides": {
+        "action_strategy": "mh_dec_mcts_both",
+        "strategies": [
+          "mh_dec_mcts_full"
+        ],
+        "shared": {
+          "mode_labels": [
+            "IG_BS",
+            "IGd_BM"
+          ],
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [
+            0,
+            20
+          ],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "enable_plotting": false,
+          "enable_logging": true
+        },
+        "decentralized": {
+          "communication_range": 15.625,
+          "communication_delay": 0.05,
+          "message_drop_probability": 0.0,
+          "d_uct": {
+            "decay_factor": 0.9,
+            "threshold_sec": 2.0
+          },
+          "overlap_penalty_weight": 0.3,
+          "radius_multiplier": 5
+        },
+        "hierarchical_dec_mcts": {
+          "use_mcts_llp": true,
+          "use_g2": true,
+          "llp": {
+            "horizon": 3,
+            "iterations": 30,
+            "ucb_c": 1.4,
+            "discount_factor": 0.95
+          },
+          "hlp": {
+            "horizon": 8,
+            "iterations": 30,
+            "ucb_c": 1.0,
+            "discount_factor": 0.98,
+            "tile_size": [
+              25,
+              25
+            ],
+            "replan_interval": 1.0
+          },
+          "intent_sharing": {
+            "ll_broadcast_interval": 0.1,
+            "hl_broadcast_interval": 0.5,
+            "max_history": 10
+          }
+        },
+        "strategy_configs": {
+          "greedy_ig": "../../configs/strategies/greedy_ig.json",
+          "dec_mcts": "../../configs/strategies/dec_mcts.json",
+          "mh_dec_mcts_full": "../../configs/strategies/mh_dec_mcts_full.json",
+          "mh_dec_mcts_efficient": "../../configs/strategies/mh_dec_mcts_efficient.json"
+        }
+      }
+    },
+    {
+      "name": "mhfull_slow_replan",
+      "_note": "mh_dec_mcts_full | infrequent HLP replan (stable committed strategy)",
+      "overrides": {
+        "action_strategy": "mh_dec_mcts_both",
+        "strategies": [
+          "mh_dec_mcts_full"
+        ],
+        "shared": {
+          "mode_labels": [
+            "IG_BS",
+            "IGd_BM"
+          ],
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [
+            0,
+            20
+          ],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "enable_plotting": false,
+          "enable_logging": true
+        },
+        "decentralized": {
+          "communication_range": 15.625,
+          "communication_delay": 0.05,
+          "message_drop_probability": 0.0,
+          "d_uct": {
+            "decay_factor": 0.9,
+            "threshold_sec": 2.0
+          },
+          "overlap_penalty_weight": 0.3,
+          "radius_multiplier": 5
+        },
+        "hierarchical_dec_mcts": {
+          "use_mcts_llp": true,
+          "use_g2": true,
+          "llp": {
+            "horizon": 3,
+            "iterations": 30,
+            "ucb_c": 1.4,
+            "discount_factor": 0.95
+          },
+          "hlp": {
+            "horizon": 8,
+            "iterations": 30,
+            "ucb_c": 1.0,
+            "discount_factor": 0.98,
+            "tile_size": [
+              25,
+              25
+            ],
+            "replan_interval": 3.0
+          },
+          "intent_sharing": {
+            "ll_broadcast_interval": 0.1,
+            "hl_broadcast_interval": 0.5,
+            "max_history": 10
+          }
+        },
+        "strategy_configs": {
+          "greedy_ig": "../../configs/strategies/greedy_ig.json",
+          "dec_mcts": "../../configs/strategies/dec_mcts.json",
+          "mh_dec_mcts_full": "../../configs/strategies/mh_dec_mcts_full.json",
+          "mh_dec_mcts_efficient": "../../configs/strategies/mh_dec_mcts_efficient.json"
+        }
+      }
+    },
+    {
+      "name": "mhfull_deep_llp",
+      "_note": "mh_dec_mcts_full | deeper LLP horizon (longer tactical lookahead)",
+      "overrides": {
+        "action_strategy": "mh_dec_mcts_both",
+        "strategies": [
+          "mh_dec_mcts_full"
+        ],
+        "shared": {
+          "mode_labels": [
+            "IG_BS",
+            "IGd_BM"
+          ],
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [
+            0,
+            20
+          ],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "enable_plotting": false,
+          "enable_logging": true
+        },
+        "decentralized": {
+          "communication_range": 15.625,
+          "communication_delay": 0.05,
+          "message_drop_probability": 0.0,
+          "d_uct": {
+            "decay_factor": 0.9,
+            "threshold_sec": 2.0
+          },
+          "overlap_penalty_weight": 0.3,
+          "radius_multiplier": 5
+        },
+        "hierarchical_dec_mcts": {
+          "use_mcts_llp": true,
+          "use_g2": true,
+          "llp": {
+            "horizon": 5,
+            "iterations": 30,
+            "ucb_c": 1.4,
+            "discount_factor": 0.95
+          },
+          "hlp": {
+            "horizon": 8,
+            "iterations": 30,
+            "ucb_c": 1.0,
+            "discount_factor": 0.98,
+            "tile_size": [
+              25,
+              25
+            ],
+            "replan_interval": 2.0
+          },
+          "intent_sharing": {
+            "ll_broadcast_interval": 0.1,
+            "hl_broadcast_interval": 0.5,
+            "max_history": 10
+          }
+        },
+        "strategy_configs": {
+          "greedy_ig": "../../configs/strategies/greedy_ig.json",
+          "dec_mcts": "../../configs/strategies/dec_mcts.json",
+          "mh_dec_mcts_full": "../../configs/strategies/mh_dec_mcts_full.json",
+          "mh_dec_mcts_efficient": "../../configs/strategies/mh_dec_mcts_efficient.json"
+        }
+      }
+    },
+    {
+      "name": "mhfull_explore_llp",
+      "_note": "mh_dec_mcts_full | high LLP UCB (LLP explores more action branches)",
+      "overrides": {
+        "action_strategy": "mh_dec_mcts_both",
+        "strategies": [
+          "mh_dec_mcts_full"
+        ],
+        "shared": {
+          "mode_labels": [
+            "IG_BS",
+            "IGd_BM"
+          ],
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [
+            0,
+            20
+          ],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "enable_plotting": false,
+          "enable_logging": true
+        },
+        "decentralized": {
+          "communication_range": 15.625,
+          "communication_delay": 0.05,
+          "message_drop_probability": 0.0,
+          "d_uct": {
+            "decay_factor": 0.9,
+            "threshold_sec": 2.0
+          },
+          "overlap_penalty_weight": 0.3,
+          "radius_multiplier": 5
+        },
+        "hierarchical_dec_mcts": {
+          "use_mcts_llp": true,
+          "use_g2": true,
+          "llp": {
+            "horizon": 3,
+            "iterations": 30,
+            "ucb_c": 1.8,
+            "discount_factor": 0.95
+          },
+          "hlp": {
+            "horizon": 8,
+            "iterations": 30,
+            "ucb_c": 1.0,
+            "discount_factor": 0.98,
+            "tile_size": [
+              25,
+              25
+            ],
+            "replan_interval": 2.0
+          },
+          "intent_sharing": {
+            "ll_broadcast_interval": 0.1,
+            "hl_broadcast_interval": 0.5,
+            "max_history": 10
+          }
+        },
+        "strategy_configs": {
+          "greedy_ig": "../../configs/strategies/greedy_ig.json",
+          "dec_mcts": "../../configs/strategies/dec_mcts.json",
+          "mh_dec_mcts_full": "../../configs/strategies/mh_dec_mcts_full.json",
+          "mh_dec_mcts_efficient": "../../configs/strategies/mh_dec_mcts_efficient.json"
+        }
+      }
+    },
+    {
+      "name": "mhfull_exploit_hlp",
+      "_note": "mh_dec_mcts_full | low HLP UCB (HLP commits to best-known regions)",
+      "overrides": {
+        "action_strategy": "mh_dec_mcts_both",
+        "strategies": [
+          "mh_dec_mcts_full"
+        ],
+        "shared": {
+          "mode_labels": [
+            "IG_BS",
+            "IGd_BM"
+          ],
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [
+            0,
+            20
+          ],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "enable_plotting": false,
+          "enable_logging": true
+        },
+        "decentralized": {
+          "communication_range": 15.625,
+          "communication_delay": 0.05,
+          "message_drop_probability": 0.0,
+          "d_uct": {
+            "decay_factor": 0.9,
+            "threshold_sec": 2.0
+          },
+          "overlap_penalty_weight": 0.3,
+          "radius_multiplier": 5
+        },
+        "hierarchical_dec_mcts": {
+          "use_mcts_llp": true,
+          "use_g2": true,
+          "llp": {
+            "horizon": 3,
+            "iterations": 30,
+            "ucb_c": 1.4,
+            "discount_factor": 0.95
+          },
+          "hlp": {
+            "horizon": 8,
+            "iterations": 30,
+            "ucb_c": 0.7,
+            "discount_factor": 0.98,
+            "tile_size": [
+              25,
+              25
+            ],
+            "replan_interval": 2.0
+          },
+          "intent_sharing": {
+            "ll_broadcast_interval": 0.1,
+            "hl_broadcast_interval": 0.5,
+            "max_history": 10
+          }
+        },
+        "strategy_configs": {
+          "greedy_ig": "../../configs/strategies/greedy_ig.json",
+          "dec_mcts": "../../configs/strategies/dec_mcts.json",
+          "mh_dec_mcts_full": "../../configs/strategies/mh_dec_mcts_full.json",
+          "mh_dec_mcts_efficient": "../../configs/strategies/mh_dec_mcts_efficient.json"
+        }
+      }
+    },
+    {
+      "name": "mheff_base",
+      "_note": "mh_dec_mcts_efficient | all defaults \u2014 reference point",
+      "overrides": {
+        "action_strategy": "mh_dec_mcts",
+        "strategies": [
+          "mh_dec_mcts_efficient"
+        ],
+        "shared": {
+          "mode_labels": [
+            "IG_BS",
+            "IGd_BM"
+          ],
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [
+            0,
+            20
+          ],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "enable_plotting": false,
+          "enable_logging": true
+        },
+        "decentralized": {
+          "communication_range": 15.625,
+          "communication_delay": 0.05,
+          "message_drop_probability": 0.0,
+          "d_uct": {
+            "decay_factor": 0.9,
+            "threshold_sec": 2.0
+          },
+          "overlap_penalty_weight": 0.3,
+          "radius_multiplier": 5
+        },
+        "hierarchical_dec_mcts": {
+          "use_mcts_llp": false,
+          "use_g2": true,
+          "llp": {
+            "horizon": 3,
+            "iterations": 30,
+            "discount_factor": 0.95
+          },
+          "hlp": {
+            "horizon": 8,
+            "iterations": 30,
+            "ucb_c": 1.0,
+            "discount_factor": 0.98,
+            "tile_size": [
+              25,
+              25
+            ],
+            "replan_interval": 2.0
+          },
+          "intent_sharing": {
+            "ll_broadcast_interval": 0.1,
+            "hl_broadcast_interval": 0.5,
+            "max_history": 10
+          }
+        },
+        "strategy_configs": {
+          "greedy_ig": "../../configs/strategies/greedy_ig.json",
+          "dec_mcts": "../../configs/strategies/dec_mcts.json",
+          "mh_dec_mcts_full": "../../configs/strategies/mh_dec_mcts_full.json",
+          "mh_dec_mcts_efficient": "../../configs/strategies/mh_dec_mcts_efficient.json"
+        }
+      }
+    },
+    {
+      "name": "mheff_more_llp_samp",
+      "_note": "mh_dec_mcts_efficient | more random LLP rollouts (better tactical sampling)",
+      "overrides": {
+        "action_strategy": "mh_dec_mcts",
+        "strategies": [
+          "mh_dec_mcts_efficient"
+        ],
+        "shared": {
+          "mode_labels": [
+            "IG_BS",
+            "IGd_BM"
+          ],
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [
+            0,
+            20
+          ],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "enable_plotting": false,
+          "enable_logging": true
+        },
+        "decentralized": {
+          "communication_range": 15.625,
+          "communication_delay": 0.05,
+          "message_drop_probability": 0.0,
+          "d_uct": {
+            "decay_factor": 0.9,
+            "threshold_sec": 2.0
+          },
+          "overlap_penalty_weight": 0.3,
+          "radius_multiplier": 5
+        },
+        "hierarchical_dec_mcts": {
+          "use_mcts_llp": false,
+          "use_g2": true,
+          "llp": {
+            "horizon": 3,
+            "iterations": 50,
+            "discount_factor": 0.95
+          },
+          "hlp": {
+            "horizon": 8,
+            "iterations": 30,
+            "ucb_c": 1.0,
+            "discount_factor": 0.98,
+            "tile_size": [
+              25,
+              25
+            ],
+            "replan_interval": 2.0
+          },
+          "intent_sharing": {
+            "ll_broadcast_interval": 0.1,
+            "hl_broadcast_interval": 0.5,
+            "max_history": 10
+          }
+        },
+        "strategy_configs": {
+          "greedy_ig": "../../configs/strategies/greedy_ig.json",
+          "dec_mcts": "../../configs/strategies/dec_mcts.json",
+          "mh_dec_mcts_full": "../../configs/strategies/mh_dec_mcts_full.json",
+          "mh_dec_mcts_efficient": "../../configs/strategies/mh_dec_mcts_efficient.json"
+        }
+      }
+    },
+    {
+      "name": "mheff_more_hlp_iter",
+      "_note": "mh_dec_mcts_efficient | more HLP iterations (better strategic allocation)",
+      "overrides": {
+        "action_strategy": "mh_dec_mcts",
+        "strategies": [
+          "mh_dec_mcts_efficient"
+        ],
+        "shared": {
+          "mode_labels": [
+            "IG_BS",
+            "IGd_BM"
+          ],
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [
+            0,
+            20
+          ],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "enable_plotting": false,
+          "enable_logging": true
+        },
+        "decentralized": {
+          "communication_range": 15.625,
+          "communication_delay": 0.05,
+          "message_drop_probability": 0.0,
+          "d_uct": {
+            "decay_factor": 0.9,
+            "threshold_sec": 2.0
+          },
+          "overlap_penalty_weight": 0.3,
+          "radius_multiplier": 5
+        },
+        "hierarchical_dec_mcts": {
+          "use_mcts_llp": false,
+          "use_g2": true,
+          "llp": {
+            "horizon": 3,
+            "iterations": 30,
+            "discount_factor": 0.95
+          },
+          "hlp": {
+            "horizon": 8,
+            "iterations": 50,
+            "ucb_c": 1.0,
+            "discount_factor": 0.98,
+            "tile_size": [
+              25,
+              25
+            ],
+            "replan_interval": 2.0
+          },
+          "intent_sharing": {
+            "ll_broadcast_interval": 0.1,
+            "hl_broadcast_interval": 0.5,
+            "max_history": 10
+          }
+        },
+        "strategy_configs": {
+          "greedy_ig": "../../configs/strategies/greedy_ig.json",
+          "dec_mcts": "../../configs/strategies/dec_mcts.json",
+          "mh_dec_mcts_full": "../../configs/strategies/mh_dec_mcts_full.json",
+          "mh_dec_mcts_efficient": "../../configs/strategies/mh_dec_mcts_efficient.json"
+        }
+      }
+    },
+    {
+      "name": "mheff_short_llp",
+      "_note": "mh_dec_mcts_efficient | shorter LLP horizon (fast reactive tactics under HLP)",
+      "overrides": {
+        "action_strategy": "mh_dec_mcts",
+        "strategies": [
+          "mh_dec_mcts_efficient"
+        ],
+        "shared": {
+          "mode_labels": [
+            "IG_BS",
+            "IGd_BM"
+          ],
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [
+            0,
+            20
+          ],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "enable_plotting": false,
+          "enable_logging": true
+        },
+        "decentralized": {
+          "communication_range": 15.625,
+          "communication_delay": 0.05,
+          "message_drop_probability": 0.0,
+          "d_uct": {
+            "decay_factor": 0.9,
+            "threshold_sec": 2.0
+          },
+          "overlap_penalty_weight": 0.3,
+          "radius_multiplier": 5
+        },
+        "hierarchical_dec_mcts": {
+          "use_mcts_llp": false,
+          "use_g2": true,
+          "llp": {
+            "horizon": 2,
+            "iterations": 30,
+            "discount_factor": 0.95
+          },
+          "hlp": {
+            "horizon": 8,
+            "iterations": 30,
+            "ucb_c": 1.0,
+            "discount_factor": 0.98,
+            "tile_size": [
+              25,
+              25
+            ],
+            "replan_interval": 2.0
+          },
+          "intent_sharing": {
+            "ll_broadcast_interval": 0.1,
+            "hl_broadcast_interval": 0.5,
+            "max_history": 10
+          }
+        },
+        "strategy_configs": {
+          "greedy_ig": "../../configs/strategies/greedy_ig.json",
+          "dec_mcts": "../../configs/strategies/dec_mcts.json",
+          "mh_dec_mcts_full": "../../configs/strategies/mh_dec_mcts_full.json",
+          "mh_dec_mcts_efficient": "../../configs/strategies/mh_dec_mcts_efficient.json"
+        }
+      }
+    },
+    {
+      "name": "mheff_long_llp",
+      "_note": "mh_dec_mcts_efficient | longer LLP horizon (deeper rollout evaluation)",
+      "overrides": {
+        "action_strategy": "mh_dec_mcts",
+        "strategies": [
+          "mh_dec_mcts_efficient"
+        ],
+        "shared": {
+          "mode_labels": [
+            "IG_BS",
+            "IGd_BM"
+          ],
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [
+            0,
+            20
+          ],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "enable_plotting": false,
+          "enable_logging": true
+        },
+        "decentralized": {
+          "communication_range": 15.625,
+          "communication_delay": 0.05,
+          "message_drop_probability": 0.0,
+          "d_uct": {
+            "decay_factor": 0.9,
+            "threshold_sec": 2.0
+          },
+          "overlap_penalty_weight": 0.3,
+          "radius_multiplier": 5
+        },
+        "hierarchical_dec_mcts": {
+          "use_mcts_llp": false,
+          "use_g2": true,
+          "llp": {
+            "horizon": 5,
+            "iterations": 50,
+            "discount_factor": 0.95
+          },
+          "hlp": {
+            "horizon": 8,
+            "iterations": 30,
+            "ucb_c": 1.0,
+            "discount_factor": 0.98,
+            "tile_size": [
+              25,
+              25
+            ],
+            "replan_interval": 2.0
+          },
+          "intent_sharing": {
+            "ll_broadcast_interval": 0.1,
+            "hl_broadcast_interval": 0.5,
+            "max_history": 10
+          }
+        },
+        "strategy_configs": {
+          "greedy_ig": "../../configs/strategies/greedy_ig.json",
+          "dec_mcts": "../../configs/strategies/dec_mcts.json",
+          "mh_dec_mcts_full": "../../configs/strategies/mh_dec_mcts_full.json",
+          "mh_dec_mcts_efficient": "../../configs/strategies/mh_dec_mcts_efficient.json"
+        }
+      }
+    },
+    {
+      "name": "mheff_fast_replan",
+      "_note": "mh_dec_mcts_efficient | frequent HLP replan (responsive strategy)",
+      "overrides": {
+        "action_strategy": "mh_dec_mcts",
+        "strategies": [
+          "mh_dec_mcts_efficient"
+        ],
+        "shared": {
+          "mode_labels": [
+            "IG_BS",
+            "IGd_BM"
+          ],
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [
+            0,
+            20
+          ],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "enable_plotting": false,
+          "enable_logging": true
+        },
+        "decentralized": {
+          "communication_range": 15.625,
+          "communication_delay": 0.05,
+          "message_drop_probability": 0.0,
+          "d_uct": {
+            "decay_factor": 0.9,
+            "threshold_sec": 2.0
+          },
+          "overlap_penalty_weight": 0.3,
+          "radius_multiplier": 5
+        },
+        "hierarchical_dec_mcts": {
+          "use_mcts_llp": false,
+          "use_g2": true,
+          "llp": {
+            "horizon": 3,
+            "iterations": 30,
+            "discount_factor": 0.95
+          },
+          "hlp": {
+            "horizon": 8,
+            "iterations": 30,
+            "ucb_c": 1.0,
+            "discount_factor": 0.98,
+            "tile_size": [
+              25,
+              25
+            ],
+            "replan_interval": 1.0
+          },
+          "intent_sharing": {
+            "ll_broadcast_interval": 0.1,
+            "hl_broadcast_interval": 0.5,
+            "max_history": 10
+          }
+        },
+        "strategy_configs": {
+          "greedy_ig": "../../configs/strategies/greedy_ig.json",
+          "dec_mcts": "../../configs/strategies/dec_mcts.json",
+          "mh_dec_mcts_full": "../../configs/strategies/mh_dec_mcts_full.json",
+          "mh_dec_mcts_efficient": "../../configs/strategies/mh_dec_mcts_efficient.json"
+        }
+      }
+    },
+    {
+      "name": "mheff_coarse_tiles",
+      "_note": "mh_dec_mcts_efficient | coarser tiles + deeper HLP horizon",
+      "overrides": {
+        "action_strategy": "mh_dec_mcts",
+        "strategies": [
+          "mh_dec_mcts_efficient"
+        ],
+        "shared": {
+          "mode_labels": [
+            "IG_BS",
+            "IGd_BM"
+          ],
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [
+            0,
+            20
+          ],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "enable_plotting": false,
+          "enable_logging": true
+        },
+        "decentralized": {
+          "communication_range": 15.625,
+          "communication_delay": 0.05,
+          "message_drop_probability": 0.0,
+          "d_uct": {
+            "decay_factor": 0.9,
+            "threshold_sec": 2.0
+          },
+          "overlap_penalty_weight": 0.3,
+          "radius_multiplier": 5
+        },
+        "hierarchical_dec_mcts": {
+          "use_mcts_llp": false,
+          "use_g2": true,
+          "llp": {
+            "horizon": 3,
+            "iterations": 30,
+            "discount_factor": 0.95
+          },
+          "hlp": {
+            "horizon": 12,
+            "iterations": 30,
+            "ucb_c": 1.0,
+            "discount_factor": 0.98,
+            "tile_size": [
+              50,
+              50
+            ],
+            "replan_interval": 2.0
+          },
+          "intent_sharing": {
+            "ll_broadcast_interval": 0.1,
+            "hl_broadcast_interval": 0.5,
+            "max_history": 10
+          }
+        },
+        "strategy_configs": {
+          "greedy_ig": "../../configs/strategies/greedy_ig.json",
+          "dec_mcts": "../../configs/strategies/dec_mcts.json",
+          "mh_dec_mcts_full": "../../configs/strategies/mh_dec_mcts_full.json",
+          "mh_dec_mcts_efficient": "../../configs/strategies/mh_dec_mcts_efficient.json"
+        }
+      }
+    },
+    {
+      "name": "mheff_exploit_hlp",
+      "_note": "mh_dec_mcts_efficient | low HLP UCB (commit to best-known regions)",
+      "overrides": {
+        "action_strategy": "mh_dec_mcts",
+        "strategies": [
+          "mh_dec_mcts_efficient"
+        ],
+        "shared": {
+          "mode_labels": [
+            "IG_BS",
+            "IGd_BM"
+          ],
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [
+            0,
+            20
+          ],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "enable_plotting": false,
+          "enable_logging": true
+        },
+        "decentralized": {
+          "communication_range": 15.625,
+          "communication_delay": 0.05,
+          "message_drop_probability": 0.0,
+          "d_uct": {
+            "decay_factor": 0.9,
+            "threshold_sec": 2.0
+          },
+          "overlap_penalty_weight": 0.3,
+          "radius_multiplier": 5
+        },
+        "hierarchical_dec_mcts": {
+          "use_mcts_llp": false,
+          "use_g2": true,
+          "llp": {
+            "horizon": 3,
+            "iterations": 30,
+            "discount_factor": 0.95
+          },
+          "hlp": {
+            "horizon": 8,
+            "iterations": 30,
+            "ucb_c": 0.7,
+            "discount_factor": 0.98,
+            "tile_size": [
+              25,
+              25
+            ],
+            "replan_interval": 2.0
+          },
+          "intent_sharing": {
+            "ll_broadcast_interval": 0.1,
+            "hl_broadcast_interval": 0.5,
+            "max_history": 10
+          }
+        },
+        "strategy_configs": {
+          "greedy_ig": "../../configs/strategies/greedy_ig.json",
+          "dec_mcts": "../../configs/strategies/dec_mcts.json",
+          "mh_dec_mcts_full": "../../configs/strategies/mh_dec_mcts_full.json",
+          "mh_dec_mcts_efficient": "../../configs/strategies/mh_dec_mcts_efficient.json"
+        }
+      }
+    },
+    {
+      "name": "mheff_explore_hlp",
+      "_note": "mh_dec_mcts_efficient | high HLP UCB (broader region exploration)",
+      "overrides": {
+        "action_strategy": "mh_dec_mcts",
+        "strategies": [
+          "mh_dec_mcts_efficient"
+        ],
+        "shared": {
+          "mode_labels": [
+            "IG_BS",
+            "IGd_BM"
+          ],
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [
+            0,
+            20
+          ],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "enable_plotting": false,
+          "enable_logging": true
+        },
+        "decentralized": {
+          "communication_range": 15.625,
+          "communication_delay": 0.05,
+          "message_drop_probability": 0.0,
+          "d_uct": {
+            "decay_factor": 0.9,
+            "threshold_sec": 2.0
+          },
+          "overlap_penalty_weight": 0.3,
+          "radius_multiplier": 5
+        },
+        "hierarchical_dec_mcts": {
+          "use_mcts_llp": false,
+          "use_g2": true,
+          "llp": {
+            "horizon": 3,
+            "iterations": 30,
+            "discount_factor": 0.95
+          },
+          "hlp": {
+            "horizon": 8,
+            "iterations": 30,
+            "ucb_c": 1.4,
+            "discount_factor": 0.98,
+            "tile_size": [
+              25,
+              25
+            ],
+            "replan_interval": 2.0
+          },
+          "intent_sharing": {
+            "ll_broadcast_interval": 0.1,
+            "hl_broadcast_interval": 0.5,
+            "max_history": 10
+          }
+        },
+        "strategy_configs": {
+          "greedy_ig": "../../configs/strategies/greedy_ig.json",
+          "dec_mcts": "../../configs/strategies/dec_mcts.json",
+          "mh_dec_mcts_full": "../../configs/strategies/mh_dec_mcts_full.json",
+          "mh_dec_mcts_efficient": "../../configs/strategies/mh_dec_mcts_efficient.json"
+        }
+      }
+    }
+  ]
+}
