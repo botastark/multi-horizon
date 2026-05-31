@@ -96,11 +96,8 @@ class Simulator:
 
         # For MH planners, create separate HLP and LLP timestamp files
         if action_strategy in (
-            "hierarchical_dec_mcts",
-            "mh_dec_mcts",
-            "mh_dec_mcts_both",
-            "mh_dec_mcts_full",
             "mh_dec_mcts_efficient",
+            "mh_dec_mcts_full",
         ):
             hlp_path = os.path.join(log_folder, "timestamps_hlp.csv")
             llp_path = os.path.join(log_folder, "timestamps_llp.csv")
@@ -157,12 +154,22 @@ class Simulator:
                 print(f"Map Sum: {self.ground_truth_map.sum()}")
 
             if self.debug_logs:
+                print(f"step {step}: Planning...")
+
+            # 2. Plan using current beliefs. This mirrors the PA reference loop:
+            # metrics -> plan -> move -> observe/update/fuse.
+            self._select_agent_actions(step)
+
+            # 3. Act (update positions).
+            self._update_agent_positions()
+
+            if self.debug_logs:
                 print(f"step {step}: Processing agent observations...")
 
-            # 2. Observe at the current position, then fuse. This mirrors the
-            # PA reference loop: metrics -> observe/update/fuse -> plan -> move.
+            # 4. Observe at the new position, then update local beliefs.
             agent_observations = self._process_agent_observations()
 
+            # 5. Fuse news after local updates.
             if self.coordinator is not None:
                 dec_config = self.coordinator.config.get("decentralized", {})
                 news_sharing = dec_config.get("news_sharing", True)
@@ -173,16 +180,6 @@ class Simulator:
                 )
 
             self._plot_step(step, agent_observations)
-
-            if self.debug_logs:
-                print(f"step {step}: Planning...")
-
-            # 3. Plan using the post-observation belief.
-            self._select_agent_actions(step)
-
-            # 4. Act (update positions). The new position will be observed at
-            # the beginning of the next iteration, matching PA.
-            self._update_agent_positions()
 
             if self.debug_logs:
                 print(f"{'─'*40}")
@@ -593,6 +590,26 @@ class Simulator:
         )
         return planner._greedy_ig_planner
 
+    def _pa_compatible_select(self, rng, action_scores):
+        """Select max action without perturbing observation RNG on numeric ties."""
+        del rng
+        priority = {
+            "left": 0,
+            "right": 1,
+            "front": 2,
+            "back": 3,
+            "up": 4,
+            "down": 5,
+            "hover": 6,
+        }
+        best_value = max(score[0] for score in action_scores.values())
+        best_actions = [
+            action
+            for action, score in action_scores.items()
+            if np.isclose(score[0], best_value, rtol=0.0, atol=1e-9)
+        ]
+        return min(best_actions, key=lambda action: priority.get(action, 99))
+
     def _greedy_ig_selfish_data(self):
         actions = []
         data = []
@@ -606,10 +623,12 @@ class Simulator:
                 enable_discounting=enable_discounting,
             )
             greedy_planner.update_belief(agent["belief_map"])
+            t_start = time.perf_counter()
             scored_actions = greedy_planner.score_admissible_actions(
                 uav_pos.position,
                 uav_pos.altitude,
             )
+            t_end = time.perf_counter()
             admissible_action_to_ig = {
                 action: [action_data["ig"]]
                 for action, action_data in scored_actions.items()
@@ -619,12 +638,14 @@ class Simulator:
                 for action, action_data in scored_actions.items()
             }
 
-            selected = select_argmax_action(camera.rng, admissible_action_to_ig)
+            selected = self._pa_compatible_select(camera.rng, admissible_action_to_ig)
             actions.append(selected)
             data.append(
                 {
                     "admissible_action_to_IG": admissible_action_to_ig,
                     "admissible_action_to_fp_ij": admissible_action_to_fp,
+                    "_timing_start_ms": t_start * 1000.0,
+                    "_timing_end_ms": t_end * 1000.0,
                 }
             )
 
@@ -647,7 +668,13 @@ class Simulator:
         selfish_actions, data = self._greedy_ig_selfish_data()
         mode = getattr(self.coordinator, "mode", None)
 
+        # For IGd_BM we redo timing to cover the full overlap-discount computation
         if mode == "IGd_BM" and len(self.agents) > 1:
+            # Reset per-agent timers; will be set inside the decision loop below
+            for d in data:
+                d["_timing_start_ms"] = None
+                d["_timing_end_ms"] = None
+
             if not hasattr(self, "_baseline_agent_decision_order_rng"):
                 self._baseline_agent_decision_order_rng = np.random.default_rng(17)
 
@@ -685,6 +712,7 @@ class Simulator:
             }
 
             for agent_id in decision_order:
+                _t0 = time.perf_counter()
                 check = np.prod(
                     np.where(
                         np.abs(predicted_states - predicted_states[agent_id])
@@ -710,14 +738,17 @@ class Simulator:
                             footprint_dict_to_bounds(neighbor_fp),
                             footprint_dict_to_bounds(agent_fp),
                         )
-                        data[agent_id]["admissible_action_to_IG"][action][
-                            0
-                        ] *= 1.0 - overlap
+                        data[agent_id]["admissible_action_to_IG"][action][0] *= (
+                            1.0 - overlap
+                        )
 
-                action = select_argmax_action(
+                action = self._pa_compatible_select(
                     self.agents[agent_id]["camera"].rng,
-                    data[agent_id]["admissible_action_to_IG"],
+                    data[agent_id]["admissible_action_to_IG"]
                 )
+                _t1 = time.perf_counter()
+                data[agent_id]["_timing_start_ms"] = _t0 * 1000.0
+                data[agent_id]["_timing_end_ms"] = _t1 * 1000.0
                 selected_actions[agent_id] = action
                 predicted_states[agent_id, :] += action_to_direction[action]
         else:
@@ -728,6 +759,24 @@ class Simulator:
                 k: v[0] for k, v in action_data["admissible_action_to_IG"].items()
             }
             agent["_next_action"] = action
+
+        # Write planning timestamps for greedy baseline (same as main loop)
+        for agent, action_data in zip(self.agents, data):
+            agent_id = agent["agent_id"]
+            start_ms = action_data.get("_timing_start_ms")
+            end_ms = action_data.get("_timing_end_ms")
+            if start_ms is not None and end_ms is not None:
+                self._timestamp_writer.writerow(
+                    {
+                        "run_id": self.run_id,
+                        "run_number": self.run_number,
+                        "step": step,
+                        "agent_id": agent_id,
+                        "start_ms": start_ms,
+                        "end_ms": end_ms,
+                    }
+                )
+        self._timestamp_file.flush()
 
     def _compute_metrics(self, step):
         combined_observed_ids = set()

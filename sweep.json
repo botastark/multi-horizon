@@ -1,150 +1,20 @@
 {
-  "_comment": "Hyperparameter Sweep Configuration - All Methods",
-  "_description": "Tests multiple hyperparameter variations for each planning method across IG_BS (infinite comm) and IGd_BM (limited comm R5) settings",
+  "_comment": "Hyperparameter Sweep — MH-Eff and MH-Full ablations",
+  "_description": "8 experiments covering 4 clean ablation axes: (1) g2 on/off, (2) HLP horizon length, (3) region tile granularity, (4) LLP depth/exploration. All: 4 agents, 100 steps, IG_BS, Gaussian field, corner start.",
   "base_config": "configs/master_config.json",
   "experiments": [
     {
-      "name": "greedy_ig_baseline",
-      "overrides": {
-        "strategies": ["greedy_ig"],
-        "strategy_configs": {
-          "greedy_ig": "../../configs/strategies/sweeps/greedy_ig_baseline.json"
-        },
-        "shared": {
-          "mode_labels": ["IG_BS", "IGd_BM"],
-          "cluster_radius": 4,
-          "num_agents": 4,
-          "n_steps": 100,
-          "iters": [0, 20],
-          "field_type": "Gaussian",
-          "start_position": "corner",
-          "correlation_types": ["adaptive"],
-          "enable_plotting": false,
-          "enable_logging": true,
-          "debug_logs": false
-        }
-      }
-    },
-    {
-      "name": "dec_mcts_reactive_h5_i50",
-      "overrides": {
-        "strategies": ["dec_mcts"],
-        "strategy_configs": {
-          "dec_mcts": "../../configs/strategies/sweeps/dec_mcts_reactive_h5_i50.json"
-        },
-        "shared": {
-          "mode_labels": ["IG_BS", "IGd_BM"],
-          "cluster_radius": 4,
-          "num_agents": 4,
-          "n_steps": 100,
-          "iters": [0, 20],
-          "field_type": "Gaussian",
-          "start_position": "corner",
-          "correlation_types": ["adaptive"],
-          "enable_plotting": false,
-          "enable_logging": true,
-          "debug_logs": false
-        }
-      }
-    },
-    {
-      "name": "dec_mcts_balanced_h10_i30",
-      "overrides": {
-        "strategies": ["dec_mcts"],
-        "strategy_configs": {
-          "dec_mcts": "../../configs/strategies/sweeps/dec_mcts_balanced_h10_i30.json"
-        },
-        "shared": {
-          "mode_labels": ["IG_BS", "IGd_BM"],
-          "cluster_radius": 4,
-          "num_agents": 4,
-          "n_steps": 100,
-          "iters": [0, 20],
-          "field_type": "Gaussian",
-          "start_position": "corner",
-          "correlation_types": ["adaptive"],
-          "enable_plotting": false,
-          "enable_logging": true,
-          "debug_logs": false
-        }
-      }
-    },
-    {
-      "name": "dec_mcts_longlook_h15_i20",
-      "overrides": {
-        "strategies": ["dec_mcts"],
-        "strategy_configs": {
-          "dec_mcts": "../../configs/strategies/sweeps/dec_mcts_longlook_h15_i20.json"
-        },
-        "shared": {
-          "mode_labels": ["IG_BS", "IGd_BM"],
-          "cluster_radius": 4,
-          "num_agents": 4,
-          "n_steps": 100,
-          "iters": [0, 20],
-          "field_type": "Gaussian",
-          "start_position": "corner",
-          "correlation_types": ["adaptive"],
-          "enable_plotting": false,
-          "enable_logging": true,
-          "debug_logs": false
-        }
-      }
-    },
-    {
-      "name": "dec_mcts_explore_ucb2.0",
-      "overrides": {
-        "strategies": ["dec_mcts"],
-        "strategy_configs": {
-          "dec_mcts": "../../configs/strategies/sweeps/dec_mcts_explore_ucb2.0.json"
-        },
-        "shared": {
-          "mode_labels": ["IG_BS", "IGd_BM"],
-          "cluster_radius": 4,
-          "num_agents": 4,
-          "n_steps": 100,
-          "iters": [0, 20],
-          "field_type": "Gaussian",
-          "start_position": "corner",
-          "correlation_types": ["adaptive"],
-          "enable_plotting": false,
-          "enable_logging": true,
-          "debug_logs": false
-        }
-      }
-    },
-    {
-      "name": "dec_mcts_exploit_ucb1.0",
-      "overrides": {
-        "strategies": ["dec_mcts"],
-        "strategy_configs": {
-          "dec_mcts": "../../configs/strategies/sweeps/dec_mcts_exploit_ucb1.0.json"
-        },
-        "shared": {
-          "mode_labels": ["IG_BS", "IGd_BM"],
-          "cluster_radius": 4,
-          "num_agents": 4,
-          "n_steps": 100,
-          "iters": [0, 20],
-          "field_type": "Gaussian",
-          "start_position": "corner",
-          "correlation_types": ["adaptive"],
-          "enable_plotting": false,
-          "enable_logging": true,
-          "debug_logs": false
-        }
-      }
-    },
-    {
-      "name": "mh_eff_fast_replan_hlp5_rep1",
+      "_comment": "--- MH-EFF (random LLP, cheap) ---",
+      "name": "mh_eff_no_g2",
+      "_axis": "g2 ablation — no coordination signal",
       "overrides": {
         "strategies": ["mh_dec_mcts_efficient"],
         "strategy_configs": {
           "mh_dec_mcts_efficient": "../../configs/strategies/sweeps/mh_eff_fast_replan_hlp5_rep1.json"
         },
         "shared": {
-          "mode_labels": ["IG_BS", "IGd_BM"],
-          "cluster_radius": 4,
+          "mode_labels": ["IG_BS"],
+          "cluster_radius": 5,
           "num_agents": 4,
           "n_steps": 100,
           "iters": [0, 20],
@@ -158,15 +28,16 @@
       }
     },
     {
-      "name": "mh_eff_balanced_hlp8_rep2",
+      "name": "mh_eff_balanced",
+      "_axis": "g2 on, standard reference (h=8, 25x25 tiles, replan=2)",
       "overrides": {
         "strategies": ["mh_dec_mcts_efficient"],
         "strategy_configs": {
           "mh_dec_mcts_efficient": "../../configs/strategies/sweeps/mh_eff_balanced_hlp8_rep2.json"
         },
         "shared": {
-          "mode_labels": ["IG_BS", "IGd_BM"],
-          "cluster_radius": 4,
+          "mode_labels": ["IG_BS"],
+          "cluster_radius": 5,
           "num_agents": 4,
           "n_steps": 100,
           "iters": [0, 20],
@@ -180,15 +51,16 @@
       }
     },
     {
-      "name": "mh_eff_strategic_hlp12_rep3",
+      "name": "mh_eff_long_horizon",
+      "_axis": "long HLP horizon (h=12, i=40, replan=4) vs balanced",
       "overrides": {
         "strategies": ["mh_dec_mcts_efficient"],
         "strategy_configs": {
           "mh_dec_mcts_efficient": "../../configs/strategies/sweeps/mh_eff_strategic_hlp12_rep3.json"
         },
         "shared": {
-          "mode_labels": ["IG_BS", "IGd_BM"],
-          "cluster_radius": 4,
+          "mode_labels": ["IG_BS"],
+          "cluster_radius": 5,
           "num_agents": 4,
           "n_steps": 100,
           "iters": [0, 20],
@@ -202,15 +74,16 @@
       }
     },
     {
-      "name": "mh_eff_llp_boost_h4_i50",
+      "name": "mh_eff_large_tiles",
+      "_axis": "coarser 50x50 regions vs 25x25 balanced",
       "overrides": {
         "strategies": ["mh_dec_mcts_efficient"],
         "strategy_configs": {
           "mh_dec_mcts_efficient": "../../configs/strategies/sweeps/mh_eff_llp_boost_h4_i50.json"
         },
         "shared": {
-          "mode_labels": ["IG_BS", "IGd_BM"],
-          "cluster_radius": 4,
+          "mode_labels": ["IG_BS"],
+          "cluster_radius": 5,
           "num_agents": 4,
           "n_steps": 100,
           "iters": [0, 20],
@@ -224,37 +97,17 @@
       }
     },
     {
-      "name": "mh_full_fast_tactical_llp3_i40",
-      "overrides": {
-        "strategies": ["mh_dec_mcts_full"],
-        "strategy_configs": {
-          "mh_dec_mcts_full": "../../configs/strategies/sweeps/mh_full_fast_tactical_llp3_i40.json"
-        },
-        "shared": {
-          "mode_labels": ["IG_BS", "IGd_BM"],
-          "cluster_radius": 4,
-          "num_agents": 4,
-          "n_steps": 100,
-          "iters": [0, 20],
-          "field_type": "Gaussian",
-          "start_position": "corner",
-          "correlation_types": ["adaptive"],
-          "enable_plotting": false,
-          "enable_logging": true,
-          "debug_logs": false
-        }
-      }
-    },
-    {
-      "name": "mh_full_balanced_standard",
+      "_comment": "--- MH-FULL (MCTS LLP, heavier) ---",
+      "name": "mh_full_no_g2",
+      "_axis": "g2 ablation — MCTS LLP without coordination signal",
       "overrides": {
         "strategies": ["mh_dec_mcts_full"],
         "strategy_configs": {
           "mh_dec_mcts_full": "../../configs/strategies/sweeps/mh_full_balanced_standard.json"
         },
         "shared": {
-          "mode_labels": ["IG_BS", "IGd_BM"],
-          "cluster_radius": 4,
+          "mode_labels": ["IG_BS"],
+          "cluster_radius": 5,
           "num_agents": 4,
           "n_steps": 100,
           "iters": [0, 20],
@@ -268,15 +121,39 @@
       }
     },
     {
-      "name": "mh_full_deep_llp_h5",
+      "name": "mh_full_standard",
+      "_axis": "g2 on, standard reference (LLP h=3 i=30 ucb=1.4, HLP h=8 i=30)",
+      "overrides": {
+        "strategies": ["mh_dec_mcts_full"],
+        "strategy_configs": {
+          "mh_dec_mcts_full": "../../configs/strategies/sweeps/mh_full_fast_tactical_llp3_i40.json"
+        },
+        "shared": {
+          "mode_labels": ["IG_BS"],
+          "cluster_radius": 5,
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [0, 20],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "correlation_types": ["adaptive"],
+          "enable_plotting": false,
+          "enable_logging": true,
+          "debug_logs": false
+        }
+      }
+    },
+    {
+      "name": "mh_full_deep_llp",
+      "_axis": "deeper LLP look-ahead (h=5 i=25) vs standard h=3",
       "overrides": {
         "strategies": ["mh_dec_mcts_full"],
         "strategy_configs": {
           "mh_dec_mcts_full": "../../configs/strategies/sweeps/mh_full_deep_llp_h5.json"
         },
         "shared": {
-          "mode_labels": ["IG_BS", "IGd_BM"],
-          "cluster_radius": 4,
+          "mode_labels": ["IG_BS"],
+          "cluster_radius": 5,
           "num_agents": 4,
           "n_steps": 100,
           "iters": [0, 20],
@@ -290,15 +167,16 @@
       }
     },
     {
-      "name": "mh_full_ucb_tune_llp1.8",
+      "name": "mh_full_explore_ucb2",
+      "_axis": "high LLP exploration (ucb_c=2.0) vs standard ucb_c=1.4",
       "overrides": {
         "strategies": ["mh_dec_mcts_full"],
         "strategy_configs": {
           "mh_dec_mcts_full": "../../configs/strategies/sweeps/mh_full_ucb_tune_llp1.8.json"
         },
         "shared": {
-          "mode_labels": ["IG_BS", "IGd_BM"],
-          "cluster_radius": 4,
+          "mode_labels": ["IG_BS"],
+          "cluster_radius": 5,
           "num_agents": 4,
           "n_steps": 100,
           "iters": [0, 20],

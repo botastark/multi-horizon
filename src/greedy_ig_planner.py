@@ -290,15 +290,10 @@ class GreedyIGPlanner:
         self._stats["intent_updates_received"] += 1
 
     def _get_sensor_params(self, altitude: float) -> Tuple[float, float]:
-        """Get sensor model parameters for given altitude."""
-        if self.conf_dict is not None:
-            return self.conf_dict[np.round(altitude, decimals=2)]
-        else:
-            # Default sensor model
-            a = 1
-            b = 0.015
-            sigma = a * (1 - np.exp(-b * altitude))
-            return sigma, sigma
+        """Return (s0, s1) sensor noise for altitude. See helper.get_sensor_params."""
+        from helper import get_sensor_params
+
+        return get_sensor_params(altitude, self.conf_dict)
 
     def _compute_ig(
         self,
@@ -377,6 +372,8 @@ class GreedyIGPlanner:
         else:
             belief_occupied = source_belief
 
+        belief_entropy = H(belief_occupied)
+
         self.camera.set_position(current_position)
         self.camera.set_altitude(current_altitude)
 
@@ -396,7 +393,7 @@ class GreedyIGPlanner:
             prior = belief_occupied[row_slice, col_slice]
 
             sigma0, sigma1 = self._get_sensor_params(next_alt)
-            prior_entropy = H(prior)
+            prior_entropy = belief_entropy[row_slice, col_slice]
             conditional_entropy = cH(
                 prior,
                 np.round(sigma0, 7),
@@ -574,7 +571,9 @@ class GreedyIGPlanner:
             score = igd
             self._action_scores[action] = score
 
-            scored_actions.append((action, score, next_pos, next_alt, footprint, ig, igd))
+            scored_actions.append(
+                (action, score, next_pos, next_alt, footprint, ig, igd)
+            )
 
         scored_actions.sort(key=lambda item: item[1], reverse=True)
         best_action_data = scored_actions.pop(0)
@@ -588,9 +587,15 @@ class GreedyIGPlanner:
             tie_rng,
             {item[0]: item[1] for item in best_actions},
         )
-        best_action, _, best_next_pos, best_next_alt, best_footprint, best_ig, best_igd = (
-            next(item for item in best_actions if item[0] == selected_action)
-        )
+        (
+            best_action,
+            _,
+            best_next_pos,
+            best_next_alt,
+            best_footprint,
+            best_ig,
+            best_igd,
+        ) = next(item for item in best_actions if item[0] == selected_action)
 
         # Create intent
         self.current_intent = GreedyIGIntent(

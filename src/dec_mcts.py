@@ -150,7 +150,7 @@ class DecMCTSNode:
         # Use provided seed or inherit from parent for reproducibility
         if seed is not None:
             self._rng = np.random.default_rng(seed)
-        elif parent is not None and hasattr(parent, '_rng'):
+        elif parent is not None and hasattr(parent, "_rng"):
             self._rng = np.random.default_rng(parent._rng.integers(2**31))
         else:
             self._rng = np.random.default_rng()
@@ -216,14 +216,10 @@ class DecMCTSNode:
         return next_state
 
     def _get_sensor_params(self, altitude: float) -> Tuple[float, float]:
-        """Get sensor model parameters."""
-        if self.conf_dict is not None and self.conf_dict != {}:
-            return self.conf_dict[np.round(altitude, decimals=2)]
-        else:
-            a = 1
-            b = 0.015
-            sigma = a * (1 - np.exp(-b * altitude))
-            return sigma, sigma
+        """Return (s0, s1) sensor noise for altitude. See helper.get_sensor_params."""
+        from helper import get_sensor_params
+
+        return get_sensor_params(altitude, self.conf_dict)
 
     def compute_ig_reward(
         self,

@@ -18,7 +18,6 @@ from mapper_LBP import OccupancyMap as OM
 from planner import planning
 from uav_camera import Camera
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -37,6 +36,7 @@ def initialize_agent(
     coordinator=None,
     start_altitude: Optional[float] = None,
     debug_logs: bool = False,
+    experiment_config: Optional[Dict] = None,
 ) -> Dict[str, Any]:
     """
     Initialize a single agent with camera, planner, and state.
@@ -83,6 +83,7 @@ def initialize_agent(
         coordinator=coordinator,
         seed=seed + agent_id,
         debug_logs=debug_logs,
+        experiment_config=experiment_config,
     )
 
     # Initialize UAV position
@@ -293,9 +294,8 @@ def extract_region_metadata(planner, action_strategy: str) -> Tuple:
     region_scores = None
 
     if action_strategy in (
-        "mh_dec_mcts",
-        "hierarchical_dec_mcts",
-        "mh_dec_mcts_both",
+        "mh_dec_mcts_efficient",
+        "mh_dec_mcts_full",
     ) and hasattr(planner, "_hierarchical_planner"):
         hp = planner._hierarchical_planner
         if hasattr(hp, "current_region_metadata"):

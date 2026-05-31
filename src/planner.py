@@ -17,6 +17,7 @@ class planning:
         coordinator=None,
         seed=None,
         debug_logs=False,
+        experiment_config=None,
     ):
         # Initialize belief map (each cell has a default probability of 0.5) and set UAV planning parameters
         self.M = np.full((grid_info.shape[0], grid_info.shape[1], 2), 0.5)
@@ -24,6 +25,7 @@ class planning:
         self.last_action = None
         self.strategy = strategy
         self.conf_dict = conf_dict
+        self.experiment_config = experiment_config or {}  # full experiment config dict
         self.optimal_altitude = optimal_alt
         self.sweep_direction = None
         self.agent_id = agent_id
@@ -75,7 +77,7 @@ class planning:
         # Log Multi-Horizon Dec-MCTS stats
         if (
             self.debug_logs
-            and self.strategy == "hierarchical_dec_mcts"
+            and self.strategy in ("mh_dec_mcts_efficient", "mh_dec_mcts_full")
             and hasattr(self, "_hierarchical_planner")
         ):
             stats = self._hierarchical_planner.get_statistics()
@@ -129,27 +131,9 @@ class planning:
 
     def _expected_entropy(self, var, x_future):
         """Compute expected entropy based on future UAV state and sensor model parameters."""
-        a = 1
-        b = 0.015
-        sigma = a * (1 - np.exp(-b * x_future.altitude))
+        from helper import get_sensor_params
 
-        if self.conf_dict is not None:
-            # Try exact lookup first (keys are rounded to 2 decimals).
-            key = np.round(x_future.altitude, decimals=2)
-            if key in self.conf_dict:
-                s0, s1 = self.conf_dict[key]
-            else:
-                # Fallback: find nearest altitude key available in conf_dict
-                try:
-                    keys = np.array(list(self.conf_dict.keys()), dtype=float)
-                    idx = np.argmin(np.abs(keys - x_future.altitude))
-                    nearest = keys[idx]
-                    s0, s1 = self.conf_dict[nearest]
-                except Exception:
-                    s0, s1 = sigma, sigma
-        else:
-            s0, s1 = sigma, sigma
-
+        s0, s1 = get_sensor_params(x_future.altitude, self.conf_dict)
         return cH(var, s0, s1)
 
     def sweep(self, permitted_actions, visited_x):
@@ -367,10 +351,10 @@ class planning:
         elif self.strategy == "dec_mcts":
             # Use Dec-MCTS planner (single-level MCTS, multi-agent)
             return self.dec_mcts_decision()
-        elif self.strategy in ("hierarchical_dec_mcts", "mh_dec_mcts"):
+        elif self.strategy == "mh_dec_mcts_efficient":
             # Use Multi-Horizon Dec-MCTS with LLP/HLP hierarchy (random rollout LLP)
             return self.hierarchical_dec_mcts_decision(visited_x)
-        elif self.strategy == "mh_dec_mcts_both":
+        elif self.strategy == "mh_dec_mcts_full":
             # Use Multi-Horizon Dec-MCTS with MCTS for both LLP and HLP
             return self.hierarchical_dec_mcts_decision(visited_x, use_mcts_llp=True)
         elif self.strategy == "ig":
@@ -413,12 +397,8 @@ class planning:
                 dec_mcts_coordinator = self.coordinator._dec_mcts_coordinator
 
             # Extract config
-            dec_mcts_config = (
-                self.conf_dict.get("dec_mcts", {}) if self.conf_dict else {}
-            )
-            dec_config = (
-                self.conf_dict.get("decentralized", {}) if self.conf_dict else {}
-            )
+            dec_mcts_config = self.experiment_config.get("dec_mcts", {})
+            dec_config = self.experiment_config.get("decentralized", {})
             d_uct_config = dec_config.get("d_uct", {})
 
             config = {
@@ -515,8 +495,6 @@ class planning:
         - Asynchronous intent sharing between agents
         - Reward decomposition: g = g1(LL intents) + g2(all intents)
 
-        Also known as "mh_dec_mcts" strategy.
-
         Args:
             visited_x: List of visited positions
             use_mcts_llp: If True, use MCTS tree search for LLP; if False, use random rollouts
@@ -545,11 +523,7 @@ class planning:
                 intent_bus = IntentBus(num_agents=1)
 
             # Extract config - prefer hierarchical_dec_mcts section, fallback to mcts_params
-            hier_config = (
-                self.conf_dict.get("hierarchical_dec_mcts", {})
-                if self.conf_dict
-                else {}
-            )
+            hier_config = self.experiment_config.get("hierarchical_dec_mcts", {})
             horizon_weights = self.mcts_params.get("horizon_weights", {})
 
             config = {
@@ -575,6 +549,7 @@ class planning:
                 "hlp_ucb_c": hier_config.get("hlp_ucb_c", 1.0),
                 "use_mcts_llp": use_mcts_llp,
                 "use_g2": hier_config.get("use_g2", False),
+                "g2_mode": hier_config.get("g2_mode", "hl_aware"),
             }
 
             num_agents = 1
@@ -588,6 +563,7 @@ class planning:
                 grid_info=self.uav.grid,
                 intent_bus=intent_bus,
                 config=config,
+                conf_dict=self.conf_dict,
                 seed=self.seed,
             )
 

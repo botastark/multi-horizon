@@ -20,6 +20,7 @@ Architecture:
 """
 
 import logging
+import math
 import queue
 import threading
 import time
@@ -330,6 +331,7 @@ class MultiAgentCoordinator:
             "radius_multiplier",
             dec_config.get("radius_multiplier", None),
         )
+        self._pa_componentwise_comm_distances = None
 
         if radius_multiplier is not None:
             if radius_multiplier == -1:
@@ -338,15 +340,24 @@ class MultiAgentCoordinator:
                 if debug_logs:
                     print(f"Communication range: unlimited (radius_multiplier=-1)")
             else:
-                # Calculate h_displacement (matches reference: (field_len/2) / n_h_act)
-                n_h_act = 8 if self.num_agents == 8 else 5
+                # PA's adhoc environment uses n_h_act=8 for the 50x50m field,
+                # independent of agent count, and proximity is componentwise in
+                # x/y/z rather than Euclidean in x/y.
+                n_h_act = ma_config.get("n_h_act", dec_config.get("n_h_act", 8))
                 h_displacement = (grid_info.x / 2) / n_h_act
+                fov_deg = ma_config.get("fov", dec_config.get("fov", 60.0))
+                v_displacement = h_displacement / math.tan(math.radians(fov_deg) * 0.5)
                 self.communication_range = radius_multiplier * h_displacement
+                self._pa_componentwise_comm_distances = radius_multiplier * np.array(
+                    [h_displacement, h_displacement, v_displacement],
+                    dtype=float,
+                )
                 if debug_logs:
                     print(
                         f"Communication range calculation: radius_multiplier={radius_multiplier}, "
                         f"n_h_act={n_h_act}, field_len={grid_info.x}, "
                         f"h_displacement={h_displacement:.3f}, "
+                        f"v_displacement={v_displacement:.3f}, "
                         f"comm_range={self.communication_range:.3f}m"
                     )
         else:
@@ -633,6 +644,21 @@ class MultiAgentCoordinator:
         with self._states_lock:
             for other_id, state in self._agent_states.items():
                 if other_id == agent_id:
+                    continue
+
+                if self._pa_componentwise_comm_distances is not None:
+                    delta = np.array(
+                        [
+                            agent_state.position[0] - state.position[0],
+                            agent_state.position[1] - state.position[1],
+                            agent_state.altitude - state.altitude,
+                        ],
+                        dtype=float,
+                    )
+                    if np.all(
+                        np.abs(delta) <= self._pa_componentwise_comm_distances
+                    ):
+                        neighbors.append(other_id)
                     continue
 
                 # Position is already stored in METERS (from reset_start_position)

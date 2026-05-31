@@ -517,7 +517,7 @@ class AsyncAgentThread(threading.Thread):
         Run one LLP planning cycle.
 
         Supports multiple planner types:
-        - mh_dec_mcts/hierarchical_dec_mcts: Hierarchical LLP/HLP
+        - mh_dec_mcts_efficient/mh_dec_mcts_full: Hierarchical LLP/HLP
         - dec_mcts: Single-level MCTS
         - greedy_ig: Greedy information gain
         """
@@ -745,7 +745,7 @@ class AsyncAgentThread(threading.Thread):
         """
         Run one HLP planning cycle (slower rate).
 
-        Only applies to hierarchical planners (mh_dec_mcts).
+        Only applies to MH planners.
         For non-hierarchical planners, this is a no-op.
         """
         if self.planner is None:

@@ -313,10 +313,10 @@ COMMON_PARAMS = {
     },
     "n_steps": {
         "type": "int",
-        "default": 15,
-        "min": 5,
-        "max": 50,
-        "step": 5,
+        "default": 100,
+        "min": 10,
+        "max": 300,
+        "step": 10,
         "description": "Number of simulation steps per iteration",
     },
     "iters": {
@@ -329,25 +329,23 @@ COMMON_PARAMS = {
     },
     "cluster_radius": {
         "type": "float",
-        "default": 4.0,
+        "default": 5.0,
         "min": 1.0,
         "max": 10.0,
         "step": 0.5,
         "description": "Gaussian field cluster radius",
     },
-    "communication_range": {
-        "type": "float",
-        "default": 15.625,
-        "min": 5.0,
-        "max": 50.0,
-        "step": 2.5,
-        "description": "Agent communication range (meters)",
+    "radius_multiplier": {
+        "type": "select",
+        "default": -1,
+        "options": [-1, 5],
+        "description": "Comm radius multiplier: -1 = Rinf (IG_BS baseline), 5 = R5 (IGd_BM limited-comm)",
     },
     "mode_label": {
         "type": "select",
         "default": "IGd_BM",
-        "options": ["IG_BS", "IGd_BM"],
-        "description": "Information sharing mode (IG_BS=IG+BeliefSync, IGd_BM=IGd+BeliefMerge)",
+        "options": ["IG_BS", "IGd_BM", "IG_BM", "IGd_BS"],
+        "description": "Sharing mode — IG_BS: inf-comm BeliefSync · IGd_BM: R5 discounted BeliefMerge · IG_BM: inf-comm BeliefMerge · IGd_BS: R5 discounted BeliefSync",
     },
     "debug_logs": {
         "type": "select",
@@ -410,9 +408,6 @@ def run_experiment():
 
     if method not in METHOD_CONFIGS:
         return jsonify({"error": "Invalid method"}), 400
-
-    # Ensure trials directory exists
-    os.makedirs("trials", exist_ok=True)
 
     # Create custom config
     config = create_experiment_config(method, params)
@@ -527,6 +522,197 @@ def stop_experiment():
         return jsonify({"error": "Process handle not found"}), 500
 
 
+@app.route("/api/interactive_data", methods=["GET"])
+def get_interactive_data():
+    """Return averaged per-step data as JSON for Plotly interactive rendering.
+
+    Accepts ?run_path=...  (single run) OR ?run_paths=p1,p2,...  (multi-run comparison).
+    Returns { runs: [ { label, steps, avg_entropies, std_entropies, avg_mses,
+                        std_mses, avg_coverages, std_coverages, avg_heights,
+                        std_heights, n_iters } ] }
+    """
+    import numpy as _np
+
+    single = request.args.get("run_path")
+    multi_raw = request.args.get("run_paths")
+    run_ids_raw = request.args.get("run_ids")  # comma-separated
+    method = request.args.get("method")
+
+    if single:
+        paths_to_parse = [{"id": os.path.basename(single), "path": single}]
+    elif multi_raw:
+        entries = []
+        for p in multi_raw.split(","):
+            p = p.strip()
+            if p and os.path.isdir(p):
+                entries.append({"id": os.path.basename(p), "path": p})
+        paths_to_parse = entries
+    elif run_ids_raw and method:
+        # Same path resolution as /api/multi_plot
+        entries = []
+        for run_id in run_ids_raw.split(","):
+            run_id = run_id.strip()
+            if run_id == "current":
+                cur_path = experiment_state.get("results_path") or experiment_state.get(
+                    "temp_run_path"
+                )
+                if cur_path:
+                    entries.append({"id": "current", "path": cur_path})
+            else:
+                run_path = os.path.join(
+                    PROJECT_ROOT, "experiments", "runs", method, run_id
+                )
+                if os.path.exists(run_path):
+                    entries.append({"id": run_id, "path": run_path})
+        paths_to_parse = entries
+    else:
+        # Fall back to current experiment state
+        cur_path = experiment_state.get("results_path") or experiment_state.get(
+            "temp_run_path"
+        )
+        if cur_path and os.path.isdir(cur_path):
+            paths_to_parse = [{"id": os.path.basename(cur_path), "path": cur_path}]
+        else:
+            return jsonify({"error": "run_path or run_paths required"}), 400
+
+    runs_out = []
+    for run_info in paths_to_parse:
+        run_id = run_info["id"]
+        run_path = run_info["path"]
+
+        if not os.path.isdir(run_path):
+            continue
+
+        extracted = extract_run_info(run_id, run_path, status="ongoing")
+        label = extracted.get("comparison_label") or run_id
+
+        txt_dir = os.path.join(run_path, "txt")
+        if not os.path.isdir(txt_dir):
+            continue
+
+        txt_files = [
+            f
+            for f in os.listdir(txt_dir)
+            if f.endswith((".txt", ".log")) and not f.startswith("timestamps")
+        ]
+        if not txt_files:
+            continue
+
+        all_steps, all_ent, all_mse, all_cov, all_hgt = [], [], [], [], []
+
+        for txt_file in txt_files:
+            file_path = os.path.join(txt_dir, txt_file)
+            try:
+                with open(file_path, "r") as f:
+                    lines = f.readlines()
+
+                is_multi = any("Heights" in l or "Actions" in l for l in lines[:20])
+                sections, cur = [], []
+                for line in lines:
+                    if line.strip().startswith("Iteration:"):
+                        if cur:
+                            sections.append(cur)
+                        cur = [line]
+                    else:
+                        cur.append(line)
+                if cur:
+                    sections.append(cur)
+                if not sections:
+                    sections = [lines]
+
+                for sec in sections:
+                    start = None
+                    for i, line in enumerate(sec):
+                        if line.strip().startswith("Step"):
+                            start = (
+                                i + 2
+                                if (i + 1 < len(sec) and "---" in sec[i + 1])
+                                else i + 1
+                            )
+                            break
+                    if start is None:
+                        continue
+                    ss, ee, mm, cc, hh = [], [], [], [], []
+                    for line in sec[start:]:
+                        line = line.strip()
+                        if not line or line.startswith("Iteration:"):
+                            break
+                        if not line[0].isdigit():
+                            continue
+                        parts = line.split()
+                        if len(parts) >= 4:
+                            try:
+                                ss.append(float(parts[0]))
+                                ee.append(float(parts[1]))
+                                mm.append(float(parts[2]))
+                                cc.append(float(parts[3]))
+                                if is_multi and len(parts) > 4:
+                                    hs = (
+                                        " ".join(parts[4:])
+                                        .split("]")[0]
+                                        .replace("[", "")
+                                    )
+                                    hl = [
+                                        float(x.strip(","))
+                                        for x in hs.split()
+                                        if x.strip(",").replace(".", "").isdigit()
+                                    ]
+                                    hh.append(float(_np.mean(hl)) if hl else 0.0)
+                            except (ValueError, IndexError):
+                                continue
+                    if ss:
+                        all_steps.append(ss)
+                        all_ent.append(ee)
+                        all_mse.append(mm)
+                        all_cov.append(cc)
+                        all_hgt.append(hh if hh else [0.0] * len(ss))
+            except Exception as e:
+                print(f"interactive_data: parse error {txt_file}: {e}")
+                continue
+
+        if not all_steps:
+            continue
+
+        MAX_STEPS = 100
+        n = min(MAX_STEPS, max(len(s) for s in all_steps))
+        steps = list(range(n))
+
+        def _avg_std(rows):
+            avgs, stds = [], []
+            for i in range(n):
+                vals = [r[i] for r in rows if i < len(r)]
+                avgs.append(float(_np.mean(vals)) if vals else 0.0)
+                stds.append(float(_np.std(vals)) if len(vals) > 1 else 0.0)
+            return avgs, stds
+
+        ae, se = _avg_std(all_ent)
+        am, sm = _avg_std(all_mse)
+        ac, sc = _avg_std(all_cov)
+        ah, sh = _avg_std(all_hgt)
+
+        runs_out.append(
+            {
+                "id": run_id,
+                "label": label,
+                "steps": steps,
+                "avg_entropies": ae,
+                "std_entropies": se,
+                "avg_mses": am,
+                "std_mses": sm,
+                "avg_coverages": ac,
+                "std_coverages": sc,
+                "avg_heights": ah,
+                "std_heights": sh,
+                "n_iters": len(all_steps),
+            }
+        )
+
+    if not runs_out:
+        return jsonify({"error": "No data available yet"}), 404
+
+    return jsonify({"runs": runs_out})
+
+
 @app.route("/api/results", methods=["GET"])
 def get_results():
     """Generate and return plots for current results (works with incomplete iterations)."""
@@ -552,19 +738,6 @@ def get_results():
             # Results are being written directly to temp_run_path
             results_path = temp_path
             experiment_state["results_path"] = results_path
-        else:
-            # Check if trials subdirectory exists (older structure)
-            trials_dir = os.path.join(temp_path, "trials")
-            if os.path.exists(trials_dir):
-                # Find the first (and usually only) trial run directory
-                trial_dirs = [
-                    d
-                    for d in os.listdir(trials_dir)
-                    if os.path.isdir(os.path.join(trials_dir, d))
-                ]
-                if trial_dirs:
-                    results_path = os.path.join(trials_dir, trial_dirs[0])
-                    experiment_state["results_path"] = results_path
 
     # If still not found, try lazy resolution
     if not results_path and experiment_state.get("config"):
@@ -674,8 +847,6 @@ def get_ongoing_runs():
                 "dec_mcts",
                 "mh_dec_mcts_full",
                 "mh_dec_mcts_efficient",
-                "mh_dec_mcts_both",
-                "mh_dec_mcts",  # For backward compatibility
             ]:
                 method_dir = os.path.join(runs_base, method)
                 if os.path.exists(method_dir):
@@ -716,12 +887,9 @@ def extract_run_info(run_name, run_path, status="ongoing", method_hint=None):
         # Check most specific patterns first
         if "greedy_ig" in run_name:
             method = "greedy_ig"
-        elif "mh_dec_mcts_both" in run_name:
-            method = "mh_dec_mcts_both"
         elif "mh_dec_mcts_full" in run_name:
             method = "mh_dec_mcts_full"
-        elif "mh_dec_mcts" in run_name:
-            # Plain mh_dec_mcts defaults to efficient
+        elif "mh_dec_mcts_efficient" in run_name:
             method = "mh_dec_mcts_efficient"
         elif "dec_mcts" in run_name:
             method = "dec_mcts"
@@ -783,6 +951,10 @@ def extract_run_info(run_name, run_path, status="ongoing", method_hint=None):
 
     # Count log files if available
     file_count = 0
+    steps_done = None
+    iters_done = None
+    current_iter_steps = None
+    n_iters = None
     if has_data:
         try:
             file_count = len(
@@ -794,6 +966,49 @@ def extract_run_info(run_name, run_path, status="ongoing", method_hint=None):
             )
         except:
             pass
+
+        # Count completed iterations and steps from timestamps.csv
+        try:
+            ts_path = os.path.join(txt_dir, "timestamps.csv")
+            if os.path.exists(ts_path):
+                import csv as _csv
+
+                run_num_steps = {}  # run_number -> max step seen
+                with open(ts_path, "r") as _f:
+                    for row in _csv.DictReader(_f):
+                        try:
+                            rn = int(row["run_number"])
+                            s = int(row["step"])
+                            if rn not in run_num_steps or s > run_num_steps[rn]:
+                                run_num_steps[rn] = s
+                        except (KeyError, ValueError):
+                            pass
+                if run_num_steps:
+                    sorted_runs = sorted(run_num_steps.keys())
+                    last_rn = sorted_runs[-1]
+                    last_step = run_num_steps[last_rn]
+                    # Completed iters = all except the last (which may be in progress)
+                    # If last iter reached n_steps-1 it's also complete
+                    _n_steps = params.get("n_steps", 100)
+                    if last_step >= _n_steps - 1:
+                        iters_done = len(sorted_runs)
+                        current_iter_steps = _n_steps
+                    else:
+                        iters_done = len(sorted_runs) - 1
+                        current_iter_steps = last_step + 1
+                    steps_done = iters_done * _n_steps + current_iter_steps
+        except:
+            pass
+
+    # Derive n_iters from config iters field: [start, end] → end - start
+    try:
+        _iters_cfg = params.get("iters")
+        if isinstance(_iters_cfg, (list, tuple)) and len(_iters_cfg) == 2:
+            n_iters = int(_iters_cfg[1]) - int(_iters_cfg[0])
+        elif isinstance(_iters_cfg, int):
+            n_iters = _iters_cfg
+    except:
+        pass
 
     # Extract performance metrics (final coverage, entropy, etc.)
     metrics = {}
@@ -818,8 +1033,6 @@ def extract_run_info(run_name, run_path, status="ongoing", method_hint=None):
         "dec_mcts": "Dec-MCTS",
         "mh_dec_mcts_full": "MH-Full",
         "mh_dec_mcts_efficient": "MH-Eff",
-        "mh_dec_mcts": "MH-Eff",  # Plain mh_dec_mcts defaults to efficient
-        "mh_dec_mcts_both": "MH-Both",
         "unknown": "Unknown",
     }
     method_display = method_display_map.get(method, method)
@@ -843,6 +1056,11 @@ def extract_run_info(run_name, run_path, status="ongoing", method_hint=None):
         "modified": mtime_str,
         "has_data": has_data,
         "file_count": file_count,
+        "steps_done": steps_done,
+        "n_steps": params.get("n_steps"),
+        "iters_done": iters_done,
+        "current_iter_steps": current_iter_steps,
+        "n_iters": n_iters,
         "status": status,
         "params": params,
         "hyperparams": hyperparams,
@@ -903,7 +1121,7 @@ def _extract_hyperparams_from_log(run_path, method):
                         hyperparams[key] = value
 
         # Extract specific hyperparams based on method
-        if method in ["mh_dec_mcts_full", "mh_dec_mcts_efficient", "mh_dec_mcts"]:
+        if method in ["mh_dec_mcts_full", "mh_dec_mcts_efficient"]:
             # Look for horizon, iterations, etc in the log
             horizon_match = re.search(r"horizon[:\s]+([\d.]+)", content, re.IGNORECASE)
             if horizon_match:
@@ -943,12 +1161,7 @@ def _load_saved_run_config(run_path):
 
 def _load_method_default_config(method):
     """Load the default strategy config for a method as a fallback summary source."""
-    method_aliases = {
-        "mh_dec_mcts": "mh_dec_mcts_efficient",
-        "mh_dec_mcts_both": "mh_dec_mcts_full",
-    }
-    canonical_method = method_aliases.get(method, method)
-    config_path = METHOD_CONFIGS.get(canonical_method, {}).get("config_file")
+    config_path = METHOD_CONFIGS.get(method, {}).get("config_file")
 
     if not config_path or not os.path.exists(config_path):
         return None
@@ -984,8 +1197,6 @@ def _extract_hyperparams_from_config(config, method):
     elif method in [
         "mh_dec_mcts_efficient",
         "mh_dec_mcts_full",
-        "mh_dec_mcts",
-        "mh_dec_mcts_both",
     ]:
         hier_cfg = config.get("hierarchical_dec_mcts", {})
         llp_cfg = hier_cfg.get("llp", {})
@@ -1023,6 +1234,22 @@ def _extract_hyperparams_from_config(config, method):
         use_mcts_llp = hier_cfg.get("use_mcts_llp")
         if use_mcts_llp is not None:
             hyperparams["use_mcts_llp"] = use_mcts_llp
+
+        use_g2 = hier_cfg.get("use_g2")
+        if use_g2 is not None:
+            hyperparams["use_g2"] = use_g2
+
+        tile_size = hlp_cfg.get("tile_size") if hlp_cfg else hier_cfg.get("tile_size")
+        if tile_size is not None:
+            # Store as single int if square, else "WxH"
+            if isinstance(tile_size, (list, tuple)) and len(tile_size) == 2:
+                hyperparams["tile_size"] = (
+                    tile_size[0]
+                    if tile_size[0] == tile_size[1]
+                    else f"{tile_size[0]}x{tile_size[1]}"
+                )
+            else:
+                hyperparams["tile_size"] = tile_size
 
         for key in ["overlap_penalty_weight", "radius_multiplier"]:
             if key in decentralized_cfg:
@@ -1065,9 +1292,7 @@ def _summarize_hyperparams(method, hyperparams):
         ]
     elif method in [
         "mh_dec_mcts_efficient",
-        "mh_dec_mcts",
         "mh_dec_mcts_full",
-        "mh_dec_mcts_both",
     ]:
         if not hyperparams:
             return None
@@ -1079,6 +1304,8 @@ def _summarize_hyperparams(method, hyperparams):
             ("hlp_iterations", "hlp_it"),
             ("hlp_ucb_c", "hlp_c"),
             ("hlp_replan_interval", "rp"),
+            ("tile_size", "tile"),
+            ("use_g2", "g2"),
             ("use_mcts_llp", "llp"),
             ("overlap_penalty_weight", "pen"),
             ("radius_multiplier", "rm"),
@@ -1095,6 +1322,8 @@ def _summarize_hyperparams(method, hyperparams):
         value = hyperparams[key]
         if key == "use_mcts_llp":
             tokens.append("llp=mcts" if value else "llp=rollout")
+        elif key == "use_g2":
+            tokens.append("g2=on" if value else "g2=off")
         else:
             tokens.append(f"{short_key}={_format_hyperparam_value(value)}")
 
@@ -1200,7 +1429,7 @@ def get_completed_runs():
 
                     # Check if run has results
                     has_results = False
-                    for subdir in ["txt", "logs", "trials"]:
+                    for subdir in ["txt", "logs"]:
                         if os.path.exists(os.path.join(run_path, subdir)):
                             has_results = True
                             break
@@ -1249,8 +1478,8 @@ def get_best_runs():
     method_config_map = {
         "greedy_ig": "greedy_ig",
         "dec_mcts": "dec_mcts",
-        "mh_dec_mcts_full": "mh_dec_mcts_both",
-        "mh_dec_mcts_efficient": "mh_dec_mcts",
+        "mh_dec_mcts_full": "mh_dec_mcts_full",
+        "mh_dec_mcts_efficient": "mh_dec_mcts_efficient",
     }
 
     variant_groups = {}
@@ -1334,7 +1563,6 @@ def get_best_runs():
         "Dec-MCTS": 1,
         "MH-Full": 2,
         "MH-Eff": 3,
-        "MH-Both": 4,
     }
     variant_rows.sort(
         key=lambda row: (
@@ -1699,7 +1927,7 @@ def create_experiment_config(method, params):
         debug_logs_param = debug_logs_param.lower() == "true"
 
     # Get cluster_radius as integer (this is what gets passed as field_type to Field class)
-    cluster_radius = int(params.get("cluster_radius", 4))
+    cluster_radius = int(params.get("cluster_radius", 5))
 
     config["shared"].update(
         {
@@ -1727,19 +1955,18 @@ def create_experiment_config(method, params):
     )
     config["cluster_radius"] = cluster_radius
     config["num_agents"] = params.get("num_agents", 4)
-    config["n_steps"] = params.get("n_steps", 15)
+    config["n_steps"] = params.get("n_steps", 100)
     config["iters"] = [0, int(params.get("iters", 20))]
     config["mode_labels"] = [params.get("mode_label", "IGd_BM")]
     config["start_position"] = params.get("start_position", "corner")
     config["correlation_types"] = ["adaptive"]
     config["error_margins"] = [None]
 
-    # Update communication range
+    # Update communication radius — two canonical options: -1 (Rinf/IG_BS) or 5 (R5/IGd_BM)
     if "decentralized" not in config:
         config["decentralized"] = {}
-    config["decentralized"]["communication_range"] = params.get(
-        "communication_range", 15.625
-    )
+    radius_multiplier = params.get("radius_multiplier", -1)
+    config["decentralized"]["radius_multiplier"] = int(radius_multiplier)
 
     return config
 
@@ -1901,7 +2128,7 @@ def run_experiment_background(config_path):
                         if line.startswith("Logging to:"):
                             log_path = line.split("Logging to:", 1)[1].strip()
                             if log_path:
-                                # .../trials/<run>/logs/main_*.log -> .../trials/<run>
+                                # .../experiments/runs/<method>/<run>/logs/main_*.log -> .../runs/<method>/<run>
                                 results_path = os.path.dirname(
                                     os.path.dirname(log_path)
                                 )
@@ -1926,7 +2153,7 @@ def run_experiment_background(config_path):
                                     pass  # Ignore parsing errors
 
                         # Track results path from output
-                        if "trials" in line.lower() or "saving" in line.lower():
+                        if "saving" in line.lower():
                             experiment_state["log_output"].append(
                                 f"[INFO] {line.strip()}"
                             )
@@ -2159,13 +2386,9 @@ def create_run_dirname(metadata):
 
 
 def find_results_path(config):
-    """Find the path to experiment results (checks both trials/ and temp directories)."""
-    # Results can be in multiple locations:
-    # 1. PROJECT_ROOT/trials/ (old structure)
-    # 2. experiments/temp/<run_name>/trials/ (current run)
-
+    """Find the path to experiment results in experiments/ directories."""
     search_dirs = [
-        os.path.join(PROJECT_ROOT, "trials"),
+        os.path.join(PROJECT_ROOT, "experiments", "runs"),
         os.path.join(PROJECT_ROOT, "experiments", "temp"),
     ]
 
@@ -2174,41 +2397,27 @@ def find_results_path(config):
     for base_dir in search_dirs:
         if not os.path.exists(base_dir):
             continue
-
-        # For temp directory, search recursively for trials subdirs
-        if "temp" in base_dir:
-            try:
-                for run_dir in os.listdir(base_dir):
-                    run_path = os.path.join(base_dir, run_dir)
-                    if os.path.isdir(run_path):
-                        trials_subdir = os.path.join(run_path, "trials")
-                        if os.path.exists(trials_subdir):
-                            # Look inside trials subdirectory
-                            for trial in os.listdir(trials_subdir):
-                                trial_path = os.path.join(trials_subdir, trial)
-                                if os.path.isdir(trial_path):
-                                    has_results = os.path.exists(
-                                        os.path.join(trial_path, "txt")
-                                    )
-                                    if has_results:
-                                        mtime = os.path.getmtime(trial_path)
-                                        all_results.append((trial_path, mtime))
-            except Exception as e:
-                print(f"Error searching {base_dir}: {e}")
-                continue
-        else:
-            # For trials directory, look at top level
-            try:
-                for entry in os.listdir(base_dir):
-                    full_path = os.path.join(base_dir, entry)
-                    if os.path.isdir(full_path):
-                        has_results = os.path.exists(os.path.join(full_path, "txt"))
-                        if has_results:
-                            mtime = os.path.getmtime(full_path)
-                            all_results.append((full_path, mtime))
-            except Exception as e:
-                print(f"Error searching {base_dir}: {e}")
-                continue
+        try:
+            for entry in os.listdir(base_dir):
+                full_path = os.path.join(base_dir, entry)
+                if not os.path.isdir(full_path):
+                    continue
+                # Direct txt/ at this level
+                if os.path.exists(os.path.join(full_path, "txt")):
+                    mtime = os.path.getmtime(full_path)
+                    all_results.append((full_path, mtime))
+                    continue
+                # One level deeper (e.g. experiments/runs/<method>/<run>/)
+                for sub in os.listdir(full_path):
+                    sub_path = os.path.join(full_path, sub)
+                    if os.path.isdir(sub_path) and os.path.exists(
+                        os.path.join(sub_path, "txt")
+                    ):
+                        mtime = os.path.getmtime(sub_path)
+                        all_results.append((sub_path, mtime))
+        except Exception as e:
+            print(f"Error searching {base_dir}: {e}")
+            continue
 
     if all_results:
         # Return most recent directory with results
@@ -2396,14 +2605,9 @@ def extract_method_from_path(run_path):
     # Check most specific patterns first
     if "greedy_ig" in run_path:
         return "Greedy-IG"
-    elif "mh_dec_mcts_both" in run_path:
-        return "MH-Both"
     elif "mh_dec_mcts_full" in run_path:
         return "MH-Full"
     elif "mh_dec_mcts_efficient" in run_path:
-        return "MH-Eff"
-    elif "mh_dec_mcts" in run_path:
-        # Plain mh_dec_mcts defaults to efficient
         return "MH-Eff"
     elif "dec_mcts" in run_path:
         return "Dec-MCTS"
@@ -2413,14 +2617,9 @@ def extract_method_from_path(run_path):
         for part in parts:
             if "greedy_ig" in part:
                 return "Greedy-IG"
-            elif "mh_dec_mcts_both" in part:
-                return "MH-Both"
             elif "mh_dec_mcts_full" in part:
                 return "MH-Full"
             elif "mh_dec_mcts_efficient" in part:
-                return "MH-Eff"
-            elif "mh_dec_mcts" in part:
-                # Plain mh_dec_mcts defaults to efficient
                 return "MH-Eff"
             elif "dec_mcts" in part:
                 return "Dec-MCTS"
@@ -2728,7 +2927,10 @@ def create_simple_plot(results_path, output_path):
         ax1.set_xlabel("Step", fontsize=11)
         ax1.set_ylabel("Entropy", fontsize=11)
         ax1.set_title("Map Entropy Over Time", fontsize=12, fontweight="bold")
-        ax1.grid(True, alpha=0.3)
+        ax1.xaxis.set_major_locator(plt.MultipleLocator(20))
+        ax1.xaxis.set_minor_locator(plt.MultipleLocator(10))
+        ax1.grid(True, which="major", alpha=0.4)
+        ax1.grid(True, which="minor", alpha=0.15, linestyle=":")
         ax1.legend()
 
         # Plot MSE with std shading
@@ -2745,7 +2947,10 @@ def create_simple_plot(results_path, output_path):
         ax2.set_xlabel("Step", fontsize=11)
         ax2.set_ylabel("MSE", fontsize=11)
         ax2.set_title("Mean Squared Error", fontsize=12, fontweight="bold")
-        ax2.grid(True, alpha=0.3)
+        ax2.xaxis.set_major_locator(plt.MultipleLocator(20))
+        ax2.xaxis.set_minor_locator(plt.MultipleLocator(10))
+        ax2.grid(True, which="major", alpha=0.4)
+        ax2.grid(True, which="minor", alpha=0.15, linestyle=":")
         ax2.legend()
 
         # Plot coverage with std shading
@@ -2762,7 +2967,10 @@ def create_simple_plot(results_path, output_path):
         ax3.set_xlabel("Step", fontsize=11)
         ax3.set_ylabel("Coverage Ratio", fontsize=11)
         ax3.set_title("Coverage Over Time", fontsize=12, fontweight="bold")
-        ax3.grid(True, alpha=0.3)
+        ax3.xaxis.set_major_locator(plt.MultipleLocator(20))
+        ax3.xaxis.set_minor_locator(plt.MultipleLocator(10))
+        ax3.grid(True, which="major", alpha=0.4)
+        ax3.grid(True, which="minor", alpha=0.15, linestyle=":")
         ax3.legend()
 
         # Plot heights with std shading
@@ -2780,7 +2988,10 @@ def create_simple_plot(results_path, output_path):
             ax4.set_xlabel("Step", fontsize=11)
             ax4.set_ylabel("Height (m)", fontsize=11)
             ax4.set_title("Average UAV Height", fontsize=12, fontweight="bold")
-            ax4.grid(True, alpha=0.3)
+            ax4.xaxis.set_major_locator(plt.MultipleLocator(20))
+            ax4.xaxis.set_minor_locator(plt.MultipleLocator(10))
+            ax4.grid(True, which="major", alpha=0.4)
+            ax4.grid(True, which="minor", alpha=0.15, linestyle=":")
             ax4.legend()
         else:
             ax4.text(
@@ -2851,9 +3062,9 @@ def create_multi_run_plot(run_paths, output_path):
             extracted_run_info = extract_run_info(run_id, run_path, status="completed")
             label = extracted_run_info.get("comparison_label") or run_id
 
-            # Look for txt directory or trials subdirectory
+            # Look for txt directory
             txt_dir = None
-            for subdir in ["txt", "trials", "logs"]:
+            for subdir in ["txt", "logs"]:
                 candidate = os.path.join(run_path, subdir)
                 if os.path.exists(candidate):
                     # Check if it has txt files
@@ -3036,7 +3247,7 @@ def create_multi_run_plot(run_paths, output_path):
 
         # Create 2x2 plot with each run as separate curve
         fig = plt.figure(figsize=(14, 10))
-        gs = fig.add_gridspec(2, 2, hspace=0.3, wspace=0.25)
+        gs = fig.add_gridspec(2, 2, hspace=0.35, wspace=0.25)
 
         fig.suptitle(
             f"Multi-Run Comparison ({len(runs_data)} runs)",
@@ -3044,31 +3255,34 @@ def create_multi_run_plot(run_paths, output_path):
             fontweight="bold",
         )
 
-        # Color palette for different runs
-        colors = [
-            "blue",
-            "red",
-            "green",
-            "orange",
-            "purple",
-            "brown",
-            "pink",
-            "gray",
-            "olive",
-            "cyan",
-        ]
+        # Dynamic color palette that scales to any number of runs
+        n_runs = len(runs_data)
+        if n_runs <= 10:
+            _cmap = plt.get_cmap("tab10")
+        else:
+            _cmap = plt.get_cmap("tab20")
+        run_colors = [_cmap(i / max(n_runs - 1, 1)) for i in range(n_runs)]
+        run_labels = [f"{run['label']} ({run['n_iters']} iters)" for run in runs_data]
+
+        def _apply_grid(ax):
+            ax.xaxis.set_major_locator(plt.MultipleLocator(20))
+            ax.xaxis.set_minor_locator(plt.MultipleLocator(10))
+            ax.minorticks_on()
+            ax.grid(True, which="major", alpha=0.4)
+            ax.grid(True, which="minor", alpha=0.2, linestyle=":")
+
+        legend_handles = []
 
         # Plot entropy
         ax1 = fig.add_subplot(gs[0, 0])
         for i, run in enumerate(runs_data):
-            color = colors[i % len(colors)]
-            label = f"{run['label']} ({run['n_iters']} iters)"
-            ax1.plot(
+            color = run_colors[i]
+            (line,) = ax1.plot(
                 run["steps"],
                 run["avg_entropies"],
                 color=color,
                 linewidth=2,
-                label=label,
+                label=run_labels[i],
             )
             ax1.fill_between(
                 run["steps"],
@@ -3077,20 +3291,17 @@ def create_multi_run_plot(run_paths, output_path):
                 alpha=0.2,
                 color=color,
             )
+            legend_handles.append(line)
         ax1.set_xlabel("Step", fontsize=11)
         ax1.set_ylabel("Entropy", fontsize=11)
         ax1.set_title("Map Entropy Over Time", fontsize=12, fontweight="bold")
-        ax1.grid(True, alpha=0.3)
-        ax1.legend(fontsize=8)
+        _apply_grid(ax1)
 
         # Plot MSE
         ax2 = fig.add_subplot(gs[0, 1])
         for i, run in enumerate(runs_data):
-            color = colors[i % len(colors)]
-            label = f"{run['label']} ({run['n_iters']} iters)"
-            ax2.plot(
-                run["steps"], run["avg_mses"], color=color, linewidth=2, label=label
-            )
+            color = run_colors[i]
+            ax2.plot(run["steps"], run["avg_mses"], color=color, linewidth=2)
             ax2.fill_between(
                 run["steps"],
                 np.array(run["avg_mses"]) - np.array(run["std_mses"]),
@@ -3101,21 +3312,13 @@ def create_multi_run_plot(run_paths, output_path):
         ax2.set_xlabel("Step", fontsize=11)
         ax2.set_ylabel("MSE", fontsize=11)
         ax2.set_title("Mean Squared Error", fontsize=12, fontweight="bold")
-        ax2.grid(True, alpha=0.3)
-        ax2.legend(fontsize=8)
+        _apply_grid(ax2)
 
         # Plot coverage
         ax3 = fig.add_subplot(gs[1, 0])
         for i, run in enumerate(runs_data):
-            color = colors[i % len(colors)]
-            label = f"{run['label']} ({run['n_iters']} iters)"
-            ax3.plot(
-                run["steps"],
-                run["avg_coverages"],
-                color=color,
-                linewidth=2,
-                label=label,
-            )
+            color = run_colors[i]
+            ax3.plot(run["steps"], run["avg_coverages"], color=color, linewidth=2)
             ax3.fill_between(
                 run["steps"],
                 np.array(run["avg_coverages"]) - np.array(run["std_coverages"]),
@@ -3126,22 +3329,14 @@ def create_multi_run_plot(run_paths, output_path):
         ax3.set_xlabel("Step", fontsize=11)
         ax3.set_ylabel("Coverage", fontsize=11)
         ax3.set_title("Coverage Ratio", fontsize=12, fontweight="bold")
-        ax3.grid(True, alpha=0.3)
-        ax3.legend(fontsize=8)
+        _apply_grid(ax3)
 
         # Plot heights
         ax4 = fig.add_subplot(gs[1, 1])
         for i, run in enumerate(runs_data):
-            color = colors[i % len(colors)]
-            label = f"{run['label']} ({run['n_iters']} iters)"
+            color = run_colors[i]
             if any(h > 0 for h in run["avg_heights"]):
-                ax4.plot(
-                    run["steps"],
-                    run["avg_heights"],
-                    color=color,
-                    linewidth=2,
-                    label=label,
-                )
+                ax4.plot(run["steps"], run["avg_heights"], color=color, linewidth=2)
                 ax4.fill_between(
                     run["steps"],
                     np.array(run["avg_heights"]) - np.array(run["std_heights"]),
@@ -3152,10 +3347,22 @@ def create_multi_run_plot(run_paths, output_path):
         ax4.set_xlabel("Step", fontsize=11)
         ax4.set_ylabel("Height (m)", fontsize=11)
         ax4.set_title("Average UAV Height", fontsize=12, fontweight="bold")
-        ax4.grid(True, alpha=0.3)
-        ax4.legend(fontsize=8)
+        _apply_grid(ax4)
 
-        plt.tight_layout()
+        # Single shared legend below all subplots
+        n_legend_cols = min(n_runs, 2)
+        n_legend_rows = (n_runs + n_legend_cols - 1) // n_legend_cols
+        legend_space = 0.05 + n_legend_rows * 0.05
+        fig.legend(
+            handles=legend_handles,
+            labels=run_labels,
+            loc="lower center",
+            ncol=n_legend_cols,
+            fontsize=9,
+            framealpha=0.95,
+            bbox_to_anchor=(0.5, 0.0),
+        )
+        plt.subplots_adjust(top=0.93, bottom=legend_space)
         plt.savefig(output_path, dpi=150, bbox_inches="tight")
         plt.close()
 
@@ -3174,7 +3381,6 @@ if __name__ == "__main__":
     # Create templates directory if it doesn't exist
     os.makedirs("templates", exist_ok=True)
     os.makedirs("plots", exist_ok=True)
-    os.makedirs("trials", exist_ok=True)
 
     print("=" * 70)
     print("Starting MCTS Experiment Web Interface...")
