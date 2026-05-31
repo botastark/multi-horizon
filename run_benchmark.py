@@ -27,7 +27,7 @@ def run_single_strategy(strategy_name):
     strategy_configs = {
         "greedy_ig": "configs/strategies/greedy_ig.json",
         "dec_mcts": "configs/strategies/dec_mcts.json",
-        "mh_both": "configs/strategies/mh_dec_mcts_both.json",
+        "mh_full": "configs/strategies/mh_dec_mcts_full.json",
         "mh_efficient": "configs/strategies/mh_dec_mcts_efficient.json",
     }
 
@@ -79,7 +79,7 @@ def main():
     # Example 2: Run single strategy
     print("\n\nExample 2: Run single strategy (MH-Dec-MCTS full)")
     print("-" * 80)
-    run_single_strategy("mh_both")
+    run_single_strategy("mh_full")
 
     # Example 3: Legacy config
     print("\n\nExample 3: Run with legacy config")
@@ -96,7 +96,7 @@ if __name__ == "__main__":
     # Or run specific strategy
     # run_single_strategy("greedy_ig")
     # run_single_strategy("dec_mcts")
-    # run_single_strategy("mh_both")
+    # run_single_strategy("mh_full")
     # run_single_strategy("mh_efficient")
 
     # Or run with legacy config

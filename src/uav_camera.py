@@ -205,7 +205,7 @@ class Camera:
         else:
             j = x / self.grid.length
             i = self.grid.shape[0] - y / self.grid.length
-        return int(i), int(j)
+        return int(np.round(i)), int(np.round(j))
 
     def get_range(self, position=None, altitude=None, index_form=False):
         """

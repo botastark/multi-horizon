@@ -46,7 +46,7 @@ def load_config(config_file: str) -> List[Dict[str, Any]]:
         default_shared = {
             'project_path': './',
             'field_type': 'Gaussian',
-            'cluster_radius': 4,
+            'cluster_radius': 5,
             'start_position': 'corner',
             'num_agents': 4,
             'n_steps': 15,
@@ -161,7 +161,7 @@ def _merge_configs(
 
     # Special handling for log_dir_suffix
     if "log_dir_suffix" in strategy_experiment:
-        base_log_dir = merged_experiment.get("base_log_dir", "trials")
+        base_log_dir = merged_experiment.get("base_log_dir", "experiments/runs")
         merged_experiment["log_dir"] = os.path.join(
             base_log_dir, strategy_experiment["log_dir_suffix"]
         )

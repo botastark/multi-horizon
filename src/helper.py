@@ -81,6 +81,32 @@ def cH(var, sigma0, sigma1):
     return cH
 
 
+def get_sensor_params(altitude: float, conf_dict=None):
+    """
+    Return (s0, s1) sensor noise parameters for a given altitude.
+
+    Lookup order:
+    1. Exact key in conf_dict (rounded to 2 decimals)
+    2. Nearest key in conf_dict
+    3. Analytic formula: sigma = a * (1 - exp(-b * altitude))
+
+    This is the single authoritative implementation used by all planners.
+    """
+    if conf_dict is not None and conf_dict != {}:
+        key = np.round(altitude, decimals=2)
+        if key in conf_dict:
+            return conf_dict[key]
+        try:
+            keys = np.array(list(conf_dict.keys()), dtype=float)
+            idx = np.argmin(np.abs(keys - altitude))
+            return conf_dict[keys[idx]]
+        except Exception:
+            pass
+    a, b = 1.0, 0.015
+    sigma = a * (1.0 - np.exp(-b * altitude))
+    return sigma, sigma
+
+
 def footprint_dict_to_bounds(footprint):
     """Convert a camera footprint dict to (imin, imax, jmin, jmax) bounds."""
     return (
@@ -233,7 +259,17 @@ def adaptive_weights_matrix(obs_map):
     counts_one = np.count_nonzero(m_neighbors, axis=1)
     stacked = np.hstack((m_center.reshape(-1, 1), counts_one.reshape(-1, 1)))
 
-    pearson = np.corrcoef(stacked[:, 0], stacked[:, 1])[0, 1]
+    center_values = stacked[:, 0].astype(float)
+    neighbor_counts = stacked[:, 1].astype(float)
+    centered_values = center_values - np.mean(center_values)
+    centered_counts = neighbor_counts - np.mean(neighbor_counts)
+
+    stability_eps = 1e-12
+    numerator = np.sum(centered_values * centered_counts)
+    denominator = np.sqrt(np.sum(centered_values**2) * np.sum(centered_counts**2))
+    pearson = numerator / max(denominator, stability_eps)
+    pearson = np.clip(pearson, -1.0, 1.0)
+
     sigmoid = 1 / (1 + np.exp(-pearson))
 
     return np.array(

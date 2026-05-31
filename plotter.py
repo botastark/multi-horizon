@@ -5,6 +5,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import argparse
+import csv
+from collections import defaultdict
 
 dir = None
 
@@ -248,6 +250,249 @@ def _parse_single_experiment(lines, file_path):
     df["NewsMode"] = df["NewsMode"].astype(str)
 
     return df
+
+
+def parse_timing_csv(csv_path):
+    """Parse a timestamps.csv file and return aggregated timing statistics.
+
+    The CSV contains columns: run_id, run_number, step, agent_id, start_ms, end_ms
+
+    Returns:
+    pd.DataFrame: DataFrame with columns [Step, Mean_ms, Median_ms, Std_ms, P95_ms, P99_ms, Count]
+                  aggregated across all agents and runs for each step.
+    """
+    if not os.path.exists(csv_path):
+        print(f"Warning: Timestamp file not found: {csv_path}")
+        return pd.DataFrame()
+
+    # Read CSV
+    try:
+        df = pd.read_csv(csv_path)
+    except Exception as e:
+        print(f"Error reading {csv_path}: {e}")
+        return pd.DataFrame()
+
+    if df.empty:
+        return pd.DataFrame()
+
+    # Calculate planning time per row (in milliseconds)
+    df["planning_time_ms"] = df["end_ms"] - df["start_ms"]
+
+    # Group by step and aggregate statistics
+    # This gives us timing stats per step across all agents and runs
+    grouped = (
+        df.groupby("step")["planning_time_ms"]
+        .agg(
+            [
+                ("Mean_ms", "mean"),
+                ("Median_ms", "median"),
+                ("Std_ms", "std"),
+                ("P95_ms", lambda x: np.percentile(x, 95)),
+                ("P99_ms", lambda x: np.percentile(x, 99)),
+                ("Min_ms", "min"),
+                ("Max_ms", "max"),
+                ("Count", "count"),
+            ]
+        )
+        .reset_index()
+    )
+
+    grouped.rename(columns={"step": "Step"}, inplace=True)
+
+    return grouped
+
+
+def plot_timing_comparison(
+    timing_data_dict,
+    save_dir,
+    show=False,
+    metric="Mean_ms",
+    title_suffix="",
+    news_mode=None,
+    timing_type="overall",
+):
+    """Plot timing comparison across multiple methods.
+
+    Parameters:
+    timing_data_dict (dict): Dictionary mapping method names to timing DataFrames
+                            (output from parse_timing_csv)
+    save_dir (str): Directory to save the plot
+    show (bool): Whether to display the plot
+    metric (str): Which metric to plot ('Mean_ms', 'Median_ms', 'P95_ms', 'P99_ms')
+    title_suffix (str): Additional text for plot title
+    news_mode (str): News/communication mode for filename
+    timing_type (str): Type of timing data ('overall', 'hlp', 'llp')
+    """
+    plt.style.use("seaborn-v0_8-paper")
+    plt.rcParams.update(
+        {
+            "font.size": 14,
+            "axes.titlesize": 16,
+            "axes.labelsize": 14,
+            "xtick.labelsize": 12,
+            "ytick.labelsize": 12,
+            "legend.fontsize": 11,
+        }
+    )
+
+    methods_list = list(timing_data_dict.keys())
+    n_methods = len(methods_list)
+    n_legend_cols = 2 if n_methods > 8 else 1
+    n_legend_rows = (n_methods + n_legend_cols - 1) // n_legend_cols
+    fig_height = 6.0 + n_legend_rows * 0.35
+
+    fig, axes = plt.subplots(1, 2, figsize=(16, fig_height))
+    ax_main, ax_box = axes
+
+    # Dynamic color palette matching the metrics plots above (tab10/tab20)
+    if n_methods <= 10:
+        _cmap = plt.get_cmap("tab10")
+    else:
+        _cmap = plt.get_cmap("tab20")
+    method_colors = {
+        m: _cmap(i / max(n_methods - 1, 1)) for i, m in enumerate(methods_list)
+    }
+
+    legend_handles = []
+    plotted_methods = []
+
+    # Left plot: Timing evolution over steps
+    for method_name, timing_df in timing_data_dict.items():
+        if timing_df.empty:
+            continue
+
+        steps = timing_df["Step"]
+        mean_vals = (
+            timing_df[metric] if metric in timing_df.columns else timing_df["Mean_ms"]
+        )
+        std_vals = (
+            timing_df["Std_ms"]
+            if "Std_ms" in timing_df.columns
+            else np.zeros(len(mean_vals))
+        )
+
+        color = method_colors[method_name]
+
+        # Main line
+        (line,) = ax_main.plot(
+            steps,
+            mean_vals,
+            label=f"{len(plotted_methods) + 1}. {method_name}",
+            color=color,
+            linewidth=2.5,
+            alpha=0.9,
+        )
+        legend_handles.append(line)
+        plotted_methods.append(method_name)
+
+        # Confidence interval (mean ± std)
+        ax_main.fill_between(
+            steps, mean_vals - std_vals, mean_vals + std_vals, color=color, alpha=0.15
+        )
+
+    ax_main.set_xlabel("Step", fontweight="bold")
+    ax_main.set_ylabel("Planning Time (ms)", fontweight="bold")
+    metric_label = metric.replace("_ms", "").replace("_", " ")
+    ax_main.set_title(f"Planning Time Evolution ({metric_label})", fontweight="bold")
+    ax_main.xaxis.set_major_locator(plt.MultipleLocator(20))
+    ax_main.xaxis.set_minor_locator(plt.MultipleLocator(10))
+    ax_main.minorticks_on()
+    ax_main.grid(True, which="major", linestyle="--", alpha=0.4)
+    ax_main.grid(True, which="minor", linestyle=":", alpha=0.2)
+
+    # Right plot: Box plot for overall distribution
+    box_data = []
+    box_labels = []
+    box_colors = []
+
+    for method_idx, (method_name, timing_df) in enumerate(
+        ((m, timing_data_dict[m]) for m in plotted_methods), start=1
+    ):
+        if timing_df.empty:
+            continue
+        # Use mean values across all steps for box plot
+        mean_vals = (
+            timing_df[metric] if metric in timing_df.columns else timing_df["Mean_ms"]
+        )
+        box_data.append(mean_vals)
+        box_labels.append(str(method_idx))
+        box_colors.append(method_colors.get(method_name, _cmap(0)))
+
+    if box_data:
+        bp = ax_box.boxplot(
+            box_data,
+            tick_labels=box_labels,
+            patch_artist=True,
+            showmeans=True,
+            meanline=True,
+            medianprops=dict(color="red", linewidth=2),
+            meanprops=dict(color="blue", linewidth=2, linestyle="--"),
+        )
+
+        # Color the boxes
+        for patch, color in zip(bp["boxes"], box_colors):
+            patch.set_facecolor(color)
+            patch.set_alpha(0.6)
+
+        ax_box.set_ylabel("Planning Time (ms)", fontweight="bold")
+        ax_box.set_title("Overall Distribution", fontweight="bold")
+        ax_box.grid(True, axis="y", linestyle="--", alpha=0.4)
+        ax_box.set_xlabel("Method number", fontweight="bold")
+        ax_box.tick_params(axis="x", rotation=0)
+
+    # Overall title
+    title_parts = ["Planning Time Efficiency Comparison"]
+    if timing_type == "hlp":
+        title_parts[0] = "HLP (High-Level Planner) Timing Comparison"
+    elif timing_type == "llp":
+        title_parts[0] = "LLP (Low-Level Planner) Timing Comparison"
+
+    if title_suffix:
+        title_parts.append(title_suffix)
+    if news_mode:
+        title_parts.append(f"Mode: {news_mode}")
+
+    fig.suptitle(" | ".join(title_parts), fontsize=16, fontweight="bold", y=0.98)
+
+    if legend_handles:
+        fig.legend(
+            handles=legend_handles,
+            labels=[handle.get_label() for handle in legend_handles],
+            loc="lower center",
+            bbox_to_anchor=(0.5, 0.02),
+            ncol=n_legend_cols,
+            frameon=True,
+            fancybox=False,
+            edgecolor="0.85",
+            title="Methods",
+            title_fontsize=12,
+            fontsize=9,
+            handlelength=2.2,
+            columnspacing=1.2,
+            labelspacing=0.55,
+        )
+
+    bottom_margin = min(0.46, 0.1 + n_legend_rows * 0.035)
+    plt.tight_layout(rect=[0, bottom_margin, 1, 0.96])
+
+    # Save figure
+    os.makedirs(save_dir, exist_ok=True)
+    filename_parts = ["timing_comparison"]
+    if timing_type != "overall":
+        filename_parts.append(timing_type)
+    if news_mode:
+        filename_parts.append(f"news_{news_mode}")
+    filename_parts.append(metric.lower())
+    filename = "_".join(filename_parts) + ".png"
+
+    out_path = os.path.join(save_dir, filename)
+    plt.savefig(out_path, dpi=300, bbox_inches="tight")
+    print(f"Saved timing comparison to {out_path}")
+
+    if show:
+        plt.show()
+
+    plt.close()
 
 
 def aggregate_data_by_settings(path):
@@ -1085,46 +1330,178 @@ def plot_news_mode_comparison(
 
 def main(paths, show, radius):
     """
-    Main function to aggregate data from text files and generate plots.
+    Main function: aggregate data from txt files and generate a 2x2 summary plot.
 
-    Parameters:
-    paths (str or list): Path(s) to directory containing data files or single file(s).
-    show (bool): Whether to display the plot interactively.
-    radius (str): Gaussian radius setting for filtering the data.
+    Layout:
+        [0,0] Entropy (IG)   | [0,1] MSE
+        [1,0] Height         | [1,1] Coverage
 
-    Raises:
-    ValueError: If the path is not provided.
+    Each line in the legend corresponds to a distinct (NewsMode, NumAgents) combo
+    found in the data.
     """
     if paths is None:
         raise ValueError("Paths must be provided")
 
-    all_stats = pd.DataFrame()
-
-    # # Aggregate data
     stats = aggregate_data_by_settings(paths)
-    all_stats = pd.concat([all_stats, stats], ignore_index=True)
-    # all_stats = aggregate_data_by_settings(path)
 
-    # Print statistics
-    print(f"unique strategies: {all_stats['Strategy'].unique()}")
-    print(f"unique error margins: {all_stats['ErrorMargin'].unique()}")
-    print(f"unique rad: {all_stats['GaussianRadius'].unique()}")
-    print(f"unique pairwise: {all_stats['Pairwise'].unique()}")
-    if "NewsMode" in all_stats.columns:
-        print(f"unique news modes: {all_stats['NewsMode'].unique()}")
+    if stats.empty:
+        print("No data found – check paths.")
+        return
 
-    # Determine strategy name (use first strategy if multiple exist)
-    strategy = None
-    if "Strategy" in all_stats.columns and len(all_stats["Strategy"].unique()) > 0:
-        strategies = all_stats["Strategy"].unique()
-        strategy = strategies[0] if len(strategies) == 1 else "multi_strategy"
+    # ── filter to requested radius ────────────────────────────────────────────
+    radius_str = str(radius)
+    data = stats[stats["GaussianRadius"] == radius_str].copy()
+    if data.empty:
+        available = stats["GaussianRadius"].unique()
+        print(f"No data for radius={radius_str}. Available: {available}")
+        return
 
-    # Plot the aggregated statistics and save to the plots folder under the base directory
-    save_dir = None
-    if save_dir is None:
-        script_dir = os.path.dirname(os.path.realpath(__file__))
-        save_dir = os.path.join(script_dir, "plots")
-    plot_all_settings(all_stats, radius, save_dir, strategy=strategy, show=show)
+    # ── build one legend label per (NewsMode, NumAgents) group ───────────────
+    group_cols = []
+    if "NewsMode" in data.columns:
+        group_cols.append("NewsMode")
+    if "NumAgents" in data.columns:
+        group_cols.append("NumAgents")
+    if not group_cols:
+        group_cols = ["Strategy"]
+
+    groups = data.groupby(group_cols)
+    group_keys = list(groups.groups.keys())
+
+    # Colour / style palette
+    palette = [
+        ("#1f77b4", "-"),  # blue  solid
+        ("#d62728", "-"),  # red   solid
+        ("#2ca02c", "-"),  # green solid
+        ("#ff7f0e", "-"),  # orange solid
+        ("#9467bd", "--"),  # purple dashed
+        ("#8c564b", "--"),  # brown  dashed
+        ("#e377c2", "--"),  # pink   dashed
+        ("#17becf", "--"),  # cyan   dashed
+    ]
+
+    def make_label(key):
+        """Turn a group key (tuple or scalar) into a readable legend string."""
+        if not isinstance(key, tuple):
+            key = (key,)
+        parts = []
+        for col, val in zip(group_cols, key):
+            if col == "NumAgents":
+                parts.append(f"N={int(val)}")
+            else:
+                parts.append(str(val))
+        return " | ".join(parts)
+
+    # ── figure setup ─────────────────────────────────────────────────────────
+    plt.style.use("seaborn-v0_8-paper")
+    plt.rcParams.update(
+        {
+            "font.size": 13,
+            "axes.titlesize": 14,
+            "axes.labelsize": 13,
+            "xtick.labelsize": 11,
+            "ytick.labelsize": 11,
+            "legend.fontsize": 11,
+        }
+    )
+
+    metrics = [
+        ("Entropy", "Entropy"),
+        ("MSE", "MSE"),
+        ("Height", "Height (m)"),
+        ("Coverage", "Coverage"),
+    ]
+
+    fig, axes = plt.subplots(2, 2, figsize=(14, 9))
+    axes = axes.flatten()  # [Entropy, MSE, Height, Coverage]
+
+    for ax, (metric, ylabel) in zip(axes, metrics):
+        for idx, key in enumerate(group_keys):
+            color, ls = palette[idx % len(palette)]
+            label = make_label(key)
+
+            if not isinstance(key, tuple):
+                key = (key,)
+            mask = pd.Series([True] * len(data), index=data.index)
+            for col, val in zip(group_cols, key):
+                mask &= data[col] == val
+            gdata = data[mask].copy()
+
+            # average across iterations
+            try:
+                grouped = (
+                    gdata.groupby("Step")
+                    .agg({(metric, "mean"): "mean", (metric, "std"): "mean"})
+                    .reset_index()
+                    .sort_values("Step")
+                )
+                steps = grouped["Step"].values
+                mean_vals = grouped[(metric, "mean")].values
+                std_vals = grouped[(metric, "std")].fillna(0).values
+            except Exception:
+                continue
+
+            if len(steps) == 0:
+                continue
+
+            ax.plot(
+                steps, mean_vals, label=label, color=color, linestyle=ls, linewidth=2.2
+            )
+            ax.fill_between(
+                steps,
+                mean_vals - std_vals,
+                mean_vals + std_vals,
+                color=color,
+                alpha=0.18,
+            )
+
+        ax.set_xlabel("Step")
+        ax.set_ylabel(ylabel)
+        ax.set_title(metric)
+        ax.grid(True, linestyle="--", alpha=0.45)
+        for spine in ["top", "right"]:
+            ax.spines[spine].set_visible(False)
+
+    # shared legend below the figure
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(
+        handles,
+        labels,
+        loc="lower center",
+        ncol=min(len(group_keys), 4),
+        frameon=True,
+        framealpha=0.95,
+        bbox_to_anchor=(0.5, -0.04),
+    )
+
+    # pairwise info for title
+    pairwise_vals = data["Pairwise"].unique() if "Pairwise" in data.columns else []
+    pairwise_str = ", ".join(sorted(pairwise_vals)) if len(pairwise_vals) else ""
+    fig.suptitle(
+        f"Greedy IG Baseline  |  r={radius_str}  |  {pairwise_str}",
+        fontsize=14,
+        fontweight="bold",
+    )
+    plt.tight_layout(rect=[0, 0.05, 1, 1])
+
+    # ── save ─────────────────────────────────────────────────────────────────
+    script_dir = os.path.dirname(os.path.realpath(__file__))
+    save_dir = os.path.join(script_dir, "plots")
+    os.makedirs(save_dir, exist_ok=True)
+
+    modes_str = "-".join(
+        sorted(
+            str(k) if not isinstance(k, tuple) else "_".join(str(v) for v in k)
+            for k in group_keys
+        )
+    )
+    filename = f"baseline_r{radius_str}_{modes_str}.png"
+    out_path = os.path.join(save_dir, filename)
+    plt.savefig(out_path, dpi=300, bbox_inches="tight")
+    print(f"✓ Saved to {out_path}")
+    if show:
+        plt.show()
+    plt.close()
 
 
 def main_news_comparison(paths, show, radius, pairwise="equal", comm_range=None):
@@ -1276,15 +1653,19 @@ def plot_method_comparison(
     # Metrics to plot: Entropy, Height, MSE, Coverage -> 2x2 grid
     metrics = ["Entropy", "Height", "MSE", "Coverage"]
     nrows, ncols = 2, 2
+
+    # Build a per-method color palette that scales to any number of methods
+    n_methods = len(methods)
+    if n_methods <= 10:
+        _cmap = plt.get_cmap("tab10")
+    else:
+        _cmap = plt.get_cmap("tab20")
+    method_colors = {m: _cmap(i / max(n_methods - 1, 1)) for i, m in enumerate(methods)}
+
     fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(14, 10))
     axes = axes.flatten()
 
-    colors = [
-        "#1f77b4",
-        "#ff7f0e",
-        "#2ca02c",
-        "#d62728",
-    ]  # Added 4th color for 4 methods
+    legend_handles = []  # collect once, reuse for fig.legend
 
     for ax, metric in zip(axes, metrics):
         for i, method in enumerate(methods):
@@ -1312,30 +1693,45 @@ def plot_method_comparison(
             steps = grouped["Step"]
             mean_vals = grouped[(metric, "mean")]
             std_vals = grouped[(metric, "std")]
+            color = method_colors[method]
 
-            ax.plot(
+            (line,) = ax.plot(
                 steps,
                 mean_vals,
                 label=method,
-                color=colors[i % len(colors)],
+                color=color,
                 linewidth=2,
             )
             ax.fill_between(
                 steps,
                 mean_vals - std_vals,
                 mean_vals + std_vals,
-                color=colors[i % len(colors)],
-                alpha=0.25,
+                color=color,
+                alpha=0.2,
             )
+            # Collect handle only once (from first metric subplot)
+            if metric == metrics[0]:
+                legend_handles.append(line)
 
         ax.set_xlabel("Steps")
         ax.set_ylabel(metric)
         ax.set_title(metric + " over Steps")
-        ax.grid(True, linestyle="--", alpha=0.5)
+        ax.xaxis.set_major_locator(plt.MultipleLocator(20))
+        ax.xaxis.set_minor_locator(plt.MultipleLocator(10))
+        ax.minorticks_on()
+        ax.grid(True, which="major", linestyle="--", alpha=0.5)
+        ax.grid(True, which="minor", linestyle=":", alpha=0.25)
 
-        # Add legend only to Coverage plot (bottom right)
-        if metric == "Coverage":
-            ax.legend(loc="lower right", fontsize=10, framealpha=0.9)
+    # Single shared legend below all subplots
+    fig.legend(
+        handles=legend_handles,
+        labels=[h.get_label() for h in legend_handles],
+        loc="lower center",
+        ncol=min(n_methods, 2),
+        fontsize=9,
+        framealpha=0.95,
+        bbox_to_anchor=(0.5, 0.0),
+    )
 
     # Add main title with news_mode and num_agents info
     title_parts = [f"Multi-Agent Planning Comparison (r={radius}, {pairwise})"]
@@ -1346,8 +1742,10 @@ def plot_method_comparison(
     main_title = " | ".join(title_parts)
     fig.suptitle(main_title, fontsize=13, fontweight="bold", y=0.995)
 
-    # Adjust subplot spacing to accommodate title
-    plt.subplots_adjust(top=0.91)
+    # Reserve space at bottom for the legend
+    n_legend_rows = (n_methods + 1) // 2
+    legend_space = 0.05 + n_legend_rows * 0.045
+    plt.subplots_adjust(top=0.91, bottom=legend_space)
 
     os.makedirs(save_dir, exist_ok=True)
 
@@ -1392,8 +1790,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--radius",
         type=str,
-        default="orto",
-        help="Specify the radius setting (integer or 'orto')",
+        default="4",
+        help="Specify the Gaussian radius to plot (default: 4)",
     )
 
     parser.add_argument(
@@ -1426,7 +1824,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--compare-methods",
         action="store_true",
-        help="Compare Greedy-IG, Dec-MCTS, MH-Efficient and MH-Full methods (auto-discovers experiments/runs/ folders)",
+        help="Compare Greedy-IG, Dec-MCTS, MH-Eff and MH-Full methods (auto-discovers experiments/runs/ folders)",
     )
 
     parser.add_argument(
@@ -1436,9 +1834,132 @@ if __name__ == "__main__":
         help="Filter comparison to a specific news/mapping mode (e.g. IG, IGd_BM)",
     )
 
+    parser.add_argument(
+        "--compare-timing",
+        action="store_true",
+        help="Compare planning time efficiency across methods using timestamps.csv files",
+    )
+
+    parser.add_argument(
+        "--timing-metric",
+        type=str,
+        default="Mean_ms",
+        choices=["Mean_ms", "Median_ms", "P95_ms", "P99_ms"],
+        help="Timing metric to plot (default: Mean_ms)",
+    )
+
+    parser.add_argument(
+        "--timing-type",
+        type=str,
+        default="overall",
+        choices=["overall", "hlp", "llp"],
+        help="Type of timing comparison: overall (default), hlp (high-level), or llp (low-level)",
+    )
+
     args = parser.parse_args()
 
-    if args.compare_news or args.paths:
+    if args.compare_timing:
+        # Auto-discover timestamp CSV files and compare timing across methods
+        script_dir = os.path.dirname(os.path.realpath(__file__))
+        experiments_base = os.path.join(script_dir, "experiments", "runs")
+
+        method_paths = {
+            "Greedy-IG": [],
+            "Dec-MCTS": [],
+            "MH-Efficient": [],
+            "MH-Full": [],
+        }
+
+        # Search experiments/runs/ for all methods' timestamp files
+        if os.path.exists(experiments_base):
+            # Greedy IG
+            greedy_dir = os.path.join(experiments_base, "greedy_ig")
+            if os.path.exists(greedy_dir):
+                for run_dir in glob.glob(os.path.join(greedy_dir, "run_*")):
+                    csv_path = os.path.join(run_dir, "txt", "timestamps.csv")
+                    if os.path.exists(csv_path):
+                        method_paths["Greedy-IG"].append(csv_path)
+
+            # Dec-MCTS
+            dec_dir = os.path.join(experiments_base, "dec_mcts")
+            if os.path.exists(dec_dir):
+                for run_dir in glob.glob(os.path.join(dec_dir, "run_*")):
+                    csv_path = os.path.join(run_dir, "txt", "timestamps.csv")
+                    if os.path.exists(csv_path):
+                        method_paths["Dec-MCTS"].append(csv_path)
+
+            # MH-Full
+            mh_full_dir = os.path.join(experiments_base, "mh_dec_mcts_full")
+            if os.path.exists(mh_full_dir):
+                for run_dir in glob.glob(os.path.join(mh_full_dir, "run_*")):
+                    csv_path = os.path.join(run_dir, "txt", "timestamps.csv")
+                    if os.path.exists(csv_path):
+                        method_paths["MH-Full"].append(csv_path)
+
+            # MH-Eff
+            mh_eff_dir = os.path.join(experiments_base, "mh_dec_mcts_efficient")
+            if os.path.exists(mh_eff_dir):
+                for run_dir in glob.glob(os.path.join(mh_eff_dir, "run_*")):
+                    csv_path = os.path.join(run_dir, "txt", "timestamps.csv")
+                    if os.path.exists(csv_path):
+                        method_paths["MH-Efficient"].append(csv_path)
+        else:
+            print(
+                f"⚠️  Warning: experiments/runs/ directory not found at {experiments_base}"
+            )
+            print("   Run some experiments first!")
+            sys.exit(1)
+
+        # Parse and aggregate timing data per method
+        timing_data_dict = {}
+        for method, csv_paths in method_paths.items():
+            if not csv_paths:
+                print(f"No timestamp files found for {method}")
+                continue
+
+            # Aggregate across all runs for this method
+            all_timing_dfs = []
+            for csv_path in csv_paths:
+                timing_df = parse_timing_csv(csv_path)
+                if not timing_df.empty:
+                    all_timing_dfs.append(timing_df)
+
+            if all_timing_dfs:
+                # Combine all runs and re-aggregate by step
+                combined = pd.concat(all_timing_dfs, ignore_index=True)
+                # Group by step and compute overall statistics
+                final_timing = (
+                    combined.groupby("Step")
+                    .agg(
+                        {
+                            "Mean_ms": "mean",
+                            "Median_ms": "mean",
+                            "Std_ms": "mean",
+                            "P95_ms": "mean",
+                            "P99_ms": "mean",
+                        }
+                    )
+                    .reset_index()
+                )
+                timing_data_dict[method] = final_timing
+                print(f"✓ Loaded {len(csv_paths)} timestamp file(s) for {method}")
+
+        if not timing_data_dict:
+            print("No timing data found for comparison")
+            sys.exit(1)
+
+        # Generate timing comparison plot
+        save_dir = os.path.join(script_dir, "plots")
+        plot_timing_comparison(
+            timing_data_dict,
+            save_dir,
+            show=args.show,
+            metric=args.timing_metric,
+            news_mode=args.news_mode,
+        )
+
+    elif args.compare_news:
+        # Explicit news-mode comparison requested
         paths = args.paths if args.paths else ([args.path] if args.path else [])
         if not paths:
             print("Error: No paths provided for comparison")
@@ -1486,7 +2007,7 @@ if __name__ == "__main__":
                     if os.path.exists(txt_path):
                         method_paths["MH-Full"].append(txt_path)
 
-            # MH-Efficient
+            # MH-Eff
             mh_eff_dir = os.path.join(experiments_base, "mh_dec_mcts_efficient")
             if os.path.exists(mh_eff_dir):
                 for run_dir in glob.glob(os.path.join(mh_eff_dir, "run_*")):
@@ -1494,7 +2015,9 @@ if __name__ == "__main__":
                     if os.path.exists(txt_path):
                         method_paths["MH-Efficient"].append(txt_path)
         else:
-            print(f"⚠️  Warning: experiments/runs/ directory not found at {experiments_base}")
+            print(
+                f"⚠️  Warning: experiments/runs/ directory not found at {experiments_base}"
+            )
             print("   Run some experiments first!")
 
         # Aggregate per-method stats

@@ -43,11 +43,8 @@ def _build_logged_hyperparams(config, action_strategy, mcts_params):
                 hyperparams[key] = dec_cfg[key]
 
     elif action_strategy in [
-        "hierarchical_dec_mcts",
-        "mh_dec_mcts",
-        "mh_dec_mcts_both",
-        "mh_dec_mcts_full",
         "mh_dec_mcts_efficient",
+        "mh_dec_mcts_full",
     ]:
         hier_cfg = config.get("hierarchical_dec_mcts", {})
         llp_cfg = hier_cfg.get("llp", {})
@@ -287,6 +284,7 @@ def run_multi_agent_experiment(
                 coordinator=None,
                 start_altitude=start_z,
                 debug_logs=debug_logs,
+                experiment_config=config,
             )
             agents.append(agent_state)
 
@@ -344,6 +342,7 @@ def run_multi_agent_experiment(
                 coordinator=coordinator,
                 start_altitude=start_z,
                 debug_logs=debug_logs,
+                experiment_config=config,
             )
             agents.append(agent_state)
 
@@ -354,9 +353,8 @@ def run_multi_agent_experiment(
                 altitude=uav_pos.altitude,
             )
 
-        if (
-            action_strategy == "greedy_ig"
-            and config.get("multi_agent", {}).get("shared_observation_rng", False)
+        if action_strategy == "greedy_ig" and config.get("multi_agent", {}).get(
+            "shared_observation_rng", False
         ):
             shared_obs_rng = np.random.default_rng(seed)
             map_obj.rng = shared_obs_rng
@@ -404,11 +402,8 @@ def run_multi_agent_experiment(
 
         # Determine if hierarchical timing columns are needed
         use_hierarchical_timing = action_strategy in (
-            "hierarchical_dec_mcts",
-            "mh_dec_mcts",
-            "mh_dec_mcts_both",
-            "mh_dec_mcts_full",
             "mh_dec_mcts_efficient",
+            "mh_dec_mcts_full",
         )
 
         multi_agent_logger = FastLogger(
