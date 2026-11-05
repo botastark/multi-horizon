@@ -138,6 +138,7 @@ class DecMCTSNode:
         self.children: Dict[str, "DecMCTSNode"] = {}
         self.visit_count = 0
         self.value = 0.0
+        self.immediate_reward = 0.0
         self.camera = camera
         self.conf_dict = conf_dict
         self.config = config or {}
@@ -187,6 +188,7 @@ class DecMCTSNode:
         """Expand node by adding child for untried action."""
         action = self.untried_actions.pop()
         new_state = self.apply_action(self.state, action, copy_belief=True)
+        observed = self.observe(new_state)
         child = DecMCTSNode(
             new_state,
             camera=self.camera,
@@ -196,8 +198,32 @@ class DecMCTSNode:
             config=self.config,
             seed=None,  # Will inherit from parent
         )
+        child.immediate_reward = observed[0] if observed is not None else 0.0
         self.children[action] = child
         return child
+
+    def observe(self, state: Dict) -> Optional[Tuple[float, float]]:
+        """Score the footprint at state's position and apply its observation to state's belief."""
+        try:
+            [[imin, imax], [jmin, jmax]] = self.camera.get_range(
+                position=state["uav_pos"].position,
+                altitude=state["uav_pos"].altitude,
+                index_form=True,
+            )
+        except Exception:
+            return None
+
+        ig_reward = self.compute_ig_reward(state, imin, imax, jmin, jmax)
+        overlap_penalty = self.compute_overlap_penalty(state, imin, imax, jmin, jmax)
+
+        prior = state["belief"][imin:imax, jmin:jmax, 1]
+        s0, s1 = self._get_sensor_params(state["uav_pos"].altitude)
+        Pz0, Pz1, p10, p11 = expected_posterior(prior, s0, s1)
+        state["belief"] = self.belief_update(
+            state["belief"], imin, imax, jmin, jmax, Pz0, Pz1, p10, p11
+        )
+
+        return ig_reward - overlap_penalty, ig_reward
 
     def apply_action(self, state: Dict, action: str, copy_belief: bool = True) -> Dict:
         """Apply action to state and return new state."""
@@ -326,34 +352,12 @@ class DecMCTSNode:
             # Apply action
             state = self.apply_action(state, action, copy_belief=False)
 
-            # Get footprint
-            try:
-                [[imin, imax], [jmin, jmax]] = self.camera.get_range(
-                    position=state["uav_pos"].position,
-                    altitude=state["uav_pos"].altitude,
-                    index_form=True,
-                )
-            except Exception:
+            observed = self.observe(state)
+            if observed is None:
                 continue
-
-            # Compute IG reward
-            prior = state["belief"][imin:imax, jmin:jmax, 1]
-            s0, s1 = self._get_sensor_params(state["uav_pos"].altitude)
-            Pz0, Pz1, p10, p11 = expected_posterior(prior, s0, s1)
-
-            ig_reward = self.compute_ig_reward(state, imin, imax, jmin, jmax)
-            overlap_penalty = self.compute_overlap_penalty(
-                state, imin, imax, jmin, jmax
-            )
-
-            reward = ig_reward - overlap_penalty
+            reward, ig_reward = observed
             total_reward += discount * reward
             discount *= discount_factor
-
-            # Update belief
-            state["belief"] = self.belief_update(
-                state["belief"], imin, imax, jmin, jmax, Pz0, Pz1, p10, p11
-            )
 
             trajectory.append(
                 {
@@ -580,7 +584,7 @@ class DecMCTSPlanner:
             )
 
             # Backpropagation
-            node.backpropagate(reward)
+            node.backpropagate(node.immediate_reward + reward)
 
             iterations += 1
 
@@ -588,7 +592,7 @@ class DecMCTSPlanner:
 
         # Extract best action and trajectory
         best_action, action_values = self._extract_best_action(root)
-        trajectory = self._extract_trajectory(root)
+        trajectory = self._extract_trajectory(root, first_action=best_action)
 
         # Store action values for logging
         self._mcts_action_values = action_values
@@ -651,9 +655,10 @@ class DecMCTSPlanner:
     def _extract_trajectory(
         self,
         root: DecMCTSNode,
+        first_action: str = None,
         max_depth: int = None,
     ) -> List[Dict]:
-        """Extract best trajectory from MCTS tree."""
+        """Extract best trajectory from MCTS tree, starting with first_action if given."""
         if max_depth is None:
             max_depth = self.config["horizon"]
 
@@ -662,8 +667,11 @@ class DecMCTSPlanner:
         depth = 0
 
         while node.children and depth < max_depth:
-            # Select best child greedily (c=0)
-            best_child = node.best_child(c_param=0.0)
+            if depth == 0 and first_action in node.children:
+                best_child = node.children[first_action]
+            else:
+                # Select best child greedily (c=0)
+                best_child = node.best_child(c_param=0.0)
             if best_child is None:
                 break
 
@@ -701,16 +709,13 @@ class DecMCTSPlanner:
         trajectory: List[Dict],
     ) -> DecMCTSIntent:
         """Build intent from action and trajectory."""
-        action_sequence = [action]
+        action_sequence = [step["action"] for step in trajectory] or [action]
         position_sequence = [self.position]
         altitude_sequence = [self.altitude]
         footprint_sequence = []
         ig_sequence = []
 
-        # Add trajectory info
         for step in trajectory:
-            if step["action"] != action:  # Skip first action (already added)
-                action_sequence.append(step["action"])
             position_sequence.append(step["position"])
             altitude_sequence.append(step["altitude"])
             footprint_sequence.append(step["footprint"])
