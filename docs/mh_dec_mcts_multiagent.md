@@ -1,6 +1,6 @@
-# Multi-Horizon Dec-MCTS (MH_DEC_MCTS) Multi-Agent Architecture
+# Multi-Horizon Dec-MCTS Multi-Agent Architecture
 
-> **Strategy:** `mh_dec_mcts` / `hierarchical_dec_mcts` — Two-level hierarchical planning
+> **Strategies:** `mh_dec_mcts_efficient` and `mh_dec_mcts_full` — Two-level hierarchical planning
 
 ---
 
@@ -66,7 +66,7 @@ main.py
 │   ├── [3] FOR agent_id in num_agents:
 │   │       └── initialize_agent()
 │   │           ├── Camera()
-│   │           ├── planning("mh_dec_mcts")
+│   │           ├── planning("mh_dec_mcts_efficient" or "mh_dec_mcts_full")
 │   │           │   └── create_hierarchical_planner()
 │   │           │       ├── IntentBus()        # Shared
 │   │           │       ├── LowLevelPlanner()
@@ -611,11 +611,11 @@ MH-Dec-MCTS uses the same belief fusion as other strategies:
 
 ## 10. Configuration
 
-### Benchmark Configuration (`configs/benchmark_mh_dec_mcts.json`)
+### Benchmark Configuration (`configs/strategies/mh_dec_mcts_efficient.json` or `configs/strategies/mh_dec_mcts_full.json`)
 
 ```json
 {
-  "action_strategy": "mh_dec_mcts",
+  "action_strategy": "mh_dec_mcts_efficient",
   "num_agents": 4,
   "n_steps": 100,
   "iters": [0, 20],

@@ -74,6 +74,29 @@ def _make_tmp_dir():
     return d
 
 
+def canonical_actions(action_data_by_agent, atol=1e-9):
+    priority = {
+        "left": 0,
+        "right": 1,
+        "front": 2,
+        "back": 3,
+        "up": 4,
+        "down": 5,
+        "hover": 6,
+    }
+    actions = []
+    for data in action_data_by_agent:
+        scores = data["admissible_action_to_IG"]
+        best_value = max(score[0] for score in scores.values())
+        best_actions = [
+            action
+            for action, score in scores.items()
+            if np.isclose(score[0], best_value, rtol=0.0, atol=atol)
+        ]
+        actions.append(min(best_actions, key=lambda action: priority.get(action, 99)))
+    return actions
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # MH runner
 # ─────────────────────────────────────────────────────────────────────────────
@@ -94,7 +117,7 @@ def run_mh(
     start_positions, actions_per_agent
     """
     grid_info = MHGrid()
-    grf_r = config.get("cluster_radius", 4)
+    grf_r = config.get("cluster_radius", 5)
 
     camera1 = Camera(
         grid_info,
@@ -129,7 +152,7 @@ def run_mh(
         dec_config["news_sharing"] = True
         ma_config = config.setdefault("multi_agent", {})
         ma_config["news_mode"] = "BS"
-        ma_config["news_inference_type"] = "OG"
+        ma_config["news_inference_type"] = "LBP"
         ma_config["fusion_eps"] = 0.0
         ma_config["metric_aggregation"] = "fused_mean"
         ma_config["clip_metric_beliefs"] = False
@@ -137,9 +160,9 @@ def run_mh(
         dec_config.setdefault("radius_multiplier", -1)  # infinite comm
     elif news_mode == "IGd_BM":
         dec_config["position_sharing"] = True
-        dec_config["news_sharing"] = False
+        dec_config["news_sharing"] = True
         ma_config = config.setdefault("multi_agent", {})
-        ma_config["news_inference_type"] = "Bypass"
+        ma_config["news_inference_type"] = "LBP"
         ma_config["fusion_eps"] = 0.0
         ma_config["metric_aggregation"] = "fused_mean"
         ma_config["clip_metric_beliefs"] = False
@@ -260,7 +283,7 @@ def run_pa(
     n_steps: int,
     seed: int,
     radius_multiplier: int = -1,
-    news_inference_type: str = "Bypass",
+    news_inference_type: str = "LBP_single",
     debug: bool = False,
 ) -> dict:
     """
@@ -292,7 +315,7 @@ def run_pa(
     Planner = pa_sim.Planner
     H = pa_sim.H
 
-    # Build experiment params matching the PA convention for N=4, r=4
+    # Build experiment params matching the PA convention for N=4.
     iep = dict(
         a0=1.0,
         a1=1.0,
@@ -370,7 +393,10 @@ def run_pa(
 
     # Share a single observation RNG across all PA agents (matches MH's single-RNG draw order)
     shared_obs_rng = np.random.default_rng(seed)
+    shared_plan_rng = np.random.default_rng(seed)
     for agent in env.agents:
+        agent.obs_rng = shared_obs_rng
+        agent.plan_rng = shared_plan_rng
         agent.rng = shared_obs_rng
 
     # Record starting positions before any movement
@@ -386,13 +412,13 @@ def run_pa(
     coverage_hist = []
     actions_per_agent = {i: [] for i in range(n_agents)}
 
-    # ── Step loop matching MH Simulator.run() exactly ────────────────────────
-    # MH per step k:
-    #   1. record metrics (pure prior at k=0; post-obs-from-k-1 at k>0)
-    #   2. observe at current position (start pos at k=0; moved pos at k>0)
-    #   3. plan  (with post-obs beliefs)
-    #   4. move
-    observations = []  # populated inside loop on first iteration
+    # ── Step loop matching PA simulate.py and MH Simulator.run() ─────────────
+    # Per step:
+    #   1. record metrics with current beliefs
+    #   2. plan from current beliefs and previous observations
+    #   3. move
+    #   4. observe at the new position, update local beliefs, then fuse news
+    observations = []
 
     for step_index in range(n_steps):
         # 1. Record metrics with CURRENT beliefs (prior at step 0)
@@ -405,15 +431,12 @@ def run_pa(
         decided = (fused_belief > 0.55) | (fused_belief < 0.45)
         coverage_hist.append(float(decided.mean()))
 
-        # 2. Observe at current position (start pos at step 0, moved pos at step>0)
-        observations = env.get_observations(map_ground_truth)
-        mapper.set_pairwise_potential_z(env.agents, observations)
-        mapper.update_map_beliefs(env.agents, observations)
-        mapper.update_news_and_fuse_map_beliefs(env.agents, observations)
-
-        # 3. Plan using post-obs beliefs
+        # 2. Plan using current beliefs and previous observations.
+        for agent in env.agents:
+            agent.rng = agent.plan_rng
         planner.compute_map_belief_entropies()
         actions, actions_data = planner.get_actions(env.agents, observations)
+        actions = canonical_actions(actions_data)
         for agent in env.agents:
             aid = agent.id
             ent = float(np.sum(pa_sim.map_belief_entropies[:, :, aid]))
@@ -424,8 +447,16 @@ def run_pa(
             mse_per_agent[aid].append(mse)
             actions_per_agent[aid].append(actions[aid])
 
-        # 4. Move
+        # 3. Move.
         env.step(actions)
+
+        # 4. Observe at the new position, update local beliefs, then fuse news.
+        for agent in env.agents:
+            agent.rng = agent.obs_rng
+        observations = env.get_observations(map_ground_truth)
+        mapper.set_pairwise_potential_z(env.agents, observations)
+        mapper.update_map_beliefs(env.agents, observations)
+        mapper.update_news_and_fuse_map_beliefs(env.agents, observations)
 
     return {
         "entropy_per_agent": entropy_per_agent,
@@ -614,7 +645,7 @@ def main():
         n_steps=args.steps,
         seed=args.seed,
         radius_multiplier=1000,
-        news_inference_type="OG_single",
+        news_inference_type="LBP_single",
         debug=args.debug,
     )
     print(f"└─ Done. Start pos: {pa_igbs['start_positions']}\n")
@@ -643,7 +674,7 @@ def main():
         n_steps=args.steps,
         seed=args.seed,
         radius_multiplier=5,
-        news_inference_type="Bypass",
+        news_inference_type="LBP_multi",
         debug=args.debug,
     )
     print(f"└─ Done. Start pos: {pa_igd['start_positions']}\n")

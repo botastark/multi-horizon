@@ -2,7 +2,7 @@
   "_comment": "Strategy 4: MH-Dec-MCTS (efficient) - Hierarchical with LLP using random rollout",
   "_description": "Optimized hierarchical: HLP uses MCTS, LLP uses random rollout sampling",
   
-  "action_strategy": "mh_dec_mcts",
+  "action_strategy": "mh_dec_mcts_efficient",
   
   "hierarchical_dec_mcts": {
     "use_mcts_llp": false,

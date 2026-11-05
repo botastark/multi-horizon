@@ -1,24 +1,25 @@
 {
-  "_comment": "MH-Eff - Fast Replan: Short HLP horizon with frequent replanning",
-  "action_strategy": "mh_dec_mcts",
+  "_comment": "MH-Eff - No G2: g2 guidance disabled — ablation baseline to measure g2 contribution",
+  "action_strategy": "mh_dec_mcts_efficient",
+  "n_steps": 100,
 
   "hierarchical_dec_mcts": {
     "use_mcts_llp": false,
-    "use_g2": true,
+    "use_g2": false,
 
     "llp": {
       "horizon": 3,
-      "iterations": 30,
+      "iterations": 15,
       "discount_factor": 0.95
     },
 
     "hlp": {
-      "horizon": 5,
-      "iterations": 20,
+      "horizon": 8,
+      "iterations": 25,
       "ucb_c": 1.0,
       "discount_factor": 0.98,
       "tile_size": [25, 25],
-      "replan_interval": 1.0
+      "replan_interval": 2.0
     },
 
     "intent_sharing": {
@@ -34,7 +35,7 @@
   },
 
   "experiment": {
-    "name": "mh_eff_fast_replan_hlp5_rep1",
+    "name": "mh_eff_no_g2",
     "log_dir_suffix": "mh_dec_mcts_efficient",
     "strategy_metrics": [
       "llp_iterations",

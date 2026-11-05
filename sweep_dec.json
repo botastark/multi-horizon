@@ -1,0 +1,117 @@
+{
+  "_comment": "Hyperparameter Sweep Configuration - All Methods",
+  "_description": "Tests multiple hyperparameter variations for each planning method across IG_BS (infinite comm) and IGd_BM (limited comm R5) settings",
+  "base_config": "configs/master_config.json",
+  "experiments": [
+    {
+      "name": "dec_mcts_reactive_h5_i50",
+      "overrides": {
+        "strategies": ["dec_mcts"],
+        "strategy_configs": {
+          "dec_mcts": "../../configs/strategies/sweeps/dec_mcts_reactive_h5_i50.json"
+        },
+        "shared": {
+          "mode_labels": ["IG_BS", "IGd_BM"],
+          "cluster_radius": 5,
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [0, 20],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "correlation_types": ["adaptive"],
+          "enable_plotting": false,
+          "enable_logging": true,
+          "debug_logs": false
+        }
+      }
+    },
+    {
+      "name": "dec_mcts_balanced_h10_i30",
+      "overrides": {
+        "strategies": ["dec_mcts"],
+        "strategy_configs": {
+          "dec_mcts": "../../configs/strategies/sweeps/dec_mcts_balanced_h10_i30.json"
+        },
+        "shared": {
+          "mode_labels": ["IG_BS", "IGd_BM"],
+          "cluster_radius": 5,
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [0, 20],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "correlation_types": ["adaptive"],
+          "enable_plotting": false,
+          "enable_logging": true,
+          "debug_logs": false
+        }
+      }
+    },
+    {
+      "name": "dec_mcts_longlook_h15_i20",
+      "overrides": {
+        "strategies": ["dec_mcts"],
+        "strategy_configs": {
+          "dec_mcts": "../../configs/strategies/sweeps/dec_mcts_longlook_h15_i20.json"
+        },
+        "shared": {
+          "mode_labels": ["IG_BS", "IGd_BM"],
+          "cluster_radius": 5,
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [0, 20],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "correlation_types": ["adaptive"],
+          "enable_plotting": false,
+          "enable_logging": true,
+          "debug_logs": false
+        }
+      }
+    },
+    {
+      "name": "dec_mcts_explore_ucb2.0",
+      "overrides": {
+        "strategies": ["dec_mcts"],
+        "strategy_configs": {
+          "dec_mcts": "../../configs/strategies/sweeps/dec_mcts_explore_ucb2.0.json"
+        },
+        "shared": {
+          "mode_labels": ["IG_BS", "IGd_BM"],
+          "cluster_radius": 5,
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [0, 20],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "correlation_types": ["adaptive"],
+          "enable_plotting": false,
+          "enable_logging": true,
+          "debug_logs": false
+        }
+      }
+    },
+    {
+      "name": "dec_mcts_exploit_ucb1.0",
+      "overrides": {
+        "strategies": ["dec_mcts"],
+        "strategy_configs": {
+          "dec_mcts": "../../configs/strategies/sweeps/dec_mcts_exploit_ucb1.0.json"
+        },
+        "shared": {
+          "mode_labels": ["IG_BS", "IGd_BM"],
+          "cluster_radius": 5,
+          "num_agents": 4,
+          "n_steps": 100,
+          "iters": [0, 20],
+          "field_type": "Gaussian",
+          "start_position": "corner",
+          "correlation_types": ["adaptive"],
+          "enable_plotting": false,
+          "enable_logging": true,
+          "debug_logs": false
+        }
+      }
+    }
+  ]
+}

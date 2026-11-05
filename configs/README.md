@@ -125,7 +125,7 @@ Each strategy has its own config file in `configs/strategies/`.
 
 ```json
 {
-  "action_strategy": "mh_dec_mcts_both",
+  "action_strategy": "mh_dec_mcts_full",
   
   "hierarchical_dec_mcts": {
     "use_mcts_llp": true,

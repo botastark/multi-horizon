@@ -2,7 +2,7 @@
   "_comment": "Strategy 3: MH-Dec-MCTS (full) - Hierarchical with both HLP and LLP using MCTS",
   "_description": "Full hierarchical baseline: Both planners use UCB tree search",
   
-  "action_strategy": "mh_dec_mcts_both",
+  "action_strategy": "mh_dec_mcts_full",
   
   "hierarchical_dec_mcts": {
     "use_mcts_llp": true,

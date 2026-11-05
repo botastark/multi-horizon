@@ -14,7 +14,7 @@
     },
 
     "strategy": {
-        "_comment": "Action strategy selection: greedy_ig, dec_mcts, mh_dec_mcts (or hierarchical_dec_mcts)",
+        "_comment": "Action strategy selection: greedy_ig, dec_mcts, mh_dec_mcts_efficient, mh_dec_mcts_full",
         "type": "greedy_ig"
     },
 
@@ -54,7 +54,7 @@
     },
 
     "hierarchical_dec_mcts": {
-        "_comment": "Multi-Horizon Dec-MCTS (alias: mh_dec_mcts) - LLP + HLP hierarchy",
+        "_comment": "Multi-Horizon Dec-MCTS parameters for mh_dec_mcts_efficient and mh_dec_mcts_full",
         "llp_horizon": 5,
         "llp_iterations": 50,
         "hlp_horizon": 3,

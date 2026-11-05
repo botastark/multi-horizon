@@ -9,7 +9,7 @@
   "shared": {
     "project_path": "./",
     "field_type": "Gaussian",
-    "cluster_radius": 4,
+    "cluster_radius": 5,
     "start_position": "corner",
     "num_agents": 4,
     "n_steps": 100,
@@ -25,14 +25,16 @@
   },
 
   "decentralized": {
-    "_comment": "Infinite communication range (all agents can communicate)",
-    "radius_multiplier": 16
+    "_comment": "Infinite communication range (-1 = no distance limit, matches compare_greedy_ig.py)",
+    "radius_multiplier": -1,
+    "news_sharing": true,
+    "position_sharing": false
   },
 
   "multi_agent": {
     "num_agents": 4,
     "news_mode": "BS",
-    "news_inference_type": "OG",
+    "news_inference_type": "LBP",
     "fusion_eps": 0.0,
     "shared_observation_rng": true,
     "metric_aggregation": "fused_mean",
