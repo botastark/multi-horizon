@@ -1396,14 +1396,6 @@ class HighLevelPlanner:
         if time.time() - self._last_replan_time < self.replan_interval:
             return False
 
-        # Check if current target is mostly covered
-        if self.current_intent.current_target_region is not None:
-            coverage = self._region_coverage.get(
-                self.current_intent.current_target_region, 0.0
-            )
-            if coverage > 0.9:
-                return True
-
         return True
 
     def plan(self, current_position: Tuple[float, float]) -> HLIntent:
@@ -1592,14 +1584,14 @@ class HighLevelPlanner:
                 path.append((state, action))
 
                 # Rollout to get value estimate
-                value = self._rollout_region_sequence(
+                completed, value = self._rollout_region_sequence(
                     sequence, position, start_position, teammate_targets
                 )
 
                 # Backpropagate
                 self._backpropagate(tree, path, value)
 
-                return sequence, value
+                return completed, value
             else:
                 # Selection: use UCB to pick best child
                 action = self._select_best_region_ucb(node, available_regions)
@@ -1656,7 +1648,7 @@ class HighLevelPlanner:
         current_position: Tuple[float, float],
         start_position: Tuple[float, float],
         teammate_targets: Dict[int, Tuple[Set[int], float]],
-    ) -> float:
+    ) -> Tuple[List[int], float]:
         """
         Rollout policy: randomly complete region sequence to horizon.
 
@@ -1667,7 +1659,7 @@ class HighLevelPlanner:
             teammate_targets: Teammate region targets
 
         Returns:
-            Total value estimate
+            (completed region sequence, total value estimate)
         """
         sequence = list(current_sequence)
         position = current_position
@@ -1686,7 +1678,7 @@ class HighLevelPlanner:
             position = self.regions[region_id]["center"]
 
         # Evaluate complete sequence
-        return self._evaluate_region_sequence(
+        return sequence, self._evaluate_region_sequence(
             sequence, start_position, teammate_targets
         )
 

@@ -22,3 +22,8 @@ opencv-python
 tqdm
 matplotlib
 seaborn
+# Note: GDAL can be tricky to install via pip due to its dependencies. It is often recommended to install it via a package manager like conda or using system packages.
+# For example, you can install GDAL using conda with the following command:
+# conda install -c conda-forge gdal
+# another option is to install psutil which is a dependency for GDAL, you can do it with pip or conda:
+# conda install -c conda-forge --override-channels psutil
