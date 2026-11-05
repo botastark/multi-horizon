@@ -121,7 +121,7 @@ Uses default `radius_multiplier: 5` for all modes unless overridden by limited_t
   },
   "shared": {
     "num_agents": 4,
-    "cluster_radius": 4,
+    "cluster_radius": 5,
     "mode_labels": ["IG_BS", "IGd_BM"]
   }
 }

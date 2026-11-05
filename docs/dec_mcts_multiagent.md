@@ -209,7 +209,7 @@ V(node) = Σ γ^t × IG(t)  for t=0 to depth
   },
   "shared": {
     "num_agents": 4,
-    "cluster_radius": 4,
+    "cluster_radius": 5,
     "mode_labels": ["IG_BS", "IGd_BM"]
   }
 }

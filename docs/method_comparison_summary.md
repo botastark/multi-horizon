@@ -41,8 +41,8 @@ Summary of the **four baselines** used for method comparison, representing an in
   - `correlation_types`: [`equal`, `biased`, `adaptive`]
   - `iters`: [0, 20]
 
-- MH-Dec-MCTS (configs/benchmark_mh_dec_mcts.json)
-  - `action_strategy`: mh_dec_mcts_both
+- MH-Dec-MCTS full (`configs/strategies/mh_dec_mcts_full.json`)
+  - `action_strategy`: mh_dec_mcts_full
   - `num_agents`: 4
   - `use_mcts_llp`: True (Both HLP and LLP use **full MCTS tree search**)
   - LLP (low-level planner):
@@ -65,8 +65,8 @@ Summary of the **four baselines** used for method comparison, representing an in
   - `correlation_types`: [`adaptive`, `equal`, `biased`]
   - `iters`: [0, 20]
 
-- MH-Dec-MCTS (efficient) (use `mh_dec_mcts` with `use_mcts_llp=False`)
-  - `action_strategy`: mh_dec_mcts
+- MH-Dec-MCTS (efficient)
+  - `action_strategy`: mh_dec_mcts_efficient
   - `num_agents`: 4
   - `use_mcts_llp`: False (LLP uses **random rollout sampling** as optimization)
   - LLP (low-level planner):

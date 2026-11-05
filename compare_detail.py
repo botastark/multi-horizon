@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Detailed step-by-step diagnostic: PA-Dev vs MH for IG_BS/Rinf (N=4, r=4, seed=42).
+Detailed step-by-step diagnostic: PA-Dev vs MH for IG_BS/Rinf (N=4, seed=42).
 
 Prints per-step, per-agent:
   - action chosen
@@ -55,15 +55,15 @@ def load_pa(
     seed,
     n_steps,
     n_agents=4,
-    cluster_radius=4,
+    cluster_radius=5,
     radius_multiplier=1000,
     planner_type="selfish",
-    news_inference_type="OG_single",
+    news_inference_type="LBP_single",
 ):
     """Load PA environment.
 
-    IG_BS  / R=inf : planner_type='selfish',                news_inference_type='OG_single', radius_multiplier=1000
-    IGd_BM / R=5   : planner_type='mine_IoU_async_no_pred', news_inference_type='Bypass',   radius_multiplier=5
+    IG_BS  / R=inf : planner_type='selfish',                news_inference_type='LBP_single', radius_multiplier=1000
+    IGd_BM / R=5   : planner_type='mine_IoU_async_no_pred', news_inference_type='LBP_multi', radius_multiplier=5
     """
     spec = importlib.util.spec_from_file_location(
         "pa_simulator", os.path.join(PA_SRC, "simulator.py")
@@ -127,7 +127,10 @@ def load_pa(
     # draws after reset()).  All agents share the same object so they draw from
     # one sequential stream matching MH's single-RNG draw order.
     shared_obs_rng = np.random.default_rng(seed)
+    shared_plan_rng = np.random.default_rng(seed)
     for ag in env.agents:
+        ag.obs_rng = shared_obs_rng
+        ag.plan_rng = shared_plan_rng
         ag.rng = shared_obs_rng
 
     return pa_sim, env, mapper, planner, gt, iep
@@ -136,11 +139,11 @@ def load_pa(
 # ──────────────────────────────────────────────────────────────────────────────
 # MH loader
 # ──────────────────────────────────────────────────────────────────────────────
-def load_mh(seed, n_steps, cluster_radius=4, mode="IG_BS"):
+def load_mh(seed, n_steps, cluster_radius=5, mode="IG_BS"):
     """Load MH environment.
 
     mode='IG_BS'  : baseline_greedy_ig_bs_rinf.json,  news_sharing=True,  coord_news_mode='BS', radius=-1 (inf)
-    mode='IGd_BM' : baseline_greedy_igd_bm_r5.json,   news_sharing=False, coord_news_mode='BM', radius=5, enable_discounting=True
+    mode='IGd_BM' : baseline_greedy_igd_bm_r5.json,   news_sharing=True,  coord_news_mode='BM', radius=5, enable_discounting=True
     """
     if mode == "IGd_BM":
         cfg_name = "baseline_greedy_igd_bm_r5.json"
@@ -161,10 +164,10 @@ def load_mh(seed, n_steps, cluster_radius=4, mode="IG_BS"):
     dec = config.setdefault("decentralized", {})
     if mode == "IGd_BM":
         dec["position_sharing"] = True
-        dec["news_sharing"] = False
+        dec["news_sharing"] = True
         dec["radius_multiplier"] = 5
         config.setdefault("multi_agent", {})["news_mode"] = "BM"
-        config["multi_agent"]["news_inference_type"] = "Bypass"
+        config["multi_agent"]["news_inference_type"] = "LBP"
         config.setdefault("greedy_ig", {})["enable_discounting"] = True
         coord_news_mode = "BM"
     else:  # IG_BS
@@ -172,7 +175,7 @@ def load_mh(seed, n_steps, cluster_radius=4, mode="IG_BS"):
         dec["news_sharing"] = True
         dec.setdefault("radius_multiplier", -1)
         config.setdefault("multi_agent", {})["news_mode"] = "BS"
-        config["multi_agent"]["news_inference_type"] = "OG"
+        config["multi_agent"]["news_inference_type"] = "LBP"
         coord_news_mode = "BS"
     config["multi_agent"]["fusion_eps"] = 0.0
     config["multi_agent"]["metric_aggregation"] = "fused_mean"
@@ -270,7 +273,17 @@ def load_mh(seed, n_steps, cluster_radius=4, mode="IG_BS"):
         debug_logs=False,
     )
 
-    return config, grid_info, coordinator, agents, gt, conf_dict, hrange, map_obj, simulator
+    return (
+        config,
+        grid_info,
+        coordinator,
+        agents,
+        gt,
+        conf_dict,
+        hrange,
+        map_obj,
+        simulator,
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -363,6 +376,29 @@ def mh_select_actions(agents, coordinator, grid_info, simulator=None, step=0):
         action, scores = planner.select_action(belief2d, None)
         agent["actions"].append(action)
         actions[aid] = action
+    return actions
+
+
+def canonical_actions(action_data_by_agent, atol=1e-9):
+    priority = {
+        "left": 0,
+        "right": 1,
+        "front": 2,
+        "back": 3,
+        "up": 4,
+        "down": 5,
+        "hover": 6,
+    }
+    actions = []
+    for data in action_data_by_agent:
+        scores = data["admissible_action_to_IG"]
+        best_value = max(score[0] for score in scores.values())
+        best_actions = [
+            action
+            for action, score in scores.items()
+            if np.isclose(score[0], best_value, rtol=0.0, atol=atol)
+        ]
+        actions.append(min(best_actions, key=lambda action: priority.get(action, 99)))
     return actions
 
 
@@ -473,8 +509,14 @@ def print_agent_comparison(
 # ──────────────────────────────────────────────────────────────────────────────
 # PA settings per mode
 _PA_MODE_SETTINGS = {
-    "IG_BS":  dict(planner_type="selfish",                news_inference_type="OG_single", radius_multiplier=1000),
-    "IGd_BM": dict(planner_type="mine_IoU_async_no_pred", news_inference_type="Bypass",   radius_multiplier=5),
+    "IG_BS": dict(
+        planner_type="selfish", news_inference_type="LBP_single", radius_multiplier=1000
+    ),
+    "IGd_BM": dict(
+        planner_type="mine_IoU_async_no_pred",
+        news_inference_type="LBP_multi",
+        radius_multiplier=5,
+    ),
 }
 
 
@@ -482,8 +524,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--steps", type=int, default=3)
     ap.add_argument("--seed", type=int, default=42)
-    ap.add_argument("--mode", choices=["IG_BS", "IGd_BM"], default="IG_BS",
-                    help="IG_BS=selfish/OG_single/Rinf  IGd_BM=mine_IoU/Bypass/R5")
+    ap.add_argument(
+        "--mode",
+        choices=["IG_BS", "IGd_BM"],
+        default="IG_BS",
+        help="IG_BS=selfish/LBP_single/Rinf  IGd_BM=mine_IoU/LBP_multi/R5",
+    )
     args = ap.parse_args()
 
     pa_settings = _PA_MODE_SETTINGS[args.mode]
@@ -503,9 +549,7 @@ def main():
         hrange,
         map_obj,
         mh_simulator,
-    ) = load_mh(
-        args.seed, args.steps, mode=args.mode
-    )
+    ) = load_mh(args.seed, args.steps, mode=args.mode)
 
     # ── Map comparison ────────────────────────────────────────────────────────
     print(f"\n{'═'*80}")
@@ -552,16 +596,18 @@ def main():
         )
 
     # ── Step-by-step loop ─────────────────────────────────────────────────────
-    pa_observations = []  # PA observations from previous step
+    # Keep this order aligned with compare_greedy_ig.py and Simulator.run():
+    # metrics -> plan -> move -> observe/update -> fuse.
+    pa_observations = []  # PA observations from the previous post-move update
     mh_news_sharing = config.get("decentralized", {}).get("news_sharing", True)
 
     for step in range(args.steps):
         print_step_header(step)
 
-        # ── Entropy BEFORE any sensing (pure prior at step 0) ─────────────────
+        # ── Metrics BEFORE this step's planning/movement/sensing ──────────────
         pa_ent_before = pa_entropy_total(pa_sim)
         mh_ent_before = mh_entropy_total(mh_agents)
-        print(f"\n  Entropy BEFORE observe/fuse:")
+        print(f"\n  Entropy BEFORE planning:")
         print(
             f"    PA fused={pa_ent_before:.2f}   MH fused={mh_ent_before:.2f}   Δ={mh_ent_before-pa_ent_before:+.2f}"
         )
@@ -576,55 +622,12 @@ def main():
                     f"  ⚠ Agent {ag.id} per-agent belief diff before planning: max={max_diff:.6e}"
                 )
 
-        # ── PA: observe + fuse ────────────────────────────────────────────────
-        obs_raw = env.get_observations(pa_gt)  # returns list of dicts per agent
-        # extract PA observation details before belief update
-        pa_obs_detail = {}
+        # ── Plan from current beliefs and previous observations ──────────────
         for ag in env.agents:
-            aid = ag.id
-            fp_ij, _ = ag.camera.get_fp_vertices_ij(ag.state.position)
-            rmin = fp_ij["ul"][0]
-            rmax = fp_ij["bl"][0]
-            cmin = fp_ij["ul"][1]
-            cmax = fp_ij["ur"][1]
-            patch = pa_gt[rmin:rmax, cmin:cmax]
-            s0 = a0 * (1 - np.exp(-b0 * ag.state.position[2]))
-            s1 = a1 * (1 - np.exp(-b1 * ag.state.position[2]))
-            pa_obs_detail[aid] = {
-                "fp": f"rows [{rmin},{rmax}] cols [{cmin},{cmax}] ({rmax-rmin}×{cmax-cmin} cells)",
-                "n_cells": patch.size,
-                "gt_mean": float(patch.mean()) if patch.size > 0 else 0.0,
-                "s0": s0,
-                "s1": s1,
-            }
-        mapper.set_pairwise_potential_z(env.agents, obs_raw)
-        mapper.update_map_beliefs(env.agents, obs_raw)
-
-        pa_ent_after_local = pa_entropy_total(pa_sim)
-
-        mapper.update_news_and_fuse_map_beliefs(env.agents, obs_raw)
-        pa_observations = obs_raw
-
-        pa_ent_after_fuse = pa_entropy_total(pa_sim)
-
-        # ── MH: observe + fuse ───────────────────────────────────────────────
-        mh_obs_detail_raw = {}
-        # capture pre-observation beliefs
-        mh_beliefs_before = {
-            a["agent_id"]: a["belief_map"][:, :, 1].copy() for a in mh_agents
-        }
-
-        mh_obs_raw = mh_observe(coordinator, mh_agents, map_obj, conf_dict)
-
-        mh_ent_after_local = mh_entropy_total(mh_agents)
-
-        mh_fuse(coordinator, mh_agents, mh_obs_raw, news_sharing=mh_news_sharing)
-
-        mh_ent_after_fuse = mh_entropy_total(mh_agents)
-
-        # ── Plan after observation/fusion, matching compare_greedy_ig.py ─────
+            ag.rng = ag.plan_rng
         planner.compute_map_belief_entropies()
-        pa_actions, pa_plan_data = planner.get_actions(env.agents, obs_raw)
+        pa_actions, pa_plan_data = planner.get_actions(env.agents, pa_observations)
+        pa_actions = canonical_actions(pa_plan_data)
         mh_actions = mh_select_actions(
             mh_agents, coordinator, grid_info, simulator=mh_simulator, step=step
         )
@@ -647,6 +650,46 @@ def main():
         # ── Move after planning ───────────────────────────────────────────────
         pa_step(env, pa_actions)
         mh_step(mh_agents, mh_actions, coordinator, grid_info)
+
+        # ── PA: observe + fuse at the new positions ──────────────────────────
+        for ag in env.agents:
+            ag.rng = ag.obs_rng
+        obs_raw = env.get_observations(pa_gt)  # returns list of dicts per agent
+        pa_obs_detail = {}
+        for ag in env.agents:
+            aid = ag.id
+            fp_ij, _ = ag.camera.get_fp_vertices_ij(ag.state.position)
+            rmin = fp_ij["ul"][0]
+            rmax = fp_ij["bl"][0]
+            cmin = fp_ij["ul"][1]
+            cmax = fp_ij["ur"][1]
+            patch = pa_gt[rmin:rmax, cmin:cmax]
+            s0 = a0 * (1 - np.exp(-b0 * ag.state.position[2]))
+            s1 = a1 * (1 - np.exp(-b1 * ag.state.position[2]))
+            pa_obs_detail[aid] = {
+                "fp": f"rows [{rmin},{rmax}] cols [{cmin},{cmax}] ({rmax-rmin}×{cmax-cmin} cells)",
+                "n_cells": patch.size,
+                "gt_mean": float(patch.mean()) if patch.size > 0 else 0.0,
+                "s0": s0,
+                "s1": s1,
+            }
+
+        mapper.set_pairwise_potential_z(env.agents, obs_raw)
+
+        mapper.update_map_beliefs(env.agents, obs_raw)
+        pa_ent_after_local = pa_entropy_total(pa_sim)
+
+        mapper.update_news_and_fuse_map_beliefs(env.agents, obs_raw)
+        pa_observations = obs_raw
+        pa_ent_after_fuse = pa_entropy_total(pa_sim)
+
+        # ── MH: observe + fuse at the new positions ──────────────────────────
+        mh_obs_detail_raw = {}
+        mh_obs_raw = mh_observe(coordinator, mh_agents, map_obj, conf_dict)
+        mh_ent_after_local = mh_entropy_total(mh_agents)
+
+        mh_fuse(coordinator, mh_agents, mh_obs_raw, news_sharing=mh_news_sharing)
+        mh_ent_after_fuse = mh_entropy_total(mh_agents)
 
         for aid, obs in mh_obs_raw.items():
             fp = obs["fp_ij"]

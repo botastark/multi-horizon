@@ -9,7 +9,7 @@
   "shared": {
     "project_path": "./",
     "field_type": "Gaussian",
-    "cluster_radius": 4,
+    "cluster_radius": 5,
     "start_position": "corner",
     "num_agents": 4,
     "n_steps": 100,
@@ -27,7 +27,9 @@
 
   "decentralized": {
     "_comment": "R=5: radius_multiplier=5, comm_range = 5 × 3.125 = 15.625m",
-    "radius_multiplier": 5
+    "radius_multiplier": 5,
+    "news_sharing": true,
+    "position_sharing": true
   },
 
   "multi_agent": {
