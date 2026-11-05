@@ -8,6 +8,7 @@ belief is updated. A single noisy observation can raise footprint entropy (only 
 change is a decrease), so the realized per-step IG is reported rather than asserted.
 """
 
+import csv
 import os
 import sys
 from types import SimpleNamespace
@@ -28,7 +29,8 @@ from greedy_ig_planner import create_greedy_ig_planner
 from dec_mcts import DecMCTSPlanner
 from hierarchical_dec_mcts import create_hierarchical_planner, IntentBus
 
-N_STEPS = 20
+N_STEPS = 100
+DEC_HORIZON = 5
 SEED = 42
 CLUSTER_RADIUS = 5
 SENSOR_A, SENSOR_B = 1.0, 0.015
@@ -96,11 +98,11 @@ def plan_greedy(cam, conf_dict, belief, pos, alt):
 def plan_dec_mcts(cam, conf_dict, belief, pos, alt):
     planner = DecMCTSPlanner(
         agent_id=0, camera=cam, grid_info=GRID, conf_dict=conf_dict,
-        config={"horizon": N_STEPS, "iterations": 20, "timeout": 30.0}, seed=0,
+        config={"horizon": DEC_HORIZON, "iterations": 20, "timeout": 30.0}, seed=0,
     )
     planner.update_state(pos, alt, belief)
     intent = planner.plan()
-    assert 1 <= len(intent.action_sequence) <= N_STEPS, "dec-mcts plan empty or longer than horizon"
+    assert 1 <= len(intent.action_sequence) <= DEC_HORIZON, "dec-mcts plan empty or longer than horizon"
     assert len(intent.ig_sequence) == len(intent.action_sequence), "dec-mcts ig/action length mismatch"
     return intent.action_sequence[0], dict(planner._mcts_action_values)
 
@@ -163,6 +165,7 @@ def run_planner(name, plan_fn, gt):
                         "ig": ig_table, "own": own_scores,
                         "fp": cam.get_range(position=pos, altitude=alt),
                         "entropy": entropy, "mse": mse, "coverage": coverage})
+        print(f"  [{name}] step {step}: {action}", flush=True)
 
     assert not np.all(belief[..., 1] == 0.5), f"{name}: belief never updated"
     return start_alt, records, path, belief[..., 1].copy()
@@ -264,10 +267,27 @@ def plot_metrics_comparison(records_by_planner, out_path):
     plt.close(fig)
 
 
+def save_step_table(records_by_planner, out_path):
+    """CSV with one row per step; each planner column holds 'action | one-step IG per action'."""
+    names = list(records_by_planner)
+    n_steps = len(next(iter(records_by_planner.values())))
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["step"] + names)
+        for step in range(n_steps):
+            row = [step]
+            for name in names:
+                rec = records_by_planner[name][step]
+                row.append(f"{rec['action']} | {format_ig(rec['ig'])}")
+            writer.writerow(row)
+
+
 def test_planners_run_on_same_map(out_path=None):
     gt = make_ground_truth()
     paths, footprints, beliefs, records_by_planner = {}, {}, {}, {}
     for name, plan_fn in PLANNERS.items():
+        print(f"\nRunning planner {name}...")
         start_alt, records, path, belief = run_planner(name, plan_fn, gt)
         paths[name] = path
         footprints[name] = [rec["fp"] for rec in records]
@@ -279,12 +299,18 @@ def test_planners_run_on_same_map(out_path=None):
             print(f"    one-step IG per action: {format_ig(rec['ig'])}")
             if rec["own"] is not None:
                 print(f"    planner's own scores:   {format_ig(rec['own'])}")
+        print(f"  final metrics: entropy={round(records[-1]['entropy'], 3)} "
+              f"mse={round(records[-1]['mse'], 3)} coverage={round(records[-1]['coverage'], 3)}")
+        
     out_path = out_path or os.path.join(os.path.dirname(__file__), "..", "experiments", "temp", "planner_viewer_plot.png")
     plot_viewer_style(paths, footprints, beliefs, gt, out_path)
     print(f"\npath plot saved to {os.path.normpath(out_path)}")
     metrics_path = os.path.join(os.path.dirname(out_path), "planner_metrics.png")
     plot_metrics_comparison(records_by_planner, metrics_path)
     print(f"metrics plot saved to {os.path.normpath(metrics_path)}")
+    table_path = os.path.join(os.path.dirname(out_path), "planner_steps.csv")
+    save_step_table(records_by_planner, table_path)
+    print(f"step table saved to {os.path.normpath(table_path)}")
 
 
 if __name__ == "__main__":
