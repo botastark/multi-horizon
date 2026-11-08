@@ -1,5 +1,6 @@
 import copy
 import numpy as np
+from typing import Any
 from helper import uav_position, H, expected_posterior
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -101,7 +102,7 @@ class MCTSNode(SearchNodeOps):
         # all possible actions have been tried
         return len(self.untried_actions) == 0
 
-    def best_child(self, c_param=1.4):
+    def best_child(self, c_param=1.4) -> "MCTSNode":
         # select child using UCB:the highest Upper Confidence Bound
         best_node, best_score = None, -float("inf")
 
@@ -116,6 +117,8 @@ class MCTSNode(SearchNodeOps):
                 ucb = exploitation + exploration
             if ucb > best_score:
                 best_score, best_node = ucb, child
+        if best_node is None:
+            raise RuntimeError("Node has no selectable child")
         return best_node
 
     def is_terminal(self):
@@ -356,7 +359,7 @@ class MCTSPlanner:
             rng=rng, discount_factor=self.discount_factor, max_depth=self.max_depth
         )
 
-    def search(self, num_iterations=100, timeout=None, return_action_scores=False):
+    def search(self, num_iterations=100, timeout=None, return_action_scores=False) -> Any:
         start_time = time.time()
         if self.parallel == 1:
             # Serial execution (default)
@@ -435,7 +438,7 @@ class MCTSPlanner:
         """
         node = self.root
         actions = []
-        states = [copy_state(node.state)] if return_states else None
+        states = [copy_state(node.state)] if return_states else []
         depth = 0
 
         while node.children:

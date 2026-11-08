@@ -648,7 +648,7 @@ def _draw_regions_on_axis(ax, region_metadata, selected_region_id, region_scores
             text_color = "white"
         else:
             # Use contrasting text color based on fill brightness
-            if norm and region_id in region_scores:
+            if norm and region_scores is not None and region_id in region_scores:
                 brightness = norm(region_scores[region_id])
                 text_color = "white" if brightness > 0.5 else "black"
             else:

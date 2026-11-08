@@ -1,3 +1,4 @@
+from typing import Optional
 import os
 import sys
 import logging
@@ -13,7 +14,7 @@ _original_stdout = sys.stdout
 _original_stderr = sys.stderr
 
 
-def setup_main_logger(log_dir: str = "logs", experiment_name: str = None) -> str:
+def setup_main_logger(log_dir: str = "logs", experiment_name: Optional[str] = None) -> str:
     """
     Set up main logger to redirect all output to a file.
 

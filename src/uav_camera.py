@@ -1,3 +1,4 @@
+from typing import Optional
 import math
 import numpy as np
 from helper import uav_position
@@ -38,7 +39,7 @@ class Camera:
         h_step=None,
         f_overlap=None,
         s_overlap=None,
-        camera_altitude=0.0,
+        camera_altitude: Optional[float] = 0.0,
         camera_pos=(0.0, 0.0),
         seed=42,
         a=1,
@@ -61,7 +62,7 @@ class Camera:
         """
 
         self.grid = grid
-        self.altitude = camera_altitude
+        self.altitude: float = 0.0 if camera_altitude is None else camera_altitude
         self.position = camera_pos
         self.rng = np.random.default_rng(seed)
         self.fov = fov_angle
@@ -76,6 +77,8 @@ class Camera:
             self.y_range = [0, self.grid.y]
         # Compute horizontal step size (xy_step) based on overlaps and FoV.
         if f_overlap != None and s_overlap != None:
+            if camera_altitude is None:
+                raise ValueError("camera_altitude is required when overlaps are set")
             # Compute horizontal step size (xy_step) based on overlaps and FoV.
             theta_h = np.deg2rad(self.fov)  # Vertical FoV (radians)
 
@@ -97,7 +100,7 @@ class Camera:
         else:
             self.h_step = h_step
         # Ensure altitude is set (if initially 0, use h_step).
-        if self.altitude == 0 or self.altitude is None:
+        if self.altitude == 0:
             self.altitude = self.h_step
             # Define permissible altitude range (from current altitude to five steps above).
         self.h_range = (self.altitude, self.altitude + 5 * self.h_step)

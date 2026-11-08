@@ -314,6 +314,8 @@ def run_pa(
     spec = importlib.util.spec_from_file_location(
         "pa_simulator", os.path.join(PA_SRC, "simulator.py")
     )
+    if spec is None or spec.loader is None:
+        raise ImportError("Cannot load the PA-Dev simulator module")
     pa_sim = importlib.util.module_from_spec(spec)
     # Temporarily add PA_SRC so PA's intra-module imports resolve correctly
     sys.path.insert(0, PA_SRC)

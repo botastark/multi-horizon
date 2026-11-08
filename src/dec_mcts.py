@@ -83,10 +83,10 @@ class DecMCTSNode(SearchNodeOps):
         state: Dict,
         camera,
         parent=None,
-        action: str = None,
-        conf_dict: Dict = None,
-        config: Dict = None,
-        seed: int = None,
+        action: Optional[str] = None,
+        conf_dict: Optional[Dict] = None,
+        config: Optional[Dict] = None,
+        seed: Optional[int] = None,
     ):
         self.state = copy_state(state)
         self.parent = parent
@@ -120,7 +120,7 @@ class DecMCTSNode(SearchNodeOps):
             return False
         return self.state.get("remaining_steps", 1) <= 0
 
-    def best_child(self, c_param: float = 1.4) -> "DecMCTSNode":
+    def best_child(self, c_param: float = 1.4) -> Optional["DecMCTSNode"]:
         """Select best child using UCB1."""
         best_node, best_score = None, -float("inf")
 
@@ -408,6 +408,12 @@ class DecMCTSPlanner:
         self.altitude = altitude
         self.belief = belief.copy()
 
+    def _require_state(self) -> Tuple[Tuple[float, float], float, np.ndarray]:
+        """Return (position, altitude, belief), which update_state must have set."""
+        if self.position is None or self.altitude is None or self.belief is None:
+            raise RuntimeError("update_state must be called before planning")
+        return self.position, self.altitude, self.belief
+
     def update_teammate_intents(
         self,
         intents: Dict[int, DecMCTSIntent],
@@ -423,7 +429,7 @@ class DecMCTSPlanner:
         Returns:
             2D mask where values indicate teammate coverage probability
         """
-        H_grid, W_grid = self.belief.shape[:2]
+        H_grid, W_grid = self._require_state()[2].shape[:2]
         mask = np.zeros((H_grid, W_grid), dtype=float)
 
         for teammate_id, intent in self._teammate_intents.items():
@@ -458,10 +464,11 @@ class DecMCTSPlanner:
         start_time = time.perf_counter()  # High-resolution timer
 
         # Build initial state
-        uav_pos = uav_position((self.position, self.altitude))
+        position, altitude, belief = self._require_state()
+        uav_pos = uav_position((position, altitude))
         state = {
             "uav_pos": uav_pos,
-            "belief": self.belief.copy(),
+            "belief": belief.copy(),
             "remaining_steps": self.config["horizon"],
             "teammate_mask": self._compute_teammate_mask(),
         }
@@ -537,7 +544,10 @@ class DecMCTSPlanner:
                 path.append(child)
                 return child, path
             else:
-                node = node.best_child(c_param=self.config["ucb_c"])
+                best_child = node.best_child(c_param=self.config["ucb_c"])
+                if best_child is None:
+                    raise RuntimeError("Fully expanded node has no selectable child")
+                node = best_child
                 path.append(node)
 
         return node, path
@@ -556,25 +566,24 @@ class DecMCTSPlanner:
                 action_values[action] = 0.0
 
         # Select action with highest average value
-        best_action = max(action_values, key=action_values.get)
+        best_action = max(action_values, key=lambda a: action_values[a])
 
         return best_action, action_values
 
     def _extract_trajectory(
         self,
         root: DecMCTSNode,
-        first_action: str = None,
-        max_depth: int = None,
+        first_action: Optional[str] = None,
+        max_depth: Optional[int] = None,
     ) -> List[Dict]:
         """Extract best trajectory from MCTS tree, starting with first_action if given."""
-        if max_depth is None:
-            max_depth = self.config["horizon"]
+        depth_limit: int = self.config["horizon"] if max_depth is None else max_depth
 
         trajectory = []
         node = root
         depth = 0
 
-        while node.children and depth < max_depth:
+        while node.children and depth < depth_limit:
             if depth == 0 and first_action in node.children:
                 best_child = node.children[first_action]
             else:
@@ -618,8 +627,9 @@ class DecMCTSPlanner:
     ) -> DecMCTSIntent:
         """Build intent from action and trajectory."""
         action_sequence = [step["action"] for step in trajectory] or [action]
-        position_sequence = [self.position]
-        altitude_sequence = [self.altitude]
+        position, altitude, _ = self._require_state()
+        position_sequence = [position]
+        altitude_sequence = [altitude]
         footprint_sequence = []
         ig_sequence = []
 
