@@ -93,7 +93,6 @@ class FakeCamera:
         y_max = min(pos[1] + y_dist, self.y_range[1])
 
         rows, cols = self.grid.shape
-        cx, cy = 0.0, 0.0  # centered grid
 
         def xy_to_ij(x, y):
             col = int((x - self.x_range[0]) / self.grid.length)
@@ -165,7 +164,7 @@ def test_raw_entropy_ig_ignores_altitude():
     area_low = max(0, fp_low[1] - fp_low[0]) * max(0, fp_low[3] - fp_low[2])
     area_high = max(0, fp_high[1] - fp_high[0]) * max(0, fp_high[3] - fp_high[2])
 
-    print(f"\n[TEST 1] Raw-entropy IG vs altitude (uniform 0.5 belief):")
+    print("\n[TEST 1] Raw-entropy IG vs altitude (uniform 0.5 belief):")
     print(
         f"  Low alt  ({alt_low:.1f}m): footprint area={area_low} cells, IG={ig_low:.2f}"
     )
@@ -227,7 +226,7 @@ def test_sensor_aware_ig_favours_descent():
     ig_low_raw = raw_entropy_ig(belief, *fp_low)
     ig_high_raw = raw_entropy_ig(belief, *fp_high)
 
-    print(f"\n[TEST 2] Sensor-aware vs raw-entropy IG after high-alt coverage:")
+    print("\n[TEST 2] Sensor-aware vs raw-entropy IG after high-alt coverage:")
     print(f"  sigma low={sig_low:.4f}, sigma high={sig_high:.4f}")
     print(
         f"  Raw-entropy  IG — low: {ig_low_raw:.2f}, high: {ig_high_raw:.2f}  → prefers {'high' if ig_high_raw>ig_low_raw else 'low'}"
@@ -288,7 +287,7 @@ def test_residual_entropy_higher_after_high_alt_coverage():
     mean_entropy_low = float(np.mean(H(belief_low)))
     mean_entropy_high = float(np.mean(H(belief_high)))
 
-    print(f"\n[TEST 3] Residual entropy after single observation:")
+    print("\n[TEST 3] Residual entropy after single observation:")
     print(
         f"  sigma low={sig_low:.4f} → mean cell entropy after obs: {mean_entropy_low:.4f}"
     )
@@ -418,7 +417,7 @@ def test_summary_diagnosis():
     pos = (0.0, 0.0)
     altitudes = np.linspace(cam.h_range[0], cam.h_range[1], 7)
 
-    print(f"\n[TEST 5] IG vs altitude at centre position (post full-coverage belief):")
+    print("\n[TEST 5] IG vs altitude at centre position (post full-coverage belief):")
     print(
         f"  {'Alt':>8}  {'sigma':>8}  {'Footprint':>10}  {'Raw IG':>10}  {'Sensor IG':>10}  {'Raw/cell':>10}  {'Sens/cell':>10}"
     )
@@ -457,15 +456,15 @@ def test_summary_diagnosis():
         for i in range(len(per_cell_sensor) - 1)
     ), "Sensor-aware IG per cell must decrease with altitude (less precise sensor)"
 
-    print(f"\n  CONCLUSION:")
+    print("\n  CONCLUSION:")
     print(
-        f"  → Raw-entropy IG always prefers max altitude (monotone ↑) — NO descent incentive"
+        "  → Raw-entropy IG always prefers max altitude (monotone ↑) — NO descent incentive"
     )
     print(
-        f"  → Sensor-aware IG per cell always prefers min altitude (monotone ↓) — descent incentive exists"
+        "  → Sensor-aware IG per cell always prefers min altitude (monotone ↓) — descent incentive exists"
     )
     print(
-        f"  → This is why altitude doesn't decrease after coverage=1 in current MH code"
+        "  → This is why altitude doesn't decrease after coverage=1 in current MH code"
     )
 
 

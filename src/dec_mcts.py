@@ -27,34 +27,16 @@ import numpy as np
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass, field
 import time
-import logging
-import copy
 import threading
 
 from helper import StalenessMixin, uav_position, H, expected_posterior
 from mcts import SearchNodeOps, copy_state
 
-logger = logging.getLogger(__name__)
 
 
 # =============================================================================
 # Helper Functions
 # =============================================================================
-
-
-def copy_state(state: Dict) -> Dict:
-    """Deep copy state dict with efficient numpy copy."""
-    new_state = {
-        "uav_pos": copy.deepcopy(state["uav_pos"]),
-        "belief": state["belief"].copy(),
-    }
-    if "remaining_steps" in state:
-        new_state["remaining_steps"] = int(state["remaining_steps"])
-    if "covered_mask" in state:
-        new_state["covered_mask"] = state["covered_mask"].copy()
-    if "teammate_mask" in state:
-        new_state["teammate_mask"] = state["teammate_mask"].copy()
-    return new_state
 
 
 # =============================================================================
@@ -81,39 +63,12 @@ class DecMCTSIntent(StalenessMixin):
     total_expected_ig: float = 0.0
     timestamp: float = field(default_factory=time.time)
 
-    def is_stale(self, max_age: float = 2.0) -> bool:
-        """Check if intent is stale."""
-        return time.time() - self.timestamp > max_age
-
-    def staleness_discount(
-        self, decay_factor: float = 0.9, threshold_sec: float = 2.0
-    ) -> float:
-        """
-        Compute D-UCT discount factor based on intent age.
-
-        Returns:
-        - 1.0 = fresh intent
-        - <1.0 = stale intent (reduced influence)
-        """
-        age = time.time() - self.timestamp
-        staleness = max(0, age / threshold_sec)
-        return decay_factor**staleness
-
-    def get_future_footprints(
-        self, max_steps: int = None
-    ) -> List[Tuple[int, int, int, int]]:
-        """Get future footprints up to max_steps."""
-        if max_steps is None:
-            return self.footprint_sequence
-        return self.footprint_sequence[:max_steps]
-
-
 # =============================================================================
 # Dec-MCTS Node
 # =============================================================================
 
 
-class DecMCTSNode:
+class DecMCTSNode(SearchNodeOps):
     """
     MCTS tree node for Dec-MCTS planning.
 
@@ -147,8 +102,6 @@ class DecMCTSNode:
         # Available actions at this state
         self.untried_actions = sorted(camera.permitted_actions(self.state["uav_pos"]))
 
-        # Thread safety
-        self.lock = threading.Lock()
         # Use provided seed or inherit from parent for reproducibility
         if seed is not None:
             self._rng = np.random.default_rng(seed)
@@ -226,22 +179,6 @@ class DecMCTSNode:
 
         return ig_reward - overlap_penalty, ig_reward
 
-    def apply_action(self, state: Dict, action: str, copy_belief: bool = True) -> Dict:
-        """Apply action to state and return new state."""
-        if copy_belief:
-            next_state = copy_state(state)
-        else:
-            next_state = state
-
-        next_state["uav_pos"] = uav_position(
-            self.camera.x_future(action, x=state["uav_pos"])
-        )
-
-        if "remaining_steps" in next_state:
-            next_state["remaining_steps"] = max(0, next_state["remaining_steps"] - 1)
-
-        return next_state
-
     def _get_sensor_params(self, altitude: float) -> Tuple[float, float]:
         """Return (s0, s1) sensor noise for altitude. See helper.get_sensor_params."""
         from helper import get_sensor_params
@@ -303,24 +240,6 @@ class DecMCTSNode:
 
         return penalty_weight * overlap_ratio
 
-    def belief_update(
-        self,
-        belief: np.ndarray,
-        imin: int,
-        imax: int,
-        jmin: int,
-        jmax: int,
-        Pz0: np.ndarray,
-        Pz1: np.ndarray,
-        p10: np.ndarray,
-        p11: np.ndarray,
-    ) -> np.ndarray:
-        """Update belief using expected posterior."""
-        expected_post = Pz1 * p11 + Pz0 * p10
-        belief[imin:imax, jmin:jmax, 1] = expected_post
-        belief[imin:imax, jmin:jmax, 0] = 1 - expected_post
-        return belief
-
     def rollout(
         self,
         rng,
@@ -370,14 +289,6 @@ class DecMCTSNode:
             )
 
         return total_reward, trajectory
-
-    def backpropagate(self, reward: float) -> None:
-        """Backpropagate reward up the tree."""
-        node = self
-        while node is not None:
-            node.visit_count += 1
-            node.value += reward
-            node = node.parent
 
     @staticmethod
     def apply_virtual_loss(path: List["DecMCTSNode"], vloss: float = 1.0) -> None:
@@ -481,7 +392,6 @@ class DecMCTSPlanner:
 
         # MCTS action tracking for logging
         self._mcts_action_values: Dict[str, float] = {}
-        self._mcts_action_visits: Dict[str, int] = {}
 
         # RNG with seed
         self._rng = np.random.default_rng(seed)
@@ -597,9 +507,6 @@ class DecMCTSPlanner:
 
         # Store action values for logging
         self._mcts_action_values = action_values
-        self._mcts_action_visits = {
-            action: child.visit_count for action, child in root.children.items()
-        }
 
         # Build intent
         intent = self._build_intent(best_action, trajectory)
@@ -739,10 +646,6 @@ class DecMCTSPlanner:
         """Get MCTS action values (for logging)."""
         return self._mcts_action_values.copy()
 
-    def get_action_visits(self) -> Dict[str, int]:
-        """Get MCTS action visit counts (for logging)."""
-        return self._mcts_action_visits.copy()
-
     def get_statistics(self) -> Dict:
         """Get planner statistics."""
         return self._stats.copy()
@@ -777,47 +680,6 @@ class DecMCTSCoordinator:
                 aid: intent for aid, intent in self._intents.items() if aid != agent_id
             }
 
-    def get_all_intents(self) -> Dict[int, DecMCTSIntent]:
-        """Get all intents."""
-        with self._lock:
-            return self._intents.copy()
-
-
 # =============================================================================
 # Factory Function
 # =============================================================================
-
-
-def create_dec_mcts_planner(
-    agent_id: int,
-    num_agents: int,
-    camera,
-    grid_info,
-    coordinator: DecMCTSCoordinator = None,
-    config: Dict = None,
-) -> Tuple[DecMCTSPlanner, DecMCTSCoordinator]:
-    """
-    Factory function to create Dec-MCTS planner.
-
-    Args:
-        agent_id: Agent ID
-        num_agents: Total number of agents
-        camera: UAV camera model
-        grid_info: Grid information
-        coordinator: Optional existing coordinator
-        config: Planning configuration
-
-    Returns:
-        Tuple of (planner, coordinator)
-    """
-    if coordinator is None:
-        coordinator = DecMCTSCoordinator(num_agents)
-
-    planner = DecMCTSPlanner(
-        agent_id=agent_id,
-        camera=camera,
-        grid_info=grid_info,
-        config=config,
-    )
-
-    return planner, coordinator

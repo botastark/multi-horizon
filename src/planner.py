@@ -53,12 +53,6 @@ class planning:
         self.log_dir = "logs"
         self.experiment_name = None
 
-    def set_experiment_info(self, experiment_name: str, log_dir: str = None):
-        """Set experiment information for logging."""
-        self.experiment_name = experiment_name
-        if log_dir:
-            self.log_dir = log_dir
-
     def finalize_episode(self):
         """Finalize episode and log statistics for planners."""
         # Log Dec-MCTS stats
@@ -161,7 +155,6 @@ class planning:
             else:
                 self.sweep_direction = self.rng.choice(["LeftRight", "BackFront"])
 
-        # self.sweep_direction = "LeftRight"
         if self.sweep_direction == "LeftRight":
             # give priority to left or right (if one of them is present in sweep_actions, only one can be present at a time)
             if "left" in sweep_actions:
@@ -241,8 +234,6 @@ class planning:
             Tuple of (selected_action, action_scores_dict)
         """
         from greedy_ig_planner import (
-            GreedyIGPlanner,
-            log_greedy_ig_decision,
             create_greedy_ig_planner,
         )
 
@@ -288,7 +279,7 @@ class planning:
             if self.debug_logs:
                 print(f"\n[GREEDY {mode}] Agent {self.agent_id} initialized")
                 print(
-                    f"  Paper approach: pure belief-based IG (no penalties, no intents)\n"
+                    "  Paper approach: pure belief-based IG (no penalties, no intents)\n"
                 )
 
         planner = self._greedy_ig_planner
@@ -318,7 +309,6 @@ class planning:
         )
 
         # Log decision
-        teammate_info = None
         # Get action and scores
         action = decision.action
         action_scores = planner.get_action_scores()
@@ -503,7 +493,6 @@ class planning:
             Tuple of (selected_action, action_scores)
         """
         from hierarchical_dec_mcts import (
-            HierarchicalDecMCTSPlanner,
             IntentBus,
             create_hierarchical_planner,
         )
@@ -659,5 +648,4 @@ class planning:
             return_action_scores=True,
             timeout=params["timeout"],
         )
-        # print(f"MCTS seq selected action sequence: {action_seq}")
         return action, score

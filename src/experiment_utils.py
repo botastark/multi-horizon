@@ -8,17 +8,14 @@ Common utilities used across single-agent and multi-agent experiments:
 - Visualization utilities
 """
 
-import os
 import numpy as np
 from typing import Dict, List, Tuple, Optional, Any
-import logging
 
-from helper import compute_metrics, observed_m_ids, uav_position
+from helper import uav_position
 from mapper_LBP import OccupancyMap as OM
 from planner import planning
 from uav_camera import Camera
 
-logger = logging.getLogger(__name__)
 
 
 def initialize_agent(
@@ -115,120 +112,6 @@ def initialize_agent(
     return agent_state
 
 
-def compute_agent_metrics(
-    agent_state: Dict,
-    map_obj,
-    ground_truth_map,
-    grid_info,
-) -> Tuple[float, float, float]:
-    """
-    Compute metrics for a single agent.
-
-    Args:
-        agent_state: Agent state dictionary
-        map_obj: Map/environment object
-        ground_truth_map: Ground truth for comparison
-        grid_info: Grid information
-
-    Returns:
-        Tuple of (entropy, mse, coverage)
-    """
-    belief_map = agent_state["belief_map"]
-    observed_ids = agent_state["observed_ids"]
-
-    # Compute metrics
-    entropy, mse, coverage = compute_metrics(
-        map_obj, belief_map, observed_ids, grid_info, ground_truth_map
-    )
-
-    return entropy, mse, coverage
-
-
-def update_agent_observation(
-    agent_state: Dict,
-    map_obj,
-    conf_dict: Dict,
-) -> None:
-    """
-    Update agent's belief map with new observation.
-
-    Args:
-        agent_state: Agent state dictionary
-        map_obj: Map/environment object
-        conf_dict: Configuration dictionary
-    """
-    camera = agent_state["camera"]
-    uav_pos = agent_state["uav_pos"]
-    occupancy_map = agent_state["occupancy_map"]
-
-    # Get observation
-    obsd_m_ids = observed_m_ids(camera, map_obj)
-    agent_state["observed_ids"].update(obsd_m_ids)
-
-    # Update belief
-    new_belief = occupancy_map.updateBelief(
-        uav_pos, camera, map_obj, obsd_m_ids, conf_dict
-    )
-    agent_state["belief_map"] = new_belief
-
-
-def get_results_folder(
-    base_folder: str,
-    corr_type: str,
-    action_strategy: str,
-    e_margin,
-    grf_r,
-) -> str:
-    """
-    Generate results folder path.
-
-    Args:
-        base_folder: Base results directory
-        corr_type: Correlation type
-        action_strategy: Planning strategy
-        e_margin: Error margin
-        grf_r: GRF parameter
-
-    Returns:
-        Results folder path
-    """
-    e_str = f"e{e_margin}" if e_margin is not None else "eNone"
-    return f"{base_folder}/{corr_type}_{action_strategy}_{e_str}_r{grf_r}"
-
-
-def save_step_plot(
-    agent_state: Dict,
-    step: int,
-    results_folder: str,
-    iter_idx: int,
-    ground_truth_map,
-    map_obj,
-) -> None:
-    """
-    Save visualization for a single step.
-
-    Args:
-        agent_state: Agent state dictionary
-        step: Current step number
-        results_folder: Results directory
-        iter_idx: Iteration index
-        ground_truth_map: Ground truth map
-        map_obj: Map object
-    """
-    from viewer import plot_terrain_2d
-
-    save_path = f"{results_folder}/{iter_idx}/steps/step_{step}.png"
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
-
-    plot_terrain_2d(
-        map_obj,
-        agent_state["belief_map"],
-        ground_truth_map,
-        agent_state["uav_positions"],
-        save_path,
-    )
-
-
 def finalize_planners(agents: List[Dict]) -> None:
     """
     Call finalize_episode on all agent planners.
@@ -240,42 +123,6 @@ def finalize_planners(agents: List[Dict]) -> None:
         planner = agent_state["planner"]
         if hasattr(planner, "finalize_episode"):
             planner.finalize_episode()
-
-
-def compute_multi_agent_fused_metrics(
-    agents: List[Dict],
-    map_obj,
-    ground_truth_map,
-    grid_info,
-) -> Tuple[float, float, float]:
-    """
-    Compute fused metrics across all agents.
-
-    Fuses beliefs from all agents and computes global metrics.
-
-    Args:
-        agents: List of agent state dictionaries
-        map_obj: Map/environment object
-        ground_truth_map: Ground truth
-        grid_info: Grid information
-
-    Returns:
-        Tuple of (fused_entropy, fused_mse, combined_coverage)
-    """
-    # Fuse beliefs (simple averaging for now)
-    fused_belief = np.mean([agent["belief_map"] for agent in agents], axis=0)
-
-    # Combine observed cells
-    combined_observed = set()
-    for agent in agents:
-        combined_observed.update(agent["observed_ids"])
-
-    # Compute fused metrics
-    fused_entropy, fused_mse, combined_coverage = compute_metrics(
-        map_obj, fused_belief, combined_observed, grid_info, ground_truth_map
-    )
-
-    return fused_entropy, fused_mse, combined_coverage
 
 
 def extract_region_metadata(planner, action_strategy: str) -> Tuple:

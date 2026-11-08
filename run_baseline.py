@@ -46,7 +46,7 @@ def run_baseline_experiment(config_name, description):
 
     try:
         # Run the experiment (use relative path since we're in project root)
-        result = subprocess.run(
+        subprocess.run(
             [sys.executable, "src/main.py", "--config", config_path],
             check=True,
             capture_output=False,  # Show live output
@@ -97,12 +97,12 @@ def main():
     all_success = all(results.values())
 
     if all_success:
-        print(f"\n🎉 All baseline experiments completed successfully!")
-        print(f"📁 Results saved to: experiments/baseline/")
-        print(f"\n💡 You can now proceed with refactoring.")
-        print(f"   After refactoring, re-run these configs to validate results match.")
+        print("\n🎉 All baseline experiments completed successfully!")
+        print("📁 Results saved to: experiments/baseline/")
+        print("\n💡 You can now proceed with refactoring.")
+        print("   After refactoring, re-run these configs to validate results match.")
     else:
-        print(f"\n⚠️  Some experiments failed. Please check the logs.")
+        print("\n⚠️  Some experiments failed. Please check the logs.")
         return 1
 
     return 0

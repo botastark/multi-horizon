@@ -1,25 +1,8 @@
 import copy
 import numpy as np
 from helper import uav_position, H, expected_posterior
-from uav_camera import Camera
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import threading
-import psutil, os
-from typing import List, Tuple, Dict
-
-
-# @dataclass
-class LLIntent:
-    end_xy: Tuple[float, float]
-    duration: float
-    footprints: List[Tuple[np.ndarray, float]]  # list of (mask_ij, dt)
-    ig_per_sec: float
-
-
-def log_mem(prefix=""):
-    rss = psutil.Process(os.getpid()).memory_info().rss / 1e6
-    print(f"[{prefix}] Memory RSS: {rss:.1f} MB")
 
 
 def copy_state(state):
@@ -32,10 +15,41 @@ def copy_state(state):
         new_state["remaining_steps"] = int(state["remaining_steps"])
     if "covered_mask" in state:
         new_state["covered_mask"] = state["covered_mask"].copy()
+    if "teammate_mask" in state:
+        new_state["teammate_mask"] = state["teammate_mask"].copy()
     return new_state
 
 
-class MCTSNode:
+class SearchNodeOps:
+    """State transition, belief update and backup shared by MCTSNode and DecMCTSNode."""
+
+    def apply_action(self, state, action, copy_belief=True):
+        """Return the state after action; copy_belief is True in expansion, False in rollout."""
+        next_state = copy_state(state) if copy_belief else state
+        next_state["uav_pos"] = uav_position(
+            self.camera.x_future(action, x=state["uav_pos"])
+        )
+        if "remaining_steps" in next_state:
+            next_state["remaining_steps"] = max(0, next_state["remaining_steps"] - 1)
+        return next_state
+
+    def belief_update(self, belief, imin, imax, jmin, jmax, Pz0, Pz1, p10, p11):
+        """Update belief over the observed area using expected posterior."""
+        expected_post = Pz1 * p11 + Pz0 * p10
+        belief[imin:imax, jmin:jmax, 1] = expected_post
+        belief[imin:imax, jmin:jmax, 0] = 1 - expected_post
+        return belief
+
+    def backpropagate(self, reward):
+        """Add reward and one visit to this node and all its ancestors."""
+        node = self
+        while node is not None:
+            node.visit_count += 1
+            node.value += reward
+            node = node.parent
+
+
+class MCTSNode(SearchNodeOps):
     """
     A class representing a node in the Monte Carlo Tree Search (MCTS) algorithm.
     Each node corresponds to a state in the search space and contains information
@@ -56,7 +70,6 @@ class MCTSNode:
         self.camera = camera  # Camera object for action space and position updates
         self.untried_actions = sorted(camera.permitted_actions(self.state["uav_pos"]))
         self.conf_dict = conf_dict  # Optional configuration dictionary for sensor model
-        self.lock = threading.Lock()  # For thread-safe updates
         # Use provided seed or inherit from parent
         if seed is not None:
             self._rng = np.random.default_rng(seed)
@@ -78,8 +91,6 @@ class MCTSNode:
             if "down" in actions:
                 actions.remove("down")
             if (
-                # abs(s["uav_pos"].altitude - self.camera.h_range[-1]) > 1e-1
-                # and
                 "up"
                 in actions
             ):
@@ -93,7 +104,6 @@ class MCTSNode:
     def best_child(self, c_param=1.4):
         # select child using UCB:the highest Upper Confidence Bound
         best_node, best_score = None, -float("inf")
-        N = max(1, self.visit_count)
 
         for action, child in self.children.items():
             if child.visit_count == 0:
@@ -113,18 +123,6 @@ class MCTSNode:
         if "remaining_steps" not in self.state:
             return False
         return self.state.get("remaining_steps", 1) <= 0
-
-    def apply_action(self, state, action, copy_belief=True):
-        if copy_belief:
-            next_state = copy_state(state)  # used in EXPANSION
-        else:
-            next_state = state  # used in ROLLOUT
-        next_state["uav_pos"] = uav_position(
-            self.camera.x_future(action, x=state["uav_pos"])
-        )
-        if "remaining_steps" in next_state:
-            next_state["remaining_steps"] = max(0, next_state["remaining_steps"] - 1)
-        return next_state
 
     def sensor_model(self, x_future):
         a = 1
@@ -151,27 +149,6 @@ class MCTSNode:
         )
         self.children[action] = child
         return child
-
-    def belief_update(
-        self,
-        belief,
-        obsd_m_i_min,
-        obsd_m_i_max,
-        obsd_m_j_min,
-        obsd_m_j_max,
-        Pz0,
-        Pz1,
-        p_m1_z0,
-        p_m1_z1,
-    ):
-        """Update belief over the observed area using expected posterior."""
-        expected_post = Pz1 * p_m1_z1 + Pz0 * p_m1_z0
-        # belief = belief.copy()
-        belief[obsd_m_i_min:obsd_m_i_max, obsd_m_j_min:obsd_m_j_max, 1] = expected_post
-        belief[obsd_m_i_min:obsd_m_i_max, obsd_m_j_min:obsd_m_j_max, 0] = (
-            1 - expected_post
-        )
-        return belief
 
     def compute_reward(self, obs_submap, Pz0, Pz1, p_m1_z0, p_m1_z1):
         curr_entropy = H(obs_submap)
@@ -272,13 +249,10 @@ class MCTSNode:
         for t in range(max_depth):
             # 1. Get permitted actions from camera
             actions = self._filtered_actions_for_state(state)
-            # actions = self.camera.permitted_actions(state["uav_pos"])
-            # actions = sorted(self.camera.permitted_actions(state["uav_pos"]))
 
             # 2. Select an action randomly TODO could be smarter
 
             action = actions[rng.integers(len(actions))]
-            # action = np.random.choice(actions)
 
             # 3. Apply the action to get the next state
             state = self.apply_action(state, action, copy_belief=False)
@@ -317,14 +291,6 @@ class MCTSNode:
             )
 
         return total_reward
-
-    def backpropagate(self, reward):
-        # update value and visits back up to root
-        node = self
-        while node is not None:
-            node.visit_count += 1
-            node.value += reward
-            node = node.parent
 
     @staticmethod
     def apply_virtual_loss(path, vloss=1.0):
@@ -428,20 +394,7 @@ class MCTSPlanner:
                         traceback.print_exc()
                         continue
                     path = futures[fut]
-                    # node.backpropagate(reward)
                     MCTSNode.backprop_with_reward(path, reward, vloss=1.0)
-
-        # def search(self, num_iterations=100, return_action_scores=False, timeout=None):
-        #     start_time = time.time()
-        #     for _ in range(num_iterations):
-        #         if timeout is not None and (time.time() - start_time) >= timeout:
-        #             print(
-        #                 f"Timeout reached after {(time.time() - start_time):.2f} seconds."
-        #             )
-        #             break
-        #         node = self.tree_policy()
-        #         reward = node.rollout(discount_factor=self.discount_factor)
-        #         node.backpropagate(reward)
 
         best_action = self.best_action()
         if return_action_scores:
@@ -457,7 +410,6 @@ class MCTSPlanner:
         path = [node]
         while not node.is_terminal():  # You can define is_terminal if needed
             if not node.is_fully_expanded():
-                # return node.expand()
                 child = node.expand()
                 path.append(child)
                 return child, path
@@ -466,10 +418,6 @@ class MCTSPlanner:
                 path.append(node)
         return node, path
 
-    # def best_action(self):
-    #     # Choose the action from root's children with the highest visit count
-    #     best = max(self.root.children.values(), key=lambda n: n.visit_count)
-    #     return best.action_from_parent
 
     def best_action(self):
         # Choose the action from root's children with the highest avg value
@@ -491,10 +439,6 @@ class MCTSPlanner:
         depth = 0
 
         while node.children:
-            # print(
-            #     f"At d={depth}, node at {node.state['uav_pos']} has {len(node.children)} children."
-            # )
-            # print(f"children actions: {list(node.children.keys())}")
             if max_depth is not None and depth >= max_depth:
                 print(f"Reached max_depth in extract_solution depth={depth}")
             next_node = node.best_child(c_param=0.0)
@@ -506,53 +450,5 @@ class MCTSPlanner:
             if not node.children:
                 print(f"next node= {node.state['uav_pos']} has no children to continue")
             # else:
-            # print(
-            #     f"next node= {node.state['uav_pos']}  has {len(node.children)} children:{list(node.children.keys())}   "
-            # )
         return (actions, states) if return_states else actions
 
-    def visualize_tree(self, max_depth=2):
-        self.root.print_tree(max_depth=max_depth)
-
-
-def test_mcts_planner_search_and_best_action():
-    class DummyGrid:
-        def __init__(self):
-            self.x = 60
-            self.y = 110
-            self.length = 1
-            self.center = False
-            self.shape = (60, 110)
-
-    grid = DummyGrid()
-    camera = Camera(
-        grid, fov_angle=60, xy_step=1, h_range=[3, 5, 7, 12], camera_altitude=3
-    )
-    uav_pos = uav_position(((25, 40), 5))
-    state = {"uav_pos": uav_pos, "belief": np.ones((60, 110, 2)) * 0.5}
-    print(
-        f"Initial state: position=({uav_pos.position},{uav_pos.altitude}), belief shape={state['belief'].shape}"
-    )
-    planner = MCTSPlanner(
-        state, camera, conf_dict=None, discount_factor=1.0, max_depth=20, parallel=4
-    )
-    num_iterations = 100
-    action, score = planner.search(
-        num_iterations=num_iterations, return_action_scores=True
-    )
-    permitted = camera.permitted_actions(uav_pos)
-    # planner.visualize_tree(max_depth=6)
-
-    print("Permitted actions:", permitted)
-    print("Best action returned by planner:", action)
-    print("Action scores:", score)
-    assert action in permitted, "Planner should return one of the permitted actions"
-    assert (
-        planner.root.visit_count == num_iterations
-    ), "Root node visit count should equal num_iterations"
-    assert planner.root.value >= 0, "Root node value should be non-negative"
-    print("test_mcts_planner_search_and_best_action passed.")
-
-
-# if __name__ == "__main__":
-#     test_mcts_planner_search_and_best_action()

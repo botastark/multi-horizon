@@ -36,106 +36,19 @@ Baseline Comparison:
 
 import time
 import threading
-import queue
-import logging
-import random
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import Dict, List, Optional, Tuple, Any, Set
 import math
 import numpy as np
 from collections import defaultdict
 import copy
-from helper import cH as _cH, get_sensor_params as _get_sensor_params_fn
+from helper import StalenessMixin, cH as _cH, get_sensor_params as _get_sensor_params_fn
 
-logger = logging.getLogger(__name__)
 
 
 # =============================================================================
 # Detailed Logging for Hierarchical Dec-MCTS
 # =============================================================================
-
-
-def log_planning_decision(
-    agent_id: int,
-    step: int,
-    llp_action_scores: Dict[str, float],
-    hlp_region_scores: Dict[int, float],
-    selected_action: str,
-    target_region: Optional[int],
-    intents_received: Dict[str, Any],
-):
-    """
-    Log detailed planning decision with LLP scores and HLP scores.
-
-    Args:
-        agent_id: Agent ID
-        step: Current step number
-        llp_action_scores: LLP action scores (IG-only, g1)
-        hlp_region_scores: HLP region scores
-        selected_action: The action selected
-        target_region: HLP target region
-        intents_received: Summary of teammate intents received
-    """
-    logger.info("")
-    logger.info(f"{'='*60}")
-    logger.info(f"[Agent {agent_id}] PLANNING DECISION")
-    logger.info(f"{'='*60}")
-
-    # LLP Action Scores
-    logger.info("")
-    logger.info("LLP ACTION SCORES (Information Gain):")
-    sorted_actions = sorted(llp_action_scores.items(), key=lambda x: x[1], reverse=True)
-    for action, score in sorted_actions:
-        marker = " <--" if action == selected_action else ""
-        logger.info(f"  {action:8s}: {score:10.2f}{marker}")
-
-    # HLP Region Scores
-    logger.info("")
-    logger.info("HLP REGION SCORES:")
-    sorted_regions = sorted(
-        hlp_region_scores.items(), key=lambda x: x[1], reverse=True
-    )[:5]
-    for region_id, score in sorted_regions:
-        marker = " <-- TARGET" if region_id == target_region else ""
-        logger.info(f"  Region {region_id:2d}: {score:.4f}{marker}")
-
-    logger.info("")
-    logger.info(f"SELECTED ACTION: {selected_action}")
-
-    # Intents received
-    if intents_received:
-        logger.info("")
-        logger.info("INTENTS FROM TEAMMATES:")
-        for key, value in intents_received.items():
-            logger.info(f"  {key}: {value}")
-
-    logger.info(f"{'='*60}")
-
-
-def log_intent_sharing(
-    agent_id: int,
-    ll_intent_summary: Dict[str, Any],
-    hl_intent_summary: Dict[str, Any],
-):
-    """
-    Log intent sharing details.
-
-    Args:
-        agent_id: Agent ID
-        ll_intent_summary: Summary of LL intent being broadcast
-        hl_intent_summary: Summary of HL intent being broadcast
-    """
-    logger.info("")
-    logger.info(f"[Agent {agent_id}] BROADCASTING INTENTS:")
-    logger.info(
-        f"  LL Intent: actions={ll_intent_summary.get('actions', [])[:3]}..., "
-        f"total_ig={ll_intent_summary.get('total_ig', 0):.2f}"
-    )
-    logger.info(
-        f"  HL Intent: target_region={hl_intent_summary.get('target_region')}, "
-        f"region_sequence={hl_intent_summary.get('region_sequence', [])}"
-    )
 
 
 # =============================================================================
@@ -144,7 +57,7 @@ def log_intent_sharing(
 
 
 @dataclass
-class LLIntent:
+class LLIntent(StalenessMixin):
     """
     Low-Level Intent: Short-horizon motion plan.
 
@@ -172,43 +85,18 @@ class LLIntent:
     # Number of MCTS iterations behind this intent
     iterations: int = 0
 
-    def is_stale(self, max_age: float = 2.0) -> bool:
-        """Check if intent is too old to be useful."""
-        return time.time() - self.timestamp > max_age
-
-    def staleness_discount(
-        self, decay_factor: float = 0.9, threshold_sec: float = 2.0
-    ) -> float:
-        """
-        Compute D-UCT discount factor based on intent age.
-
-        Returns:
-        - 1.0 = fresh intent (full influence)
-        - <1.0 = stale intent (reduced influence)
-        """
-        age = time.time() - self.timestamp
-        staleness = max(0, age / threshold_sec)
-        return decay_factor**staleness
-
-    def get_covered_cells(self) -> Set[Tuple[int, int]]:
-        """Get set of (row, col) cells this plan will cover."""
-        cells = set()
-        for fp in self.footprint_sequence:
-            imin, imax, jmin, jmax = fp
-            for i in range(imin, imax):
-                for j in range(jmin, jmax):
-                    cells.add((i, j))
-        return cells
-
-
 @dataclass
-class HLIntent:
+class HLIntent(StalenessMixin):
     """
     High-Level Intent: Long-horizon region/cluster plan.
 
     Contains the agent's planned sequence of regions to cover,
     including estimated completion times and priority scores.
     """
+
+    STALE_MAX_AGE = 5.0  # HLP plans stay valid longer than LLP intents
+    STALE_DECAY = 0.95
+    STALE_THRESHOLD_SEC = 5.0
 
     agent_id: int
     # Sequence of region IDs the agent plans to visit
@@ -232,42 +120,9 @@ class HLIntent:
     # Number of MCTS iterations
     iterations: int = 0
 
-    def is_stale(self, max_age: float = 5.0) -> bool:
-        """Check if intent is too old (HLP has longer validity)."""
-        return time.time() - self.timestamp > max_age
-
-    def staleness_discount(
-        self, decay_factor: float = 0.95, threshold_sec: float = 5.0
-    ) -> float:
-        """
-        Compute D-UCT discount factor based on intent age.
-
-        HLP intents use slower decay since regions change less frequently.
-        """
-        age = time.time() - self.timestamp
-        staleness = max(0, age / threshold_sec)
-        return decay_factor**staleness
-
     def get_target_regions(self) -> Set[int]:
         """Get set of regions this agent intends to cover."""
         return set(self.region_sequence)
-
-
-@dataclass
-class BeliefUpdate:
-    """
-    Belief update message for sharing local observations.
-    """
-
-    agent_id: int
-    # Updated cell probabilities: {(row, col): probability}
-    cell_updates: Dict[Tuple[int, int], float] = field(default_factory=dict)
-    # Observed region mask (compressed)
-    observed_mask_bounds: Optional[Tuple[int, int, int, int]] = None
-    # Timestamp
-    timestamp: float = field(default_factory=time.time)
-    # Step number
-    step: int = 0
 
 
 # =============================================================================
@@ -304,9 +159,6 @@ class IntentBus:
         self._ll_history: Dict[int, List[LLIntent]] = defaultdict(list)
         self._hl_history: Dict[int, List[HLIntent]] = defaultdict(list)
 
-        # Belief updates queue
-        self._belief_updates: queue.Queue = queue.Queue(maxsize=100)
-
         # Thread safety
         self._lock = threading.RLock()
 
@@ -335,14 +187,6 @@ class IntentBus:
                 self._hl_history[intent.agent_id].pop(0)
             self._stats["hl_broadcasts"] += 1
 
-    def broadcast_belief_update(self, update: BeliefUpdate) -> None:
-        """Broadcast belief update (non-blocking, drops if full)."""
-        try:
-            self._belief_updates.put_nowait(update)
-            self._stats["belief_broadcasts"] += 1
-        except queue.Full:
-            pass  # Drop old updates if queue is full
-
     def get_all_ll_intents(
         self, exclude_agent: Optional[int] = None
     ) -> Dict[int, LLIntent]:
@@ -368,16 +212,6 @@ class IntentBus:
     def get_teammate_hl_intents(self, agent_id: int) -> Dict[int, HLIntent]:
         """Get HL intents from all teammates (excluding self)."""
         return self.get_all_hl_intents(exclude_agent=agent_id)
-
-    def get_pending_belief_updates(self) -> List[BeliefUpdate]:
-        """Get all pending belief updates (non-blocking)."""
-        updates = []
-        while True:
-            try:
-                updates.append(self._belief_updates.get_nowait())
-            except queue.Empty:
-                break
-        return updates
 
     def get_statistics(self) -> Dict[str, int]:
         """Get bus statistics."""
@@ -457,10 +291,6 @@ class LowLevelPlanner:
         # HLP guidance (from own agent's HLP)
         self._hl_guidance: Optional[HLIntent] = None
 
-        # MCTS tree (persistent across cycles for D-UCT)
-        self._tree: Dict[str, Any] = {}
-        self._tree_valid = False
-
         # Current intent
         self.current_intent: Optional[LLIntent] = None
 
@@ -524,10 +354,6 @@ class LowLevelPlanner:
         self._teammate_ll_intents = ll_intents
         self._teammate_hl_intents = hl_intents
         self._stats["intent_updates_received"] += 1
-
-        # Intents changed → partial tree invalidation
-        # In full D-UCT, we'd discount old statistics; here we mark for re-evaluation
-        self._tree_valid = False
 
     def update_hl_guidance(self, hl_intent: HLIntent) -> None:
         """Update guidance from own HLP."""
@@ -735,48 +561,6 @@ class LowLevelPlanner:
         )
 
         return g2_value
-
-    def _evaluate_single_action(
-        self,
-        current_state: Tuple[float, float, float],
-        action: str,
-        coverage_discount: np.ndarray,
-    ) -> float:
-        """
-        Evaluate a single action for logging purposes.
-
-        Returns:
-            ig_score (IG-only, no alignment bonus)
-        """
-        # Get current state
-        current_pos = current_state[:2]
-        current_alt = current_state[2]
-
-        # Temporarily set camera state
-        org = self.camera.get_x()
-        original_pos, original_alt = org.position, org.altitude
-
-        self.camera.set_position(current_pos)
-        self.camera.set_altitude(current_alt)
-
-        # Get next state
-        future_state = self.camera.x_future(action)
-        if future_state is None:
-            self.camera.set_position(original_pos)
-            self.camera.set_altitude(original_alt)
-            return 0.0
-
-        next_pos = future_state[0]
-        next_alt = future_state[1]
-
-        # Compute IG (footprint not needed here)
-        ig, _ = self._compute_ig(next_pos, next_alt, coverage_discount)
-
-        # Restore camera state
-        self.camera.set_position(original_pos)
-        self.camera.set_altitude(original_alt)
-
-        return ig
 
     def _simulate_trajectory(
         self,
@@ -1662,7 +1446,6 @@ class HighLevelPlanner:
             (completed region sequence, total value estimate)
         """
         sequence = list(current_sequence)
-        position = current_position
         visited = set(sequence)
 
         # Random completion to horizon
@@ -1675,7 +1458,6 @@ class HighLevelPlanner:
             region_id = self._rng.choice(available)
             sequence.append(region_id)
             visited.add(region_id)
-            position = self.regions[region_id]["center"]
 
         # Evaluate complete sequence
         return sequence, self._evaluate_region_sequence(
@@ -1888,9 +1670,6 @@ class HierarchicalDecMCTSPlanner:
         }
 
         # Region metadata for visualization (exposed as properties)
-        self._current_region_metadata: Optional[Dict] = None
-        self._current_selected_region: Optional[int] = None
-        self._current_region_scores: Optional[Dict[int, float]] = None
 
     @property
     def current_region_metadata(self) -> Optional[Dict]:

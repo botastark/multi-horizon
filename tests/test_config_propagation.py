@@ -19,7 +19,6 @@ import sys, os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-import numpy as np
 from types import SimpleNamespace
 
 # ── project imports ───────────────────────────────────────────────────────────
@@ -27,7 +26,6 @@ from config_loader import load_config
 from planner import planning
 from uav_camera import Camera
 from hierarchical_dec_mcts import (
-    HierarchicalDecMCTSPlanner,
     IntentBus,
     create_hierarchical_planner,
 )
@@ -296,4 +294,4 @@ if errors:
         print(f"  • {e}")
     sys.exit(1)
 else:
-    print(f"\033[32m✓ All config propagation tests passed.\033[0m")
+    print("\033[32m✓ All config propagation tests passed.\033[0m")

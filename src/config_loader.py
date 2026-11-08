@@ -135,7 +135,7 @@ def _merge_configs(
     shared_decentralized: Dict[str, Any],
     shared_experiment: Dict[str, Any],
     strategy: Dict[str, Any],
-    master: Dict[str, Any] = None,
+    master: Dict[str, Any] = {},
 ) -> Dict[str, Any]:
     """
     Merge shared and strategy-specific configs.

@@ -5,10 +5,24 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import argparse
-import csv
-from collections import defaultdict
 
-dir = None
+
+METHOD_RUN_DIRS = {
+    "Greedy-IG": "greedy_ig",
+    "Dec-MCTS": "dec_mcts",
+    "MH-Efficient": "mh_dec_mcts_efficient",
+    "MH-Full": "mh_dec_mcts_full",
+}
+
+
+def _discover_method_paths(experiments_base, *leaf):
+    """Map each method to the existing <experiments_base>/<method>/run_*/<leaf> paths."""
+    method_paths = {}
+    for method, run_dir_name in METHOD_RUN_DIRS.items():
+        pattern = os.path.join(experiments_base, run_dir_name, "run_*")
+        candidates = (os.path.join(run, *leaf) for run in glob.glob(pattern))
+        method_paths[method] = [path for path in candidates if os.path.exists(path)]
+    return method_paths
 
 
 def get_closest_value(d, h):
@@ -936,7 +950,7 @@ def plot_information_sharing_comparison(
                     {"color": "gray", "linestyle": "-", "label": mode, "linewidth": 2},
                 )
 
-                line = ax.plot(
+                ax.plot(
                     steps,
                     mean_vals,
                     color=props["color"],
@@ -1532,7 +1546,7 @@ def main_news_comparison(paths, show, radius, pairwise="equal", comm_range=None)
         return
 
     # Print available data - handle MultiIndex columns from aggregation
-    print(f"\n=== Data Summary ===")
+    print("\n=== Data Summary ===")
     print(f"Strategies: {all_stats['Strategy'].unique()}")
     print(
         f"News modes: {all_stats['NewsMode'].unique() if 'NewsMode' in all_stats.columns else 'N/A'}"
@@ -1863,47 +1877,8 @@ if __name__ == "__main__":
         script_dir = os.path.dirname(os.path.realpath(__file__))
         experiments_base = os.path.join(script_dir, "experiments", "runs")
 
-        method_paths = {
-            "Greedy-IG": [],
-            "Dec-MCTS": [],
-            "MH-Efficient": [],
-            "MH-Full": [],
-        }
-
-        # Search experiments/runs/ for all methods' timestamp files
-        if os.path.exists(experiments_base):
-            # Greedy IG
-            greedy_dir = os.path.join(experiments_base, "greedy_ig")
-            if os.path.exists(greedy_dir):
-                for run_dir in glob.glob(os.path.join(greedy_dir, "run_*")):
-                    csv_path = os.path.join(run_dir, "txt", "timestamps.csv")
-                    if os.path.exists(csv_path):
-                        method_paths["Greedy-IG"].append(csv_path)
-
-            # Dec-MCTS
-            dec_dir = os.path.join(experiments_base, "dec_mcts")
-            if os.path.exists(dec_dir):
-                for run_dir in glob.glob(os.path.join(dec_dir, "run_*")):
-                    csv_path = os.path.join(run_dir, "txt", "timestamps.csv")
-                    if os.path.exists(csv_path):
-                        method_paths["Dec-MCTS"].append(csv_path)
-
-            # MH-Full
-            mh_full_dir = os.path.join(experiments_base, "mh_dec_mcts_full")
-            if os.path.exists(mh_full_dir):
-                for run_dir in glob.glob(os.path.join(mh_full_dir, "run_*")):
-                    csv_path = os.path.join(run_dir, "txt", "timestamps.csv")
-                    if os.path.exists(csv_path):
-                        method_paths["MH-Full"].append(csv_path)
-
-            # MH-Eff
-            mh_eff_dir = os.path.join(experiments_base, "mh_dec_mcts_efficient")
-            if os.path.exists(mh_eff_dir):
-                for run_dir in glob.glob(os.path.join(mh_eff_dir, "run_*")):
-                    csv_path = os.path.join(run_dir, "txt", "timestamps.csv")
-                    if os.path.exists(csv_path):
-                        method_paths["MH-Efficient"].append(csv_path)
-        else:
+        method_paths = _discover_method_paths(experiments_base, "txt", "timestamps.csv")
+        if not os.path.exists(experiments_base):
             print(
                 f"⚠️  Warning: experiments/runs/ directory not found at {experiments_base}"
             )
@@ -1974,47 +1949,8 @@ if __name__ == "__main__":
         # Search: experiments/runs/ structure
         experiments_base = os.path.join(script_dir, "experiments", "runs")
 
-        method_paths = {
-            "Greedy-IG": [],
-            "Dec-MCTS": [],
-            "MH-Efficient": [],
-            "MH-Full": [],
-        }
-
-        # Search experiments/runs/ for all methods
-        if os.path.exists(experiments_base):
-            # Greedy IG
-            greedy_dir = os.path.join(experiments_base, "greedy_ig")
-            if os.path.exists(greedy_dir):
-                for run_dir in glob.glob(os.path.join(greedy_dir, "run_*")):
-                    txt_path = os.path.join(run_dir, "txt")
-                    if os.path.exists(txt_path):
-                        method_paths["Greedy-IG"].append(txt_path)
-
-            # Dec-MCTS
-            dec_dir = os.path.join(experiments_base, "dec_mcts")
-            if os.path.exists(dec_dir):
-                for run_dir in glob.glob(os.path.join(dec_dir, "run_*")):
-                    txt_path = os.path.join(run_dir, "txt")
-                    if os.path.exists(txt_path):
-                        method_paths["Dec-MCTS"].append(txt_path)
-
-            # MH-Full
-            mh_full_dir = os.path.join(experiments_base, "mh_dec_mcts_full")
-            if os.path.exists(mh_full_dir):
-                for run_dir in glob.glob(os.path.join(mh_full_dir, "run_*")):
-                    txt_path = os.path.join(run_dir, "txt")
-                    if os.path.exists(txt_path):
-                        method_paths["MH-Full"].append(txt_path)
-
-            # MH-Eff
-            mh_eff_dir = os.path.join(experiments_base, "mh_dec_mcts_efficient")
-            if os.path.exists(mh_eff_dir):
-                for run_dir in glob.glob(os.path.join(mh_eff_dir, "run_*")):
-                    txt_path = os.path.join(run_dir, "txt")
-                    if os.path.exists(txt_path):
-                        method_paths["MH-Efficient"].append(txt_path)
-        else:
+        method_paths = _discover_method_paths(experiments_base, "txt")
+        if not os.path.exists(experiments_base):
             print(
                 f"⚠️  Warning: experiments/runs/ directory not found at {experiments_base}"
             )

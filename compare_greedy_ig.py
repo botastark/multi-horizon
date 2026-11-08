@@ -14,7 +14,6 @@ Usage:
 """
 
 import argparse
-import importlib
 import os
 import sys
 import shutil
@@ -36,10 +35,8 @@ PA_SRC = "/home/bota/repos/Precision-Agriculture-Dev"
 # MH imports (src/ must be on path)
 sys.path.insert(0, MH_SRC)
 
-from helper import gaussian_random_field
 from orthomap import Field
-from mapper_LBP import OccupancyMap as OM
-from planner import planning
+from helper import select_canonical_action
 from uav_camera import Camera
 from multi_agent_coordinator import MultiAgentCoordinator
 from experiment_utils import initialize_agent
@@ -74,27 +71,39 @@ def _make_tmp_dir():
     return d
 
 
+def pa_experiment_params(
+    cluster_radius, news_inference_type, planner_type, n_agents, n_steps, radius_multiplier
+):
+    """Build PA-Dev experiment parameters for a greedy-IG run."""
+    return dict(
+        a0=1.0,
+        a1=1.0,
+        b0=0.015,
+        b1=0.015,
+        inference_type="LBP_cts_vectorized",
+        cluster_radius=cluster_radius,
+        news_inference_type=news_inference_type,
+        map_type="gaussian",
+        planner_type=planner_type,
+        env_type="adhoc",
+        x="BL",
+        y="BL",
+        altitude=0,
+        n_agents=n_agents,
+        centralized=False,
+        n_runs=1,
+        n_steps=n_steps,
+        render=False,
+        weights_type="adaptive",
+        radius_multiplier=radius_multiplier,
+    )
+
+
 def canonical_actions(action_data_by_agent, atol=1e-9):
-    priority = {
-        "left": 0,
-        "right": 1,
-        "front": 2,
-        "back": 3,
-        "up": 4,
-        "down": 5,
-        "hover": 6,
-    }
-    actions = []
-    for data in action_data_by_agent:
-        scores = data["admissible_action_to_IG"]
-        best_value = max(score[0] for score in scores.values())
-        best_actions = [
-            action
-            for action, score in scores.items()
-            if np.isclose(score[0], best_value, rtol=0.0, atol=atol)
-        ]
-        actions.append(min(best_actions, key=lambda action: priority.get(action, 99)))
-    return actions
+    return [
+        select_canonical_action(data["admissible_action_to_IG"], atol)
+        for data in action_data_by_agent
+    ]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -316,41 +325,20 @@ def run_pa(
     H = pa_sim.H
 
     # Build experiment params matching the PA convention for N=4.
-    iep = dict(
-        a0=1.0,
-        a1=1.0,
-        b0=0.015,
-        b1=0.015,
-        inference_type="LBP_cts_vectorized",
-        cluster_radius=cluster_radius,
-        news_inference_type=news_inference_type,
-        map_type="gaussian",
-        planner_type=planner_type,
-        env_type="adhoc",
-        x="BL",
-        y="BL",
-        altitude=0,
-        n_agents=n_agents,
-        centralized=False,
-        n_runs=1,
-        n_steps=n_steps,
-        render=False,
-        weights_type="adaptive",
-        radius_multiplier=radius_multiplier,
+    iep = pa_experiment_params(
+        cluster_radius, news_inference_type, planner_type, n_agents, n_steps, radius_multiplier
     )
 
     # Override map RNG seed so it matches our chosen seed
     # PA normally uses default_rng(123) - we'll set it to the given seed
-    pa_sim.MappingEnv.__init__  # just to check it exists
 
     env = MappingEnv(
         field_len=50.0,
         fov=np.pi / 3,
         **iep,
     )
-    # Patch map_rng and agent_position_rng to use our seed
+    # Patch map_rng to use our seed
     env.map_rng = np.random.default_rng(seed)
-    env.agent_position_rng = np.random.default_rng(seed)
 
     mapper = Mapper(
         env.n_cell,
@@ -401,8 +389,6 @@ def run_pa(
 
     # Record starting positions before any movement
     start_positions = [(a.state.position[0], a.state.position[1]) for a in env.agents]
-    # if debug:
-    # print(f"[PA] start_positions = {start_positions}")
 
     # Per-step histories
     entropy_per_agent = [[] for _ in range(n_agents)]  # sum entropy per agent per step
@@ -608,7 +594,7 @@ def main():
     args = parser.parse_args()
 
     print(f"\n{'='*70}")
-    print(f"  MH Greedy IG Validation  (reference: PA-Dev)")
+    print("  MH Greedy IG Validation  (reference: PA-Dev)")
     print(f"  seed={args.seed}  steps={args.steps}  N={args.agents}  r={args.radius}")
     print(f"{'='*70}\n")
 

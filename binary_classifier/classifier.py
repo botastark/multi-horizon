@@ -4,10 +4,6 @@ import torch.nn as nn
 from torchvision import transforms
 from PIL import Image
 
-# #!/usr/bin/env python3
-# import sys
-# import os
-# sys.path.append(os.path.abspath(os.path.join(os.getcwd(), "..")))
 
 from binary_classifier.classifier_model import ModifiedClassifier
 
@@ -87,47 +83,3 @@ class Predicter(nn.Module):
                 preds = preds.cpu().numpy()
                 preds = np.argmax(preds)
                 return preds
-            # else:
-            #     pred = torch.argmax(outputs, dim=1)
-            #     pred = pred.tolist()
-            #     outputs = torch.nn.functional.softmax(outputs, dim=1)
-            #     outputs = outputs.tolist()
-            #     return pred
-
-    # Update predict function to handle batch prediction with a fixed batch size
-    def predict_batch(self, img_paths, batch_size=64):
-        """
-        Predict classes for a batch of images/paths.
-
-        Parameters:
-            img_inputs (list): A list where each element is either a file path (str) or a PIL Image.
-            batch_size (int): Batch size for prediction.
-
-        Returns:
-            list: A list of predictions for the input images.
-        """
-        self.model.eval()
-        all_predictions = []
-
-        for i in range(0, len(img_paths), batch_size):
-            batch_paths = img_paths[i : i + batch_size]
-            # Load images based on input type
-            if isinstance(batch_paths[0], str):
-                images = [
-                    self.transform(Image.open(img_path)) for img_path in batch_paths
-                ]
-            else:
-                images = [self.transform(img) for img in batch_paths]
-
-            images = torch.stack(images).to(self.device)
-
-            with torch.no_grad():
-                outputs = self.model(images)
-                if self.num_classes == 2:
-                    probs = torch.sigmoid(outputs)
-                    preds = (probs > 0.5).float()
-                    predictions = preds.cpu().numpy()
-                else:
-                    predictions = torch.argmax(outputs, dim=1).tolist()
-            all_predictions.extend(predictions)
-        return all_predictions
