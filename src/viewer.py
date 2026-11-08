@@ -2,64 +2,9 @@ from matplotlib import colors
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np
-from mpl_toolkits.mplot3d import Axes3D  # Ensure this is imported
 
 from matplotlib import cm
 from matplotlib.colors import Normalize
-
-
-def plot_terrain_2d(filename, grid, ground_truth):
-    """
-    Plot a 2D visualization of the terrain (ground truth) and save to file.
-
-    Args:
-        save_path (str): File path to save the generated figure.
-        grid (object): Grid configuration with attributes 'center', 'x', 'y', and 'length'.
-        ground_truth (np.ndarray): 2D binary map representing the ground truth.
-    """
-    plt.rcParams.update(
-        {
-            "font.size": 22,
-            "axes.labelsize": 22,
-            "xtick.labelsize": 22,
-            "ytick.labelsize": 22,
-        }
-    )
-
-    fig, ax = plt.subplots(figsize=(9, 9), dpi=300)
-
-    # Determine x/y ranges
-    if grid.center:
-        x_range = [-grid.x / 2, grid.x / 2]
-        y_range = [-grid.y / 2, grid.y / 2]
-    else:
-        x_range = [0, grid.x]
-        y_range = [0, grid.y]
-
-    ax.set_xlim(x_range)
-    ax.set_ylim(y_range)
-    ax.set_xlabel("X (m)", labelpad=4)
-    ax.set_ylabel("Y (m)", labelpad=4)
-
-    # Create a discrete colormap for ground truth
-    cmap = colors.ListedColormap(["lemonchiffon", "darkgreen"])
-    ax.imshow(
-        ground_truth.T,
-        cmap=cmap,
-        origin="lower",
-        extent=[x_range[0], x_range[1], y_range[0], y_range[1]],
-    )
-    # Set custom tick labels
-    ticks_x = np.linspace(x_range[0], x_range[1], 5)
-    ticks_y = np.linspace(y_range[0], y_range[1], 5)
-    ax.set_xticks(ticks_x)
-    ax.set_yticks(ticks_y)
-    ax.set_xticklabels([f"{tick:.1f}" for tick in ticks_x])
-    ax.set_yticklabels([f"{tick:.1f}" for tick in ticks_y])
-
-    plt.tight_layout()
-    plt.savefig(filename, bbox_inches="tight")
-    plt.close(fig)
 
 
 def plot_terrain(
@@ -283,30 +228,12 @@ def plot_terrain(
             uav_y = [uav.position[1] for uav in agent_positions]
             n_points = len(uav_x)
 
-            # Plot trajectory segments with time-based colors
-            for i in range(n_points - 1):
-                t_norm = i / max(1, max_steps - 1)  # Normalize time to [0, 1]
-                ax2.plot(
-                    uav_x[i : i + 2],
-                    uav_y[i : i + 2],
-                    color=time_cmap(t_norm),
-                    linewidth=2.5,
-                    alpha=0.8,
-                )
+            _plot_path_and_start(
+                ax2, uav_x, uav_y, time_cmap, max_steps - 1,
+                f"Agent {agent_idx} start" if agent_idx == 0 else None,
+            )
 
-            # Mark start position
             if n_points > 0:
-                ax2.scatter(
-                    [uav_x[0]],
-                    [uav_y[0]],
-                    color=time_cmap(0),
-                    s=100,
-                    marker="o",
-                    edgecolors="black",
-                    linewidths=1.5,
-                    zorder=10,
-                    label=f"Agent {agent_idx} start" if agent_idx == 0 else None,
-                )
                 # Mark current position with triangle
                 ax2.scatter(
                     [uav_x[-1]],
@@ -346,28 +273,12 @@ def plot_terrain(
             uav_y = [uav.position[1] for uav in uav_pos]
             n_points = len(uav_x)
 
-            for i in range(n_points - 1):
-                t_norm = i / max(1, n_points - 1)
-                ax2.plot(
-                    uav_x[i : i + 2],
-                    uav_y[i : i + 2],
-                    color=time_cmap(t_norm),
-                    linewidth=2.5,
-                    alpha=0.8,
-                )
+            _plot_path_and_start(
+                ax2, uav_x, uav_y, time_cmap, n_points - 1,
+                "Start",
+            )
 
             if n_points > 0:
-                ax2.scatter(
-                    [uav_x[0]],
-                    [uav_y[0]],
-                    color=time_cmap(0),
-                    s=100,
-                    marker="o",
-                    edgecolors="black",
-                    linewidths=1.5,
-                    zorder=10,
-                    label="Start",
-                )
                 ax2.scatter(
                     [uav_x[-1]],
                     [uav_y[-1]],
@@ -610,6 +521,25 @@ def plot_terrain(
     plt.close(fig)
 
 
+def _plot_path_and_start(ax, xs, ys, cmap, time_span, start_label):
+    """Draw a time-coloured path on ax and mark its first point."""
+    for i in range(len(xs) - 1):
+        t_norm = i / max(1, time_span)
+        ax.plot(xs[i : i + 2], ys[i : i + 2], color=cmap(t_norm), linewidth=2.5, alpha=0.8)
+    if xs:
+        ax.scatter(
+            [xs[0]],
+            [ys[0]],
+            color=cmap(0),
+            s=100,
+            marker="o",
+            edgecolors="black",
+            linewidths=1.5,
+            zorder=10,
+            label=start_label,
+        )
+
+
 def _draw_regions_on_axis(ax, region_metadata, selected_region_id, region_scores):
     """
     Helper function to draw region visualization on an axis.
@@ -625,7 +555,6 @@ def _draw_regions_on_axis(ax, region_metadata, selected_region_id, region_scores
         selected_region_id: ID of currently selected region (highlighted)
         region_scores: Dict mapping region_id -> score value
     """
-    import matplotlib.cm as cm
     from matplotlib.colors import Normalize
 
     # Use RdYlBu_r (red-yellow-blue reversed) colormap: red=low, blue=high
@@ -637,11 +566,9 @@ def _draw_regions_on_axis(ax, region_metadata, selected_region_id, region_scores
         scores = list(region_scores.values())
         min_score = min(scores)
         max_score = max(scores)
-        score_range = max_score - min_score if max_score > min_score else 1.0
         norm = Normalize(vmin=min_score, vmax=max_score)
     else:
         norm = None
-        score_range = 1.0
 
     for region_id, metadata in region_metadata.items():
         center = metadata["center"]
@@ -668,12 +595,10 @@ def _draw_regions_on_axis(ax, region_metadata, selected_region_id, region_scores
         if region_id == selected_region_id:
             edge_color = "black"
             line_width = 3.0
-            edge_alpha = 1.0
             fill_alpha = min(0.7, fill_alpha + 0.2)  # Make selected more visible
         else:
             edge_color = fill_color
             line_width = 1.5
-            edge_alpha = 0.8
 
         # Draw filled rectangle with score-based color
         rect = patches.Rectangle(

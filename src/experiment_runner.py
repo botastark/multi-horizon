@@ -1,16 +1,12 @@
 import os
 import json
 import numpy as np
-from tqdm import tqdm
 from datetime import datetime
 
 from helper import (
     FastLogger,
     uav_position,
 )
-from mapper_LBP import OccupancyMap as OM
-from planner import planning
-from uav_camera import Camera
 from multi_agent_coordinator import MultiAgentCoordinator
 from experiment_utils import initialize_agent
 from simulator import Simulator
@@ -71,90 +67,6 @@ def _build_logged_hyperparams(config, action_strategy, mcts_params):
                 hyperparams[key] = hier_cfg[key]
 
     return hyperparams
-
-
-def run_single_agent_experiment(
-    config,
-    grid_info,
-    camera,
-    map_obj,
-    ground_truth_map,
-    conf_dict,
-    occupancy_map,
-    planner,
-    uav_pos,
-    results_folder,
-    corr_type,
-    e_margin,
-    grf_r,
-    iter_idx,
-    n_steps,
-    ENABLE_STEPWISE_PLOTTING,
-    ENABLE_LOGGING,
-    mcts_params,
-    action_strategy,
-):
-    """Run a single-agent experiment using the Simulator class."""
-    # Ensure camera state matches provided uav_pos
-    camera.set_altitude(uav_pos.altitude)
-    camera.set_position(uav_pos.position)
-
-    # Build agent state compatible with initialize_agent output
-    agent_state = {
-        "agent_id": 0,
-        "camera": camera,
-        "planner": planner,
-        "occupancy_map": occupancy_map,
-        "uav_pos": uav_pos,
-        "uav_positions": [uav_pos],
-        "actions": [],
-        "belief_map": np.full((grid_info.shape[0], grid_info.shape[1], 2), 0.5),
-        "observed_ids": set(),
-        "entropy": [],
-        "mse": [],
-        "coverage": [],
-        "height": [],
-        "info_gain_action": {},
-    }
-
-    agents = [agent_state]
-
-    # Generate unique run ID for this iteration (timestamp-based for linking logs/plots)
-    run_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-
-    simulator = Simulator(
-        agents=agents,
-        map_obj=map_obj,
-        ground_truth_map=ground_truth_map,
-        conf_dict=conf_dict,
-        grid_info=grid_info,
-        n_steps=n_steps,
-        results_folder=results_folder,
-        corr_type=corr_type,
-        e_margin=e_margin,
-        grf_r=grf_r,
-        iter_idx=iter_idx,
-        enable_stepwise_plotting=ENABLE_STEPWISE_PLOTTING,
-        enable_logging=ENABLE_LOGGING,
-        action_strategy=action_strategy,
-        coordinator=None,
-        multi_agent_logger=None,
-        run_id=run_id,
-        debug_logs=False,
-    )
-
-    result = simulator.run()
-
-    # Extract single-agent formatted result
-    agent_res = result["agents"][0]
-    return {
-        "entropy": agent_res["entropy"],
-        "mse": agent_res["mse"],
-        "coverage": agent_res["coverage"],
-        "height": agent_res["height"],
-        "uav_positions": agent_res["uav_positions"],
-        "actions": agent_res["actions"],
-    }
 
 
 def run_multi_agent_experiment(
@@ -400,12 +312,6 @@ def run_multi_agent_experiment(
             mcts_params=mcts_params,
         )
 
-        # Determine if hierarchical timing columns are needed
-        use_hierarchical_timing = action_strategy in (
-            "mh_dec_mcts_efficient",
-            "mh_dec_mcts_full",
-        )
-
         multi_agent_logger = FastLogger(
             log_folder,
             strategy=action_strategy,
@@ -420,7 +326,6 @@ def run_multi_agent_experiment(
             filename="run.log",
             multi_agent=True,
             news_mode=news_mode,
-            use_hierarchical_timing=use_hierarchical_timing,
             run_id=run_id,
             header_extras=[
                 ("hyperparams", json.dumps(logged_hyperparams, sort_keys=True)),

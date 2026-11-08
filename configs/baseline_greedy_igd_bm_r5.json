@@ -9,7 +9,7 @@
   "shared": {
     "project_path": "./",
     "field_type": "Gaussian",
-    "cluster_radius": 5,
+    "cluster_radius": 4,
     "start_position": "corner",
     "num_agents": 4,
     "n_steps": 100,

@@ -26,14 +26,11 @@ Reference: Equation (1) in the paper for IG definition
 """
 
 import numpy as np
-from typing import Dict, List, Tuple, Optional, Any, Set
+from typing import Dict, Tuple, Optional, Any
 from dataclasses import dataclass, field
 import time
-import logging
-import copy
-from helper import footprint_dict_to_bounds, footprint_iou, select_argmax_action
+from helper import StalenessMixin, footprint_dict_to_bounds, footprint_iou, select_argmax_action
 
-logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -110,12 +107,12 @@ def compute_footprint_iou(
 
 
 # =============================================================================
-# Intent Data Structures (compatible with async runner)
+# Intent Data Structures 
 # =============================================================================
 
 
 @dataclass
-class GreedyIGIntent:
+class GreedyIGIntent(StalenessMixin):
     """
     Intent for greedy IG planner.
 
@@ -136,25 +133,6 @@ class GreedyIGIntent:
     expected_ig: float = 0.0
     # Timestamp for staleness tracking
     timestamp: float = field(default_factory=time.time)
-
-    def is_stale(self, max_age: float = 2.0) -> bool:
-        """Check if intent is stale."""
-        return time.time() - self.timestamp > max_age
-
-    def staleness_discount(
-        self, decay_factor: float = 0.9, threshold_sec: float = 2.0
-    ) -> float:
-        """
-        Compute D-UCT discount factor based on intent age.
-
-        Returns:
-        - 1.0 = fresh intent
-        - <1.0 = stale intent (reduced influence)
-        """
-        age = time.time() - self.timestamp
-        staleness = max(0, age / threshold_sec)
-        return decay_factor**staleness
-
 
 # =============================================================================
 # Greedy IG Planner
@@ -449,56 +427,6 @@ class GreedyIGPlanner:
 
         return discount
 
-    def _compute_teammate_overlap(
-        self,
-        footprint: Tuple[int, int, int, int],
-    ) -> float:
-        """
-        Compute overlap penalty with teammate footprints.
-
-        Args:
-            footprint: (imin, imax, jmin, jmax) proposed footprint
-
-        Returns:
-            Overlap penalty (higher = more overlap with teammates)
-        """
-        if not self._teammate_intents:
-            return 0.0
-
-        imin, imax, jmin, jmax = footprint
-        H_grid, W_grid = self.belief.shape[:2] if self.belief is not None else (1, 1)
-
-        # Create mask for proposed footprint
-        my_cells = set()
-        for i in range(max(0, imin), min(imax, H_grid)):
-            for j in range(max(0, jmin), min(jmax, W_grid)):
-                my_cells.add((i, j))
-
-        if not my_cells:
-            return 0.0
-
-        # Count overlapping cells with teammates
-        total_overlap = 0.0
-        for teammate_id, intent in self._teammate_intents.items():
-            if intent.is_stale():
-                continue
-
-            # D-UCT staleness discount
-            staleness_discount = intent.staleness_discount()
-
-            t_imin, t_imax, t_jmin, t_jmax = intent.footprint
-            teammate_cells = set()
-            for i in range(max(0, t_imin), min(t_imax, H_grid)):
-                for j in range(max(0, t_jmin), min(t_jmax, W_grid)):
-                    teammate_cells.add((i, j))
-
-            # Count overlap
-            overlap = len(my_cells & teammate_cells)
-            total_overlap += overlap * staleness_discount
-
-        # Normalize by footprint size
-        return total_overlap / len(my_cells) if my_cells else 0.0
-
     def plan(
         self,
         current_position: Tuple[float, float],
@@ -640,164 +568,8 @@ class GreedyIGPlanner:
 # =============================================================================
 
 
-def log_greedy_ig_decision(
-    agent_id: int,
-    step: int,
-    raw_ig_scores: Dict[str, float],
-    overlap_penalties: Dict[str, float],
-    final_scores: Dict[str, float],
-    selected_action: str,
-    intents_received: Dict[str, Any],
-    discount_factors: Optional[Dict[str, float]] = None,
-):
-    """
-    Log greedy IG planning decision.
-
-    Args:
-        agent_id: Agent ID
-        step: Current step
-        raw_ig_scores: Raw IG per action
-        overlap_penalties: Overlap penalty per action
-        final_scores: Final scores (IG * discount or IG - penalty)
-        selected_action: Selected action
-        intents_received: Summary of teammate intents
-        discount_factors: Optional discount factors per action (for IGd)
-    """
-    logger.info("")
-    logger.info(f"{'='*60}")
-    mode = (
-        "IGd"
-        if discount_factors and any(d < 1.0 for d in discount_factors.values())
-        else "IG"
-    )
-    logger.info(f"[Agent {agent_id}] GREEDY {mode} DECISION (Step {step})")
-    logger.info(f"{'='*60}")
-
-    logger.info("")
-    logger.info("RAW INFORMATION GAIN:")
-    sorted_ig = sorted(raw_ig_scores.items(), key=lambda x: x[1], reverse=True)
-    for action, ig in sorted_ig:
-        logger.info(f"  {action:8s}: {ig:10.2f}")
-
-    if discount_factors and any(d < 1.0 for d in discount_factors.values()):
-        logger.info("")
-        logger.info("DISCOUNT FACTORS (footprint overlap with neighbors):")
-        for action, discount in sorted(discount_factors.items(), key=lambda x: x[1]):
-            logger.info(f"  {action:8s}: {discount:10.4f}")
-
-    if any(p > 0 for p in overlap_penalties.values()):
-        logger.info("")
-        logger.info("OVERLAP PENALTIES (teammate avoidance):")
-        for action, penalty in sorted(
-            overlap_penalties.items(), key=lambda x: x[1], reverse=True
-        ):
-            if penalty > 0:
-                logger.info(f"  {action:8s}: -{penalty:10.2f}")
-
-    logger.info("")
-    score_label = (
-        "DISCOUNTED IG (IG × discount)"
-        if discount_factors and any(d < 1.0 for d in discount_factors.values())
-        else "FINAL SCORES (IG - Overlap Penalty)"
-    )
-    logger.info(f"{score_label}:")
-    sorted_final = sorted(final_scores.items(), key=lambda x: x[1], reverse=True)
-    for action, score in sorted_final:
-        marker = " <-- SELECTED" if action == selected_action else ""
-        if score > float("-inf"):
-            logger.info(f"  {action:8s}: {score:10.2f}{marker}")
-        else:
-            logger.info(f"  {action:8s}:        N/A{marker}")
-
-    if intents_received:
-        logger.info("")
-        logger.info("TEAMMATE INTENTS:")
-        for key, value in intents_received.items():
-            logger.info(f"  {key}: {value}")
-
-    logger.info(f"{'='*60}")
-
-
 # =============================================================================
 # Multi-Agent Greedy IG Coordinator
-# =============================================================================
-
-
-class GreedyIGCoordinator:
-    """
-    Coordinator for multi-agent greedy IG planning.
-
-    Manages intent sharing between agents running greedy IG planners.
-    Compatible with both synchronous and asynchronous execution.
-    """
-
-    def __init__(self, num_agents: int):
-        """
-        Initialize coordinator.
-
-        Args:
-            num_agents: Number of agents
-        """
-        self.num_agents = num_agents
-        self._intents: Dict[int, GreedyIGIntent] = {}
-        self._lock = None  # Set if async
-
-        self._stats = {
-            "intents_shared": 0,
-            "intents_retrieved": 0,
-        }
-
-    def enable_async(self):
-        """Enable thread-safe operations for async execution."""
-        import threading
-
-        self._lock = threading.Lock()
-
-    def share_intent(self, intent: GreedyIGIntent) -> None:
-        """
-        Share an agent's intent.
-
-        Args:
-            intent: Agent's current intent
-        """
-        if self._lock:
-            with self._lock:
-                self._intents[intent.agent_id] = intent
-        else:
-            self._intents[intent.agent_id] = intent
-        self._stats["intents_shared"] += 1
-
-    def get_teammate_intents(self, agent_id: int) -> Dict[int, GreedyIGIntent]:
-        """
-        Get intents from all teammates (excluding self).
-
-        Args:
-            agent_id: Requesting agent's ID
-
-        Returns:
-            Dict mapping teammate_id -> GreedyIGIntent
-        """
-        self._stats["intents_retrieved"] += 1
-
-        if self._lock:
-            with self._lock:
-                return {
-                    tid: intent
-                    for tid, intent in self._intents.items()
-                    if tid != agent_id
-                }
-        else:
-            return {
-                tid: intent for tid, intent in self._intents.items() if tid != agent_id
-            }
-
-    def get_statistics(self) -> Dict[str, Any]:
-        """Get coordinator statistics."""
-        return dict(self._stats)
-
-
-# =============================================================================
-# Factory Function
 # =============================================================================
 
 

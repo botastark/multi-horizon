@@ -50,17 +50,6 @@ class ImageSampler:
         tile_pixels_v = self.resolution_y / coverage_v
         return int(tile_pixels_h), int(tile_pixels_v)
 
-    def calculate_altitude_from_tile_size(self, tile_size):
-        """
-        Estimate the altitude from the size of a ground tile in the image.
-        """
-        tile_pixels_h, tile_pixels_v = tile_size
-        coverage_h = self.resolution_x / tile_pixels_h
-        coverage_v = self.resolution_y / tile_pixels_v
-        altitude_h = coverage_h / (2 * math.tan(self.fov_h / 2))
-        altitude_v = coverage_v / (2 * math.tan(self.fov_v / 2))
-        return (altitude_h + altitude_v) / 2
-
     def downsample_with_blur(self, image, target_size, original_size):
         """
         Downsample the image with a Gaussian blur to avoid aliasing.
@@ -175,7 +164,6 @@ class Field:
         self.predictions_cache = {}
         self._initialize_predictions()
 
-        # return {}
 
     def _save_cache(self):
         with open(self._cache_filepath(), "wb") as f:
@@ -314,12 +302,6 @@ class Field:
         cropped_img = self.img[x_range, y_range, :]
         return Image.fromarray(cropped_img)
 
-    def get_tile_info(self, tile):
-        """
-        Return the tile image and its ground truth label.
-        """
-        return self._get_tile_img(tile), self.ground_truth_map[tile[0], tile[1]]
-
     def convert_xy_ij(self, x, y):
         """
         Convert (x, y) coordinates to grid indices (i, j).
@@ -408,7 +390,6 @@ class Field:
                 observations = self.ground_truth_map[i_min:i_max, j_min:j_max]
                 return fp_vertices_ij, observations
             if self.predictor is not None:
-                # label = np.zeros_like(x, dtype=int)
                 if self.predictions_cache is not None:
                     approx_alt = round(uav_pos.altitude, 2)
                     if not approx_alt in self.predictions_cache.keys():
@@ -427,7 +408,6 @@ class Field:
                     else:
                         pred_at_alt = self.predictions_cache[approx_alt]
 
-                    # pred_at_alt = self.predictions_cache[approx_alt]
                     assert (
                         pred_at_alt.shape == self.ground_truth_map.shape
                     ), f"Prediction cache shape mismatch: {pred_at_alt.shape} vs {self.ground_truth_map.shape}"
@@ -442,7 +422,6 @@ class Field:
                         observations.flat[ind] = int(
                             self.predictor.predict(tile_pil_img)
                         )
-                        # label.flat[ind] = self.ground_truth_map[r, c]
         return fp_vertices_ij, observations
 
     def get_ground_truth(self):

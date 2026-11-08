@@ -7,7 +7,6 @@ This script demonstrates how to run experiments with the new config system.
 
 import subprocess
 import sys
-from pathlib import Path
 
 
 def run_all_strategies():

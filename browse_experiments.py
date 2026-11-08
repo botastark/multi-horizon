@@ -7,9 +7,7 @@ Shows experiment metadata and allows easy comparison.
 """
 
 import os
-import json
 from datetime import datetime
-from pathlib import Path
 
 
 def parse_experiment_metadata(exp_dir):

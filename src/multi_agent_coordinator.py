@@ -45,9 +45,6 @@ class MessageType(Enum):
     """Types of messages that can be exchanged between agents."""
 
     POSITION_UPDATE = auto()  # Agent position broadcast
-    BELIEF_UPDATE = auto()  # Belief map update notification
-    OBSERVATION = auto()  # Raw observation data
-    INTENT = auto()  # Planned action intent (for coordination)
 
 
 # =============================================================================
@@ -136,29 +133,6 @@ class CommunicationBus:
                 except queue.Full:
                     self._stats["messages_dropped"] += 1
                     logger.warning(f"Message queue full for agent {agent_id}")
-
-    def send_to(self, message: AgentMessage, target_id: int) -> bool:
-        """
-        Send a message to a specific agent.
-
-        Args:
-            message: Message to send
-            target_id: ID of target agent
-
-        Returns:
-            True if sent successfully, False if queue full
-        """
-        if target_id not in self._queues:
-            return False
-
-        with self._lock:
-            try:
-                self._queues[target_id].put_nowait(message)
-                self._stats["messages_sent"] += 1
-                return True
-            except queue.Full:
-                self._stats["messages_dropped"] += 1
-                return False
 
     def receive(self, agent_id: int, timeout: float = 0.01) -> Optional[AgentMessage]:
         """
@@ -309,7 +283,7 @@ class MultiAgentCoordinator:
         )
         if self.correlation_type == "":
             if debug_logs:
-                print(f"Warning: correlation_type not specified, defaulting to 'equal'")
+                print("Warning: correlation_type not specified, defaulting to 'equal'")
             self.correlation_type = "equal"
 
         # Prefer provided `news_mode` override, otherwise `multi_agent.news_mode`, fall back to `decentralized.news_mode`, default to BM
@@ -338,7 +312,7 @@ class MultiAgentCoordinator:
                 # Unlimited range
                 self.communication_range = -1
                 if debug_logs:
-                    print(f"Communication range: unlimited (radius_multiplier=-1)")
+                    print("Communication range: unlimited (radius_multiplier=-1)")
             else:
                 # PA's adhoc environment uses n_h_act=8 for the 50x50m field,
                 # independent of agent count, and proximity is componentwise in

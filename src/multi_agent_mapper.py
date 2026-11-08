@@ -219,46 +219,6 @@ class MultiAgentMapper:
     # LOCAL MAPPING (per-agent, single-step OG + LBP)
     # -------------------------------------------------------------------------
 
-    def local_mapping_update(
-        self,
-        agent_id: int,
-        fp_vertices_ij: Dict[str, np.ndarray],
-        z: np.ndarray,
-        uav_pos: Any,
-    ):
-        """
-        Perform a single local mapping step for one agent:
-
-            OG Bayesian update  -> OccupancyMap.update_belief_OG
-            LBP spatial smoothing -> OccupancyMap.propagate_messages
-
-        Args:
-            agent_id: which agent to update.
-            fp_vertices_ij: bounding box indices (as produced by OccupancyMap.get_indices).
-            z: binary observation patch.
-            uav_pos: UAV position object (must have altitude attribute).
-        """
-        # # Skip LBP if footprint is 1x1 (no spatial neighbors)
-        # h = fp_vertices_ij["bl"][0] - fp_vertices_ij["ul"][0]
-        # w = fp_vertices_ij["ur"][1] - fp_vertices_ij["ul"][1]
-        # if h <= 1 or w <= 1:
-        #     return
-
-        omap = self.maps[agent_id]
-
-        # 1) OG update (sets sigma0, sigma1 internally)
-        omap.update_belief_OG(fp_vertices_ij, z, uav_pos)
-
-        # 2) LBP propagation for spatial consistency
-        if self.lbp_iterations > 0:
-            omap.propagate_messages(
-                fp_vertices_ij,
-                z,
-                max_iterations=self.lbp_iterations,
-                correlation_type=omap.correlation_type,
-                reset_msgs=True,
-            )
-
     # -------------------------------------------------------------------------
     # NEWS BELIEF UPDATE (no fusion yet)
     # -------------------------------------------------------------------------
@@ -523,17 +483,6 @@ class MultiAgentMapper:
             # reset only the used per-neighbor entry
             self.news_map_beliefs[sender_id, neighbor_id, :, :] = 0.5
 
-    def fuse_news_with_neighbors(self, agent_id: int, neighbor_ids: List[int]):
-        """
-        Fuse news from agent_id into its neighbors.
-        Alias for fuse_news_from_sender for compatibility.
-
-        Args:
-            agent_id: ID of agent whose news to fuse
-            neighbor_ids: List of neighbor agent IDs
-        """
-        self.fuse_news_from_sender(agent_id, neighbor_ids)
-
     # -------------------------------------------------------------------------
     # HIGH-LEVEL SYNCHRONOUS PIPELINES
     # -------------------------------------------------------------------------
@@ -576,45 +525,6 @@ class MultiAgentMapper:
             if neighbors:
                 self.fuse_news_from_sender(agent_id, neighbors)
 
-    def update_all_news(self, agent_observations: Dict[int, Dict[str, Any]]):
-        """
-        PHASE 1 (BATCH SYNCHRONOUS): Update news beliefs for ALL agents.
-
-        This is the batch version that updates all agents' news beliefs
-        before any fusion occurs. Follows the paper's synchronous pattern.
-
-        Note: Local mapping (OG+LBP) should be done by each agent's
-        OccupancyMap BEFORE calling this method.
-
-        Args:
-            agent_observations: Dict mapping agent_id to observation dict with:
-                - 'fp_ij' or 'fp_vertices_ij': Footprint indices
-                - 'submap' or 'z': Binary observation array
-                - 'sigmas': Tuple (sigma0, sigma1) or None (uses defaults)
-        """
-        for agent_id, obs in agent_observations.items():
-            # Handle different key names for compatibility
-            fp_ij = obs.get("fp_ij")
-            if fp_ij is None:
-                fp_ij = obs.get("fp_vertices_ij")
-
-            z = obs.get("submap")
-            if z is None:
-                z = obs.get("z")
-
-            sigmas = obs.get("sigmas")
-
-            if fp_ij is None or z is None:
-                continue
-
-            # Set sigmas on the agent's map if provided
-            if sigmas is not None:
-                self.maps[agent_id].sigma0 = sigmas[0]
-                self.maps[agent_id].sigma1 = sigmas[1]
-
-            # Update news belief only (no fusion yet)
-            self.update_news_belief(agent_id, fp_ij, z)
-
     def get_stats(self) -> Dict[str, Any]:
         """Get statistics about the mapper state."""
         return {
@@ -627,49 +537,3 @@ class MultiAgentMapper:
     def get_fused_belief(self) -> np.ndarray:
         """Alias for get_global_fused_belief for compatibility."""
         return self.get_global_fused_belief()
-
-    def step_all_agents_synchronous(
-        self,
-        agent_observations: Dict[int, Dict[str, Any]],
-        neighbor_map: Dict[int, List[int]],
-    ):
-        """
-        Run one full mapping + sharing step for all agents in a synchronous way.
-
-        Pipeline:
-            1) Local mapping (OG + LBP) for ALL agents
-            2) Update news beliefs for ALL agents (no fusion yet)
-            3) Fuse news from ALL senders into ALL neighbors
-
-        Args:
-            agent_observations: dict[agent_id] -> {
-                'fp_vertices_ij': dict with 'ul','bl','ur','br' (np.array pairs),
-                'z': np.ndarray of binary observations,
-                'uav_pos': object with altitude attribute
-            }
-            neighbor_map: dict[agent_id] -> list of neighbor agent IDs
-                          (e.g., from communication range or complete graph)
-        """
-        # 1) Local mapping
-        for agent_id, obs in agent_observations.items():
-            fp_ij = obs["fp_vertices_ij"]
-            z = obs["z"]
-            uav_pos = obs["uav_pos"]
-            self.local_mapping_update(agent_id, fp_ij, z, uav_pos)
-
-        # 2) Update news beliefs (no fusion)
-        for agent_id, obs in agent_observations.items():
-            fp_ij = obs["fp_vertices_ij"]
-            z = obs["z"]
-            self.update_news_belief(agent_id, fp_ij, z)
-
-        # 3) Fuse news from each sender into its neighbors
-        for sender_id in range(self.num_agents):
-            neighbors = neighbor_map.get(sender_id, [])
-            if neighbors:
-                self.fuse_news_from_sender(sender_id, neighbors)
-
-        # 4) NOW run LBP on the final belief
-        for agent_id in range(self.num_agents):
-            omap = self.maps[agent_id]
-            omap.propagate_messages(fp_ij, z, ...)

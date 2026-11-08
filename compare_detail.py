@@ -22,9 +22,8 @@ MH_SRC = os.path.join(os.path.dirname(__file__), "src")
 PA_SRC = "/home/bota/repos/Precision-Agriculture-Dev"
 sys.path.insert(0, MH_SRC)
 
-from helper import gaussian_random_field
 from orthomap import Field
-from mapper_LBP import OccupancyMap as OM
+from compare_greedy_ig import canonical_actions, pa_experiment_params
 from uav_camera import Camera
 from multi_agent_coordinator import MultiAgentCoordinator
 from experiment_utils import initialize_agent
@@ -72,32 +71,12 @@ def load_pa(
     sys.path.insert(0, PA_SRC)
     spec.loader.exec_module(pa_sim)
 
-    iep = dict(
-        a0=1.0,
-        a1=1.0,
-        b0=0.015,
-        b1=0.015,
-        inference_type="LBP_cts_vectorized",
-        cluster_radius=cluster_radius,
-        news_inference_type=news_inference_type,
-        map_type="gaussian",
-        planner_type=planner_type,
-        env_type="adhoc",
-        x="BL",
-        y="BL",
-        altitude=0,
-        n_agents=n_agents,
-        centralized=False,
-        n_runs=1,
-        n_steps=n_steps,
-        render=False,
-        weights_type="adaptive",
-        radius_multiplier=radius_multiplier,
+    iep = pa_experiment_params(
+        cluster_radius, news_inference_type, planner_type, n_agents, n_steps, radius_multiplier
     )
 
     env = pa_sim.MappingEnv(field_len=50.0, fov=np.pi / 3, **iep)
     env.map_rng = np.random.default_rng(seed)
-    env.agent_position_rng = np.random.default_rng(seed)
     mapper = pa_sim.Mapper(env.n_cell, env.min_space_z, env.max_space_z, **iep)
     planner = pa_sim.Planner(
         env.action_to_direction,
@@ -239,7 +218,6 @@ def load_mh(seed, n_steps, cluster_radius=5, mode="IG_BS"):
             debug_logs=False,
         )
         agents.append(agent_state)
-        cam = agent_state["camera"]
         uv = agent_state["uav_pos"]
         coordinator.update_agent_state(
             agent_id=aid,
@@ -289,15 +267,6 @@ def load_mh(seed, n_steps, cluster_radius=5, mode="IG_BS"):
 # ──────────────────────────────────────────────────────────────────────────────
 # Step helpers
 # ──────────────────────────────────────────────────────────────────────────────
-def pa_observe_and_fuse(pa_sim, env, mapper, gt):
-    """One round of: observe → set_pairwise → update_map_beliefs → fuse."""
-    observations = env.get_observations(gt)
-    mapper.set_pairwise_potential_z(env.agents, observations)
-    mapper.update_map_beliefs(env.agents, observations)
-    mapper.update_news_and_fuse_map_beliefs(env.agents, observations)
-    return observations
-
-
 def mh_observe(coordinator, agents, map_obj, conf_dict):
     """Local observation only (OG update + LBP). No fusion."""
     agent_obs = {}
@@ -352,7 +321,6 @@ def mh_fuse(coordinator, agents, agent_obs, news_sharing=True):
 
 def mh_select_actions(agents, coordinator, grid_info, simulator=None, step=0):
     """One round of greedy IG planning for all agents."""
-    from helper import uav_position
 
     if simulator is not None:
         simulator._select_agent_actions(step)
@@ -368,37 +336,12 @@ def mh_select_actions(agents, coordinator, grid_info, simulator=None, step=0):
     for agent in agents:
         aid = agent["agent_id"]
         planner = agent["planner"]
-        om = agent["occupancy_map"]
         bm = agent["belief_map"]
-        uv = agent["uav_pos"]
         # Update planner belief with fused map
         belief2d = bm[:, :, 1]
         action, scores = planner.select_action(belief2d, None)
         agent["actions"].append(action)
         actions[aid] = action
-    return actions
-
-
-def canonical_actions(action_data_by_agent, atol=1e-9):
-    priority = {
-        "left": 0,
-        "right": 1,
-        "front": 2,
-        "back": 3,
-        "up": 4,
-        "down": 5,
-        "hover": 6,
-    }
-    actions = []
-    for data in action_data_by_agent:
-        scores = data["admissible_action_to_IG"]
-        best_value = max(score[0] for score in scores.values())
-        best_actions = [
-            action
-            for action, score in scores.items()
-            if np.isclose(score[0], best_value, rtol=0.0, atol=atol)
-        ]
-        actions.append(min(best_actions, key=lambda action: priority.get(action, 99)))
     return actions
 
 
@@ -448,60 +391,6 @@ def mh_entropy_total(agents):
     beliefs = np.stack([a["belief_map"][:, :, 1] for a in agents], axis=0)
     fused = beliefs.mean(axis=0)
     return float(np.sum(H_binary(fused)))
-
-
-def print_agent_comparison(
-    step, pa_sim, env, mh_agents, pa_actions, mh_actions, pa_obs, mh_obs, gt
-):
-    for aid in range(len(env.agents)):
-        pa_ag = env.agents[aid]
-        mh_ag = mh_agents[aid]
-        pa_pos = pa_ag.state.position
-        mh_uv = mh_ag["uav_pos"]
-
-        # PA footprint from observation
-        pa_fp = pa_obs[aid]["fp"] if pa_obs else None
-        mh_fp = mh_obs.get(aid, {}).get("fp_ij") if mh_obs else None
-
-        # Per-agent entropy (own belief)
-        pa_ent = float(np.sum(H_binary(pa_sim.map_beliefs[:, :, aid])))
-        mh_ent = float(np.sum(H_binary(mh_ag["belief_map"][:, :, 1])))
-
-        print(f"\n  Agent {aid}")
-        print(
-            f"    PA pos: ({pa_pos[0]:+6.2f},{pa_pos[1]:+6.2f},z={pa_pos[2]:.3f})  "
-            f"action={pa_actions.get(aid,'?') if pa_actions else 'N/A'}"
-        )
-        print(
-            f"    MH pos: ({mh_uv.position[0]:+6.2f},{mh_uv.position[1]:+6.2f},z={mh_uv.altitude:.3f})  "
-            f"action={mh_actions.get(aid,'?') if mh_actions else 'N/A'}"
-        )
-        if pa_fp is not None:
-            print(f"    PA footprint: {pa_fp}")
-        if mh_fp is not None:
-            _r0, _r1 = mh_fp["ul"][0], mh_fp["bl"][0]
-            _c0, _c1 = mh_fp["ul"][1], mh_fp["ur"][1]
-            print(
-                f"    MH footprint: rows [{_r0},{_r1}] cols [{_c0},{_c1}]  "
-                f"({_r1-_r0}×{_c1-_c0} cells)"
-            )
-        print(
-            f"    PA belief entropy: {pa_ent:10.2f}   MH belief entropy: {mh_ent:10.2f}   Δ={mh_ent-pa_ent:+.2f}"
-        )
-        if pa_obs and aid in pa_obs:
-            obs_data = pa_obs[aid]
-            print(
-                f"    PA sigma: ({obs_data['s0']:.4f},{obs_data['s1']:.4f})   "
-                f"cells observed: {obs_data['n_cells']}   "
-                f"GT mean in fp: {obs_data['gt_mean']:.4f}"
-            )
-        if mh_obs and aid in mh_obs:
-            mo = mh_obs[aid]
-            print(
-                f"    MH sigma: ({mo['sigmas'][0]:.4f},{mo['sigmas'][1]:.4f})   "
-                f"cells observed: {mo.get('n_cells','?')}   "
-                f"GT mean in fp: {mo.get('gt_mean','?')}"
-            )
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -581,7 +470,7 @@ def main():
     print(f"  Sigmas identical: {np.isclose(s0_pa,s0_mh) and np.isclose(s1_pa,s1_mh)}")
 
     # ── Starting positions ────────────────────────────────────────────────────
-    print(f"\n  Starting positions:")
+    print("\n  Starting positions:")
     for ag in env.agents:
         mh_ag = mh_agents[ag.id]
         pa_p = ag.state.position
@@ -607,7 +496,7 @@ def main():
         # ── Metrics BEFORE this step's planning/movement/sensing ──────────────
         pa_ent_before = pa_entropy_total(pa_sim)
         mh_ent_before = mh_entropy_total(mh_agents)
-        print(f"\n  Entropy BEFORE planning:")
+        print("\n  Entropy BEFORE planning:")
         print(
             f"    PA fused={pa_ent_before:.2f}   MH fused={mh_ent_before:.2f}   Δ={mh_ent_before-pa_ent_before:+.2f}"
         )
@@ -640,7 +529,7 @@ def main():
             ):
                 mh_ig_scores[aid] = dict(p._greedy_ig_planner._action_scores)
 
-        print(f"\n  Actions chosen:")
+        print("\n  Actions chosen:")
         for aid in range(4):
             pa_act = pa_actions[aid] if pa_actions else "?"
             mh_act = mh_actions[aid] if mh_actions else "?"
@@ -703,16 +592,16 @@ def main():
             }
 
         # ── Print details ─────────────────────────────────────────────────────
-        print(f"\n  After LOCAL observation (before fusion):")
+        print("\n  After LOCAL observation (before fusion):")
         print(
             f"    PA fused={pa_ent_after_local:.2f}   MH fused={mh_ent_after_local:.2f}   Δ={mh_ent_after_local-pa_ent_after_local:+.2f}"
         )
-        print(f"\n  After FUSION:")
+        print("\n  After FUSION:")
         print(
             f"    PA fused={pa_ent_after_fuse:.2f}   MH fused={mh_ent_after_fuse:.2f}   Δ={mh_ent_after_fuse-pa_ent_after_fuse:+.2f}"
         )
 
-        print(f"\n  Per-agent footprint + observation details:")
+        print("\n  Per-agent footprint + observation details:")
         for aid in range(4):
             pa_d = pa_obs_detail.get(aid, {})
             mh_d = mh_obs_detail_raw.get(aid, {})

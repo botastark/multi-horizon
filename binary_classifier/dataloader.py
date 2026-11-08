@@ -107,10 +107,6 @@ class WheatOthomapDataset(Dataset):
     def _index_to_tile(self, index):
         return self.tiles[index]
 
-    # Function to convert a tile (row, col) to an index
-    def _tile_to_index(self, tile):
-        return self.tiles.index(tile)
-
     def _get_image_range(self, tile):
         """
         Given a tile (row, col), return the x and y range slices based on tile_pixel_loc.
@@ -147,10 +143,6 @@ class WheatOthomapDataset(Dataset):
 
     def __len__(self):
         return len(self.tiles)
-
-    def get_tile_info(self, tile):
-        return self._get_tile_img(tile), self.labels[tile[0], tile[1]]
-
 
 # train = WheatOthomapDataset(dataset_path, annotation_path, tile_ortomappixel_path)
 # train_loader = torch.utils.data.DataLoader(

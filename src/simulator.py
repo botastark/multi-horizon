@@ -3,14 +3,14 @@ import time
 import csv
 import os
 from tqdm import tqdm
-from typing import Dict, List, Any, Tuple
+from typing import Dict, Any
 from helper import (
+    select_canonical_action,
     H,
     compute_metrics,
     footprint_dict_to_bounds,
     footprint_iou,
     observed_m_ids,
-    select_argmax_action,
     uav_position,
 )
 from experiment_utils import (
@@ -590,33 +590,12 @@ class Simulator:
         )
         return planner._greedy_ig_planner
 
-    def _pa_compatible_select(self, rng, action_scores):
-        """Select max action without perturbing observation RNG on numeric ties."""
-        del rng
-        priority = {
-            "left": 0,
-            "right": 1,
-            "front": 2,
-            "back": 3,
-            "up": 4,
-            "down": 5,
-            "hover": 6,
-        }
-        best_value = max(score[0] for score in action_scores.values())
-        best_actions = [
-            action
-            for action, score in action_scores.items()
-            if np.isclose(score[0], best_value, rtol=0.0, atol=1e-9)
-        ]
-        return min(best_actions, key=lambda action: priority.get(action, 99))
-
     def _greedy_ig_selfish_data(self):
         actions = []
         data = []
         enable_discounting = getattr(self.coordinator, "mode", None) == "IGd_BM"
 
         for agent in self.agents:
-            camera = agent["camera"]
             uav_pos = agent["uav_pos"]
             greedy_planner = self._greedy_ig_planner_for_agent(
                 agent,
@@ -638,7 +617,7 @@ class Simulator:
                 for action, action_data in scored_actions.items()
             }
 
-            selected = self._pa_compatible_select(camera.rng, admissible_action_to_ig)
+            selected = select_canonical_action(admissible_action_to_ig)
             actions.append(selected)
             data.append(
                 {
@@ -742,10 +721,7 @@ class Simulator:
                             1.0 - overlap
                         )
 
-                action = self._pa_compatible_select(
-                    self.agents[agent_id]["camera"].rng,
-                    data[agent_id]["admissible_action_to_IG"]
-                )
+                action = select_canonical_action(data[agent_id]["admissible_action_to_IG"])
                 _t1 = time.perf_counter()
                 data[agent_id]["_timing_start_ms"] = _t0 * 1000.0
                 data[agent_id]["_timing_end_ms"] = _t1 * 1000.0
@@ -1163,7 +1139,7 @@ class Simulator:
 
             # HLP replan analysis (MH planners)
             if "hlp_replan_frequency" in planner_stats:
-                print(f"\n  HLP Replan Analysis:")
+                print("\n  HLP Replan Analysis:")
                 print(
                     f"    Replan frequency: {planner_stats['hlp_replan_frequency']*100:.1f}% ({planner_stats['hlp_replan_count']} steps)"
                 )
@@ -1184,7 +1160,7 @@ class Simulator:
         total_outliers = len(self.timing_stats["outliers"])
         if total_outliers > 0:
             print(f"\n  TOTAL OUTLIERS ACROSS ALL PLANNERS: {total_outliers}")
-            print(f"  (Steps with latency > mean + 3*std)")
+            print("  (Steps with latency > mean + 3*std)")
 
         print("\n" + "=" * 80)
 

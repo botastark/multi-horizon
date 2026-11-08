@@ -1,7 +1,6 @@
 import os
 import json
 import copy
-import numpy as np
 from tqdm import tqdm
 import matplotlib
 
@@ -184,7 +183,7 @@ def run_experiment_with_config(config: dict, args):
     # Loop over mode labels (allows batch runs via greedy_ig.mode_label = [...])
     for news_mode in mode_labels:
         config = copy.deepcopy(base_config)
-        actual_news_mode = _apply_mh_mode_label(config, news_mode)
+        _apply_mh_mode_label(config, news_mode)
 
         # Get communication range for folder naming
         # Check if radius_multiplier is specified (preferred, matches reference paper)
@@ -249,7 +248,7 @@ def run_experiment_with_config(config: dict, args):
         # Setup logging to file only if debug_logs is enabled
         if debug_logs:
             log_dir = os.path.join(results_folder, "logs")
-            log_file = setup_main_logger(log_dir=log_dir, experiment_name=run_base)
+            setup_main_logger(log_dir=log_dir, experiment_name=run_base)
             logger = get_main_logger()
             logger.info(f"Running experiment mode: {news_mode}")
             logger.info(f"Results folder: {results_folder}")
@@ -268,7 +267,6 @@ def run_experiment_with_config(config: dict, args):
         mcts_params = config.get("mcts_params", {})
 
         field_type = config["field_type"]
-        start_position = config["start_position"]
         action_strategy = config["action_strategy"]
         correlation_types = config["correlation_types"]
         n_steps = config["n_steps"]
@@ -406,7 +404,7 @@ def run_experiment_with_config(config: dict, args):
                         )
                         init_camera = camera1
 
-                    result = run_multi_agent_experiment(
+                    run_multi_agent_experiment(
                         config=config,
                         grid_info=grid_info,
                         map_obj=map_obj,

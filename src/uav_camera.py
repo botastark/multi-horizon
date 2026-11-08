@@ -38,7 +38,7 @@ class Camera:
         h_step=None,
         f_overlap=None,
         s_overlap=None,
-        camera_altitude=0,
+        camera_altitude=0.0,
         camera_pos=(0.0, 0.0),
         seed=42,
         a=1,
@@ -77,16 +77,13 @@ class Camera:
         # Compute horizontal step size (xy_step) based on overlaps and FoV.
         if f_overlap != None and s_overlap != None:
             # Compute horizontal step size (xy_step) based on overlaps and FoV.
-            theta_w = np.deg2rad(self.fov)  # Horizontal FoV (radians)
             theta_h = np.deg2rad(self.fov)  # Vertical FoV (radians)
 
             # Compute ground footprint dimensions
-            W = 2 * self.altitude * np.tan(theta_w / 2)  # Ground width (meters)
             H = 2 * self.altitude * np.tan(theta_h / 2)  # Ground height (meters)
 
             # Compute step sizes based on overlap
             xy_step_f = H * (1 - f_overlap)  # Forward step
-            xy_step_s = W * (1 - s_overlap)  # Side step
             self.xy_step = round(xy_step_f, 2)
         else:
             # Fallback: use half the minimum range divided by 8.
@@ -107,8 +104,6 @@ class Camera:
 
         # Define available actions.
         self.actions = {"up", "down", "front", "back", "left", "right", "hover"}
-        # print(f"H range: {self.h_range}")
-        # print(f"xy_step {self.xy_step}, h_step {self.h_step}")
 
     def reset(self):
         self.position = (0.0, 0.0)

@@ -32,7 +32,7 @@ from types import SimpleNamespace
 
 # ── project imports ──────────────────────────────────────────────────────────
 from uav_camera import Camera
-from greedy_ig_planner import GreedyIGPlanner, H, cH
+from greedy_ig_planner import H, cH
 from hierarchical_dec_mcts import LowLevelPlanner, HLIntent
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -205,9 +205,9 @@ def test_ig_altitude_curve():
         raw_entropy_ig[-1] >= raw_entropy_ig[0]
     ), "Raw entropy must be non-decreasing with altitude"
 
-    print(f"\n  ✓ True IG shows sensor-model dip at σ≈0.5 altitude.")
+    print("\n  ✓ True IG shows sensor-model dip at σ≈0.5 altitude.")
     print(
-        f"  ✓ Raw entropy is monotone — LLP without sensor model always prefers max alt."
+        "  ✓ Raw entropy is monotone — LLP without sensor model always prefers max alt."
     )
     return altitudes, raw_entropy_ig, true_ig
 
@@ -453,15 +453,15 @@ def test_hlp_g2_influence():
     n_in_no_g2 = in_target(states_no_g2)
     n_in_with_g2 = in_target(states_with_g2)
 
-    print(f"\n  Start position: (0, 0),  Target region: x∈[0,50], y∈[-50,0]")
-    print(f"\n  Plan WITHOUT g2:")
+    print("\n  Start position: (0, 0),  Target region: x∈[0,50], y∈[-50,0]")
+    print("\n  Plan WITHOUT g2:")
     print(f"    Actions : {intent_no_g2.action_sequence}")
     print(
         f"    States  : {[(round(s[0],1), round(s[1],1), round(s[2],1)) for s in states_no_g2]}"
     )
     print(f"    States in target region: {n_in_no_g2}/{len(states_no_g2)}")
     print(f"    Total IG: {intent_no_g2.total_expected_ig:.4f}")
-    print(f"\n  Plan WITH g2 (HLP → target region):")
+    print("\n  Plan WITH g2 (HLP → target region):")
     print(f"    Actions : {intent_with_g2.action_sequence}")
     print(
         f"    States  : {[(round(s[0],1), round(s[1],1), round(s[2],1)) for s in states_with_g2]}"
@@ -479,8 +479,8 @@ def test_hlp_g2_influence():
             "  ⚠ HLP g2 guidance did NOT increase movement toward target — check g2 weight."
         )
 
-    print(f"\n  NOTE: With 'stub' g2 mode and low horizon the effect may be subtle.")
-    print(f"  Use g2_mode='hl_aware' and longer horizon for stronger guidance.")
+    print("\n  NOTE: With 'stub' g2 mode and low horizon the effect may be subtle.")
+    print("  Use g2_mode='hl_aware' and longer horizon for stronger guidance.")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

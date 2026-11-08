@@ -1,6 +1,6 @@
 import numpy as np
 from helper import adaptive_weights_matrix
-from typing import Dict, Optional, Tuple, Any
+from typing import Optional
 
 
 class OccupancyMap:
@@ -23,7 +23,6 @@ class OccupancyMap:
         self.correlation_type = correlation_type
         self.eps = eps
 
-        self.phi = np.full((self.N[0], self.N[1], 2), 0.5)  # Local evidence
         self.map_beliefs = np.full((self.N[0], self.N[1]), 0.5)  # Marginal beliefs
 
         self.msgs = None
@@ -41,7 +40,6 @@ class OccupancyMap:
     def reset(self, conf_dict=None):
         """Reset the map beliefs and message structures."""
         self.conf_dict = conf_dict
-        self.phi = np.full((self.N[0], self.N[1], 2), 0.5)
         self.last_observations = np.array([])
         self._init_LBP_msgs()
         self.map_beliefs = np.full((self.N[0], self.N[1]), 0.5)
@@ -167,15 +165,6 @@ class OccupancyMap:
             return np.array(
                 adaptive_weights_matrix(self.last_observations), dtype=float
             )
-
-    def get_indices(self, i, j):
-        """Compute bounding box corner indices from 1D row/col index arrays."""
-        return {
-            "ul": np.array([np.min(i), np.min(j)]),
-            "bl": np.array([np.max(i) + 1, np.min(j)]),
-            "ur": np.array([np.min(i), np.max(j) + 1]),
-            "br": np.array([np.max(i) + 1, np.max(j) + 1]),
-        }
 
     def get_belief(self):
         """Return current belief map (probability of occupancy)."""

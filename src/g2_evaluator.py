@@ -36,7 +36,7 @@ Available g2 modes (selectable via `mode` parameter):
 All modes scale output by 0.1 to stay comparable to g1 (IG units).
 """
 
-from typing import Dict, Optional, Tuple, List, Any
+from typing import Dict, Optional, Tuple, Any
 import numpy as np
 from collections import OrderedDict
 
@@ -468,7 +468,6 @@ def _g2_eta_weighted(
         if region_entropy < 1e-6:
             continue
 
-        target = region_hotspot_ij.get(rid, region["center"])
         min_eta = float("inf")
 
         for aid, hl_intent in hl_intents.items():
@@ -707,44 +706,3 @@ def compute_ll_overlap_penalty(ll_intents: Dict[int, Any]) -> float:
 # ---------------------------------------------------------------------------
 # Legacy stubs (backward compatibility)
 # ---------------------------------------------------------------------------
-
-
-def evaluate_region_coverage(
-    hl_intents: Dict[int, Any],
-    belief: np.ndarray,
-    grid_info: Any,
-) -> float:
-    """Legacy stub. Use _g2_hl_aware instead."""
-    return 0.0
-
-
-def compute_coordination_penalty(
-    ll_intents: Dict[int, Any],
-    hl_intents: Dict[int, Any],
-) -> float:
-    """Legacy stub. Overlap handled in compute_ll_overlap_penalty."""
-    return 0.0
-
-
-def get_region_uncertainty(
-    belief: np.ndarray,
-    region_bounds: Tuple[int, int, int, int],
-) -> float:
-    """Total entropy in a rectangular region."""
-    imin, imax, jmin, jmax = region_bounds
-    region_belief = belief[imin:imax, jmin:jmax]
-    if region_belief.ndim == 3:
-        region_belief = region_belief[:, :, 1:]
-    return compute_uncertain_area(region_belief)
-
-
-def compute_region_overlap(
-    region1: Tuple[int, int, int, int],
-    region2: Tuple[int, int, int, int],
-) -> float:
-    """Intersection area between two (imin, imax, jmin, jmax) rectangles."""
-    i1_min, i1_max, j1_min, j1_max = region1
-    i2_min, i2_max, j2_min, j2_max = region2
-    i_overlap = max(0, min(i1_max, i2_max) - max(i1_min, i2_min))
-    j_overlap = max(0, min(j1_max, j2_max) - max(j1_min, j2_min))
-    return float(i_overlap * j_overlap)
