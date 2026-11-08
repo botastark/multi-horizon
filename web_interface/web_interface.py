@@ -11,13 +11,11 @@ import threading
 import time
 import re
 import logging
-from pathlib import Path
 from flask import Flask, render_template, request, jsonify, send_file
 from datetime import datetime
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import importlib.util
 
 # Get project root directory (parent of web_interface/)
@@ -50,6 +48,68 @@ experiment_state = {
 
 # Method configurations with parameters and descriptions
 # Ordered as: 1.IG, 2.DecMCTS, 3.MH_Full, 4.MH_Eff
+def _mh_shared_params(hlp_horizon_description):
+    """Tunable parameters shared by both MH-Dec-MCTS variants."""
+    return {
+        "llp_discount": {
+            "type": "float",
+            "default": 0.95,
+            "min": 0.5,
+            "max": 1.0,
+            "step": 0.05,
+            "description": "LLP discount factor",
+        },
+        "hlp_horizon": {
+            "type": "int",
+            "default": 8,
+            "min": 3,
+            "max": 15,
+            "step": 1,
+            "description": hlp_horizon_description,
+        },
+        "hlp_iterations": {
+            "type": "int",
+            "default": 30,
+            "min": 10,
+            "max": 100,
+            "step": 10,
+            "description": "HLP MCTS iterations",
+        },
+        "hlp_ucb_c": {
+            "type": "float",
+            "default": 1.0,
+            "min": 0.5,
+            "max": 3.0,
+            "step": 0.1,
+            "description": "HLP UCB exploration constant",
+        },
+        "hlp_discount": {
+            "type": "float",
+            "default": 0.98,
+            "min": 0.5,
+            "max": 1.0,
+            "step": 0.05,
+            "description": "HLP discount factor",
+        },
+        "replan_interval": {
+            "type": "float",
+            "default": 2.0,
+            "min": 0.5,
+            "max": 5.0,
+            "step": 0.5,
+            "description": "HLP replan interval (seconds)",
+        },
+        "overlap_penalty_weight": {
+            "type": "float",
+            "default": 0.3,
+            "min": 0.0,
+            "max": 1.0,
+            "step": 0.1,
+            "description": "Penalty weight for overlapping coverage",
+        },
+    }
+
+
 METHOD_CONFIGS = {
     "greedy_ig": {
         "name": "1. IG (Greedy Information Gain)",
@@ -152,62 +212,9 @@ METHOD_CONFIGS = {
                 "step": 10,
                 "description": "LLP iterations (random rollout sampling)",
             },
-            "llp_discount": {
-                "type": "float",
-                "default": 0.95,
-                "min": 0.5,
-                "max": 1.0,
-                "step": 0.05,
-                "description": "LLP discount factor",
-            },
-            "hlp_horizon": {
-                "type": "int",
-                "default": 8,
-                "min": 3,
-                "max": 15,
-                "step": 1,
-                "description": "High-Level Planner horizon (strategic region allocation)",
-            },
-            "hlp_iterations": {
-                "type": "int",
-                "default": 30,
-                "min": 10,
-                "max": 100,
-                "step": 10,
-                "description": "HLP MCTS iterations",
-            },
-            "hlp_ucb_c": {
-                "type": "float",
-                "default": 1.0,
-                "min": 0.5,
-                "max": 3.0,
-                "step": 0.1,
-                "description": "HLP UCB exploration constant",
-            },
-            "hlp_discount": {
-                "type": "float",
-                "default": 0.98,
-                "min": 0.5,
-                "max": 1.0,
-                "step": 0.05,
-                "description": "HLP discount factor",
-            },
-            "replan_interval": {
-                "type": "float",
-                "default": 2.0,
-                "min": 0.5,
-                "max": 5.0,
-                "step": 0.5,
-                "description": "HLP replan interval (seconds)",
-            },
-            "overlap_penalty_weight": {
-                "type": "float",
-                "default": 0.3,
-                "min": 0.0,
-                "max": 1.0,
-                "step": 0.1,
-                "description": "Penalty weight for overlapping coverage",
-            },
+            **_mh_shared_params(
+                "High-Level Planner horizon (strategic region allocation)"
+            ),
         },
     },
     "mh_dec_mcts_efficient": {
@@ -241,62 +248,7 @@ METHOD_CONFIGS = {
                 "step": 0.1,
                 "description": "LLP UCB exploration constant",
             },
-            "llp_discount": {
-                "type": "float",
-                "default": 0.95,
-                "min": 0.5,
-                "max": 1.0,
-                "step": 0.05,
-                "description": "LLP discount factor",
-            },
-            "hlp_horizon": {
-                "type": "int",
-                "default": 8,
-                "min": 3,
-                "max": 15,
-                "step": 1,
-                "description": "High-Level Planner horizon",
-            },
-            "hlp_iterations": {
-                "type": "int",
-                "default": 30,
-                "min": 10,
-                "max": 100,
-                "step": 10,
-                "description": "HLP MCTS iterations",
-            },
-            "hlp_ucb_c": {
-                "type": "float",
-                "default": 1.0,
-                "min": 0.5,
-                "max": 3.0,
-                "step": 0.1,
-                "description": "HLP UCB exploration constant",
-            },
-            "hlp_discount": {
-                "type": "float",
-                "default": 0.98,
-                "min": 0.5,
-                "max": 1.0,
-                "step": 0.05,
-                "description": "HLP discount factor",
-            },
-            "replan_interval": {
-                "type": "float",
-                "default": 2.0,
-                "min": 0.5,
-                "max": 5.0,
-                "step": 0.5,
-                "description": "HLP replan interval (seconds)",
-            },
-            "overlap_penalty_weight": {
-                "type": "float",
-                "default": 0.3,
-                "min": 0.0,
-                "max": 1.0,
-                "step": 0.1,
-                "description": "Penalty weight for overlapping coverage",
-            },
+            **_mh_shared_params("High-Level Planner horizon"),
         },
     },
 }
@@ -1024,7 +976,7 @@ def extract_run_info(run_name, run_path, status="ongoing", method_hint=None):
                 # Use first txt file to get final metrics
                 first_file = os.path.join(txt_dir, txt_files[0])
                 metrics = _extract_final_metrics(first_file)
-        except Exception as e:
+        except Exception:
             pass  # Metrics will remain empty
 
     # Map method to display name
@@ -1140,7 +1092,7 @@ def _extract_hyperparams_from_log(run_path, method):
             if iter_match:
                 hyperparams["iterations"] = int(iter_match.group(1))
 
-    except Exception as e:
+    except Exception:
         pass
 
     return hyperparams
@@ -1381,7 +1333,7 @@ def _extract_final_metrics(file_path):
                     metrics["final_coverage"] = float(parts[4])
                 except (ValueError, IndexError):
                     pass
-    except Exception as e:
+    except Exception:
         pass
 
     return metrics
@@ -1859,7 +1811,6 @@ def create_experiment_config(method, params):
     config["experiment"]["web_interface"] = True
 
     # Update method-specific parameters
-    method_key = config.get("action_strategy")
 
     if method == "greedy_ig":
         if "greedy_ig" in config:
@@ -2149,7 +2100,7 @@ def run_experiment_background(config_path):
                                     if current is not None and total is not None:
                                         experiment_state["current_iter"] = current
                                         experiment_state["total_iters"] = total
-                                except Exception as e:
+                                except Exception:
                                     pass  # Ignore parsing errors
 
                         # Track results path from output
@@ -2237,30 +2188,7 @@ def run_experiment_background(config_path):
                     "[INFO] Experiment stopped by user"
                 )
                 # Move to failed directory
-                if temp_run_path and os.path.exists(temp_run_path):
-                    failed_dir = os.path.join(PROJECT_ROOT, "experiments", "failed")
-                    os.makedirs(failed_dir, exist_ok=True)
-                    failed_path = os.path.join(failed_dir, run_dirname)
-                    try:
-                        import shutil
-
-                        shutil.move(temp_run_path, failed_path)
-                        experiment_state["log_output"].append(
-                            f"[INFO] Moved to failed: {failed_path}"
-                        )
-                        # Update metadata
-                        metadata_path = os.path.join(failed_path, "metadata.json")
-                        if os.path.exists(metadata_path):
-                            with open(metadata_path, "r") as f:
-                                meta = json.load(f)
-                            meta["status"] = "stopped"
-                            meta["end_time"] = datetime.now().isoformat()
-                            with open(metadata_path, "w") as f:
-                                json.dump(meta, f, indent=2)
-                    except Exception as e:
-                        experiment_state["log_output"].append(
-                            f"[ERROR] Failed to move to failed dir: {e}"
-                        )
+                _move_run_to_failed(temp_run_path, run_dirname, "stopped")
             else:
                 detailed_error = f"Process exited with code {returncode}"
                 if stderr_tail:
@@ -2290,31 +2218,7 @@ def run_experiment_background(config_path):
                             [f"[ERROR] {line}" for line in actual_errors]
                         )
                 # Move to failed directory
-                if temp_run_path and os.path.exists(temp_run_path):
-                    failed_dir = os.path.join(PROJECT_ROOT, "experiments", "failed")
-                    os.makedirs(failed_dir, exist_ok=True)
-                    failed_path = os.path.join(failed_dir, run_dirname)
-                    try:
-                        import shutil
-
-                        shutil.move(temp_run_path, failed_path)
-                        experiment_state["log_output"].append(
-                            f"[INFO] Moved to failed: {failed_path}"
-                        )
-                        # Update metadata
-                        metadata_path = os.path.join(failed_path, "metadata.json")
-                        if os.path.exists(metadata_path):
-                            with open(metadata_path, "r") as f:
-                                meta = json.load(f)
-                            meta["status"] = "failed"
-                            meta["end_time"] = datetime.now().isoformat()
-                            meta["error"] = detailed_error
-                            with open(metadata_path, "w") as f:
-                                json.dump(meta, f, indent=2)
-                    except Exception as e:
-                        experiment_state["log_output"].append(
-                            f"[ERROR] Failed to move to failed dir: {e}"
-                        )
+                _move_run_to_failed(temp_run_path, run_dirname, "failed", error=detailed_error)
         else:
             # Success! Move from temp to runs/<method>/
             if temp_run_path and os.path.exists(temp_run_path):
@@ -2441,9 +2345,7 @@ def generate_comparison_plots(run_paths, include_timing=True, timing_metric="Mea
     Returns:
         Dictionary with plot URLs for {metrics, timing}
     """
-    import sys
     import pandas as pd
-    import numpy as np
 
     # Import plotter functions
     plotter_path = os.path.join(PROJECT_ROOT, "plotter.py")
@@ -2518,7 +2420,6 @@ def generate_comparison_plots(run_paths, include_timing=True, timing_metric="Mea
             timing_data_dict = {}
             hlp_timing_dict = {}
             llp_timing_dict = {}
-            has_hierarchical = False
 
             for run_path in run_paths:
                 run_name = os.path.basename(os.path.normpath(run_path))
@@ -2540,7 +2441,6 @@ def generate_comparison_plots(run_paths, include_timing=True, timing_metric="Mea
                     hlp_df = plotter.parse_timing_csv(hlp_csv_path)
                     if not hlp_df.empty:
                         hlp_timing_dict[method] = hlp_df
-                        has_hierarchical = True
 
                 # LLP timing (hierarchical methods only)
                 llp_csv_path = os.path.join(run_path, "txt", "timestamps_llp.csv")
@@ -2663,7 +2563,7 @@ def generate_plots(results_path):
         result = create_simple_plot(results_path, output_path)
         if result:
             return output_file  # Return the filename directly
-    except Exception as e:
+    except Exception:
         import traceback
 
         traceback.print_exc()
@@ -2719,6 +2619,145 @@ def generate_plots(results_path):
     return None
 
 
+def _parse_run_log(file_path, all_data, verbose=False):
+    """Append per-iteration steps, entropy, MSE, coverage and heights from a run log to all_data."""
+    import numpy as np
+
+    with open(file_path, "r") as f:
+        lines = f.readlines()
+
+    # Split file into iterations - each iteration section starts with "Iteration: X"
+    iteration_sections = []
+    current_section = []
+    is_multi_agent = False
+
+    for line in lines:
+        # Check for multi-agent format
+        if "Heights" in line or "Actions" in line:
+            is_multi_agent = True
+
+        # Check if this is start of new iteration
+        if line.strip().startswith("Iteration:"):
+            if current_section:
+                iteration_sections.append(current_section)
+            current_section = [line]
+        else:
+            current_section.append(line)
+
+    # Don't forget the last section
+    if current_section:
+        iteration_sections.append(current_section)
+
+    # If no iteration markers found, treat entire file as one iteration
+    if not iteration_sections:
+        iteration_sections = [lines]
+
+    if verbose:
+        print(f"  Found {len(iteration_sections)} iteration(s) in file")
+
+    # Parse each iteration separately
+    for iter_idx, section_lines in enumerate(iteration_sections):
+        # Find data section within this iteration
+        data_start = None
+        for i, line in enumerate(section_lines):
+            if line.strip().startswith("Step"):
+                # Skip header and separator line (----)
+                data_start = i + 1
+                if (
+                    i + 1 < len(section_lines)
+                    and "---" in section_lines[i + 1]
+                ):
+                    data_start = i + 2
+                break
+
+        if data_start:
+            steps = []
+            entropies = []
+            mses = []
+            coverages = []
+            heights_data = []
+
+            for line in section_lines[data_start:]:
+                line = line.strip()
+                # Stop if we hit next iteration or empty section
+                if not line or line.startswith("Iteration:"):
+                    break
+                if not line[0].isdigit():
+                    continue
+
+                parts = line.split()
+                if len(parts) >= 4:
+                    try:
+                        steps.append(float(parts[0]))
+                        entropies.append(float(parts[1]))
+                        mses.append(float(parts[2]))
+                        coverages.append(float(parts[3]))
+
+                        # Parse heights if multi-agent format (column 4 has [h1, h2, ...])
+                        if is_multi_agent and len(parts) > 4:
+                            # Extract heights list [h1, h2, h3, h4]
+                            heights_str = (
+                                " ".join(parts[4:])
+                                .split("]")[0]
+                                .replace("[", "")
+                            )
+                            if heights_str:
+                                heights_list = [
+                                    float(h.strip(","))
+                                    for h in heights_str.split()
+                                    if h.strip(",")
+                                    .replace(".", "")
+                                    .isdigit()
+                                ]
+                                if heights_list:
+                                    heights_data.append(
+                                        np.mean(heights_list)
+                                    )  # Average across agents
+                    except (ValueError, IndexError):
+                        # Skip lines that don't parse correctly
+                        continue
+
+            if steps:
+                all_data["steps"].append(steps)
+                all_data["entropies"].append(entropies)
+                all_data["mses"].append(mses)
+                all_data["coverages"].append(coverages)
+                all_data["heights"].append(
+                    heights_data if heights_data else [0] * len(steps)
+                )
+                if verbose:
+                    print(f"  Iteration {iter_idx}: Parsed {len(steps)} steps")
+
+
+
+def _move_run_to_failed(temp_run_path, run_dirname, status, error=None):
+    """Move an unfinished run to experiments/failed and record its status in metadata.json."""
+    if not temp_run_path or not os.path.exists(temp_run_path):
+        return
+    failed_dir = os.path.join(PROJECT_ROOT, "experiments", "failed")
+    os.makedirs(failed_dir, exist_ok=True)
+    failed_path = os.path.join(failed_dir, run_dirname)
+    try:
+        import shutil
+
+        shutil.move(temp_run_path, failed_path)
+        experiment_state["log_output"].append(f"[INFO] Moved to failed: {failed_path}")
+        metadata_path = os.path.join(failed_path, "metadata.json")
+        if os.path.exists(metadata_path):
+            with open(metadata_path, "r") as f:
+                meta = json.load(f)
+            meta["status"] = status
+            meta["end_time"] = datetime.now().isoformat()
+            if error is not None:
+                meta["error"] = error
+            with open(metadata_path, "w") as f:
+                json.dump(meta, f, indent=2)
+    except Exception as e:
+        experiment_state["log_output"].append(
+            f"[ERROR] Failed to move to failed dir: {e}"
+        )
+
+
 def create_simple_plot(results_path, output_path):
     """Create a simple plot from experiment text files."""
     print(f"Creating simple plot from {results_path}")
@@ -2761,109 +2800,7 @@ def create_simple_plot(results_path, output_path):
             print(f"Parsing {txt_file}...")
 
             try:
-                with open(file_path, "r") as f:
-                    lines = f.readlines()
-
-                # Split file into iterations - each iteration section starts with "Iteration: X"
-                iteration_sections = []
-                current_section = []
-                is_multi_agent = False
-
-                for line in lines:
-                    # Check for multi-agent format
-                    if "Heights" in line or "Actions" in line:
-                        is_multi_agent = True
-
-                    # Check if this is start of new iteration
-                    if line.strip().startswith("Iteration:"):
-                        if current_section:
-                            iteration_sections.append(current_section)
-                        current_section = [line]
-                    else:
-                        current_section.append(line)
-
-                # Don't forget the last section
-                if current_section:
-                    iteration_sections.append(current_section)
-
-                # If no iteration markers found, treat entire file as one iteration
-                if not iteration_sections:
-                    iteration_sections = [lines]
-
-                print(f"  Found {len(iteration_sections)} iteration(s) in file")
-
-                # Parse each iteration separately
-                for iter_idx, section_lines in enumerate(iteration_sections):
-                    # Find data section within this iteration
-                    data_start = None
-                    for i, line in enumerate(section_lines):
-                        if line.strip().startswith("Step"):
-                            # Skip header and separator line (----)
-                            data_start = i + 1
-                            if (
-                                i + 1 < len(section_lines)
-                                and "---" in section_lines[i + 1]
-                            ):
-                                data_start = i + 2
-                            break
-
-                    if data_start:
-                        steps = []
-                        entropies = []
-                        mses = []
-                        coverages = []
-                        heights_data = []
-
-                        for line in section_lines[data_start:]:
-                            line = line.strip()
-                            # Stop if we hit next iteration or empty section
-                            if not line or line.startswith("Iteration:"):
-                                break
-                            if not line[0].isdigit():
-                                continue
-
-                            parts = line.split()
-                            if len(parts) >= 4:
-                                try:
-                                    steps.append(float(parts[0]))
-                                    entropies.append(float(parts[1]))
-                                    mses.append(float(parts[2]))
-                                    coverages.append(float(parts[3]))
-
-                                    # Parse heights if multi-agent format (column 4 has [h1, h2, ...])
-                                    if is_multi_agent and len(parts) > 4:
-                                        # Extract heights list [h1, h2, h3, h4]
-                                        heights_str = (
-                                            " ".join(parts[4:])
-                                            .split("]")[0]
-                                            .replace("[", "")
-                                        )
-                                        if heights_str:
-                                            heights_list = [
-                                                float(h.strip(","))
-                                                for h in heights_str.split()
-                                                if h.strip(",")
-                                                .replace(".", "")
-                                                .isdigit()
-                                            ]
-                                            if heights_list:
-                                                heights_data.append(
-                                                    np.mean(heights_list)
-                                                )  # Average across agents
-                                except (ValueError, IndexError) as e:
-                                    # Skip lines that don't parse correctly
-                                    continue
-
-                        if steps:
-                            all_data["steps"].append(steps)
-                            all_data["entropies"].append(entropies)
-                            all_data["mses"].append(mses)
-                            all_data["coverages"].append(coverages)
-                            all_data["heights"].append(
-                                heights_data if heights_data else [0] * len(steps)
-                            )
-                            print(f"  Iteration {iter_idx}: Parsed {len(steps)} steps")
-
+                _parse_run_log(file_path, all_data, verbose=True)
             except Exception as e:
                 print(f"Error parsing {txt_file}: {e}")
                 continue
@@ -2911,7 +2848,6 @@ def create_simple_plot(results_path, output_path):
             fontweight="bold",
         )
 
-        steps_arr = np.array(steps)
 
         # Plot entropy with std shading
         ax1 = fig.add_subplot(gs[0, 0])
@@ -3104,96 +3040,7 @@ def create_multi_run_plot(run_paths, output_path):
                 file_path = os.path.join(txt_dir, txt_file)
 
                 try:
-                    with open(file_path, "r") as f:
-                        lines = f.readlines()
-
-                    # Split by iterations
-                    iteration_sections = []
-                    current_section = []
-                    is_multi_agent = False
-
-                    for line in lines:
-                        if "Heights" in line or "Actions" in line:
-                            is_multi_agent = True
-                        if line.strip().startswith("Iteration:"):
-                            if current_section:
-                                iteration_sections.append(current_section)
-                            current_section = [line]
-                        else:
-                            current_section.append(line)
-
-                    if current_section:
-                        iteration_sections.append(current_section)
-                    if not iteration_sections:
-                        iteration_sections = [lines]
-
-                    # Parse each iteration
-                    for section_lines in iteration_sections:
-                        data_start = None
-                        for i, line in enumerate(section_lines):
-                            if line.strip().startswith("Step"):
-                                data_start = i + 1
-                                if (
-                                    i + 1 < len(section_lines)
-                                    and "---" in section_lines[i + 1]
-                                ):
-                                    data_start = i + 2
-                                break
-
-                        if data_start:
-                            steps, entropies, mses, coverages, heights_data = (
-                                [],
-                                [],
-                                [],
-                                [],
-                                [],
-                            )
-
-                            for line in section_lines[data_start:]:
-                                line = line.strip()
-                                if not line or line.startswith("Iteration:"):
-                                    break
-                                if not line[0].isdigit():
-                                    continue
-
-                                parts = line.split()
-                                if len(parts) >= 4:
-                                    try:
-                                        steps.append(float(parts[0]))
-                                        entropies.append(float(parts[1]))
-                                        mses.append(float(parts[2]))
-                                        coverages.append(float(parts[3]))
-
-                                        if is_multi_agent and len(parts) > 4:
-                                            heights_str = (
-                                                " ".join(parts[4:])
-                                                .split("]")[0]
-                                                .replace("[", "")
-                                            )
-                                            if heights_str:
-                                                heights_list = [
-                                                    float(h.strip(","))
-                                                    for h in heights_str.split()
-                                                    if h.strip(",")
-                                                    .replace(".", "")
-                                                    .isdigit()
-                                                ]
-                                                if heights_list:
-                                                    heights_data.append(
-                                                        np.mean(heights_list)
-                                                    )
-                                    except (ValueError, IndexError):
-                                        continue
-
-                            if steps:
-                                all_data["steps"].append(steps)
-                                all_data["entropies"].append(entropies)
-                                all_data["mses"].append(mses)
-                                all_data["coverages"].append(coverages)
-                                all_data["heights"].append(
-                                    heights_data if heights_data else [0] * len(steps)
-                                )
-
+                    _parse_run_log(file_path, all_data, verbose=False)
                 except Exception as e:
                     print(f"Error parsing {txt_file}: {e}")
                     continue
