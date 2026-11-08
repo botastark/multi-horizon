@@ -24,14 +24,15 @@ Reference: Section 3 of the paper for Dec-MCTS framework
 """
 
 import numpy as np
-from typing import Dict, List, Tuple, Optional, Any, Set
+from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass, field
 import time
 import logging
 import copy
 import threading
 
-from helper import uav_position, H, expected_posterior
+from helper import StalenessMixin, uav_position, H, expected_posterior
+from mcts import SearchNodeOps, copy_state
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,7 @@ def copy_state(state: Dict) -> Dict:
 
 
 @dataclass
-class DecMCTSIntent:
+class DecMCTSIntent(StalenessMixin):
     """
     Intent for Dec-MCTS planner.
 
