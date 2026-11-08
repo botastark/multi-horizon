@@ -4,6 +4,7 @@ Flask Web Interface for MCTS Experiment Configuration and Execution
 """
 
 import json
+from typing import Optional
 import os
 import sys
 import subprocess
@@ -1966,7 +1967,7 @@ def _parse_progress_from_text(text: str):
     return int(match.group(1)), int(match.group(2))
 
 
-def _update_progress_from_runlog(results_path: str):
+def _update_progress_from_runlog(results_path: Optional[str]):
     """Fallback progress update by reading txt/run.log while process is running."""
     if not results_path:
         return
@@ -2039,6 +2040,9 @@ def run_experiment_background(config_path):
         experiment_state["log_output"].append(
             f"[INFO] Process started with PID: {process.pid}"
         )
+
+        # Both streams exist because Popen was given stdout=PIPE and stderr=PIPE
+        assert process.stdout is not None and process.stderr is not None
 
         # Store process handle for stopping
         experiment_state["process"] = process
@@ -2221,7 +2225,7 @@ def run_experiment_background(config_path):
                 _move_run_to_failed(temp_run_path, run_dirname, "failed", error=detailed_error)
         else:
             # Success! Move from temp to runs/<method>/
-            if temp_run_path and os.path.exists(temp_run_path):
+            if temp_run_path and run_dirname and os.path.exists(temp_run_path):
                 runs_dir = os.path.join(PROJECT_ROOT, "experiments", "runs", method)
                 os.makedirs(runs_dir, exist_ok=True)
                 final_path = os.path.join(runs_dir, run_dirname)
@@ -2351,6 +2355,8 @@ def generate_comparison_plots(run_paths, include_timing=True, timing_metric="Mea
     plotter_path = os.path.join(PROJECT_ROOT, "plotter.py")
     if os.path.exists(plotter_path):
         spec = importlib.util.spec_from_file_location("plotter", plotter_path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Cannot load {plotter_path}")
         plotter = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(plotter)
     else:

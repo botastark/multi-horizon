@@ -25,9 +25,6 @@ class OccupancyMap:
 
         self.map_beliefs = np.full((self.N[0], self.N[1]), 0.5)  # Marginal beliefs
 
-        self.msgs = None
-        self.msgs_buffer = None
-        self.direction_to_slicing_data = None
         self._init_LBP_msgs()
 
         # Sensor model parameters (set during OG update)
@@ -185,11 +182,12 @@ class OccupancyMap:
                 "conf_dict must be provided with altitude->(sigma0, sigma1) mapping."
             )
         alt = np.round(uav_pos.altitude, decimals=2)
-        self.sigma0, self.sigma1 = self.conf_dict[alt]
+        sigma0, sigma1 = self.conf_dict[alt]
+        self.sigma0, self.sigma1 = sigma0, sigma1
 
         # Likelihood of each state (0 or 1)
-        likelihood_m_zero = np.where(z == 0, 1 - self.sigma0, self.sigma0)
-        likelihood_m_one = np.where(z == 0, self.sigma1, 1 - self.sigma1)
+        likelihood_m_zero = np.where(z == 0, 1 - sigma0, sigma0)
+        likelihood_m_one = np.where(z == 0, sigma1, 1 - sigma1)
 
         assert np.all(np.greater_equal(likelihood_m_one, 0.0)) and np.all(
             np.less_equal(likelihood_m_one, 1.0)

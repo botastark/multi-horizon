@@ -1802,7 +1802,7 @@ class HierarchicalDecMCTSPlanner:
         # Get teammate intent summary
         ll_intents = self.intent_bus.get_teammate_ll_intents(self.agent_id)
         hl_intents = self.intent_bus.get_teammate_hl_intents(self.agent_id)
-        intents_received = {
+        intents_received: Dict[str, Any] = {
             "ll_intents_from": list(ll_intents.keys()),
             "hl_intents_from": list(hl_intents.keys()),
         }

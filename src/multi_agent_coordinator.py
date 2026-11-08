@@ -318,6 +318,8 @@ class MultiAgentCoordinator:
                 # independent of agent count, and proximity is componentwise in
                 # x/y/z rather than Euclidean in x/y.
                 n_h_act = ma_config.get("n_h_act", dec_config.get("n_h_act", 8))
+                if grid_info is None:
+                    raise ValueError("grid_info is required when radius_multiplier is set")
                 h_displacement = (grid_info.x / 2) / n_h_act
                 fov_deg = ma_config.get("fov", dec_config.get("fov", 60.0))
                 v_displacement = h_displacement / math.tan(math.radians(fov_deg) * 0.5)

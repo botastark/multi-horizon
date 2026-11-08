@@ -136,6 +136,12 @@ class Simulator:
             (self.grid_info.shape[0], self.grid_info.shape[1], 2), 0.5
         )
 
+    def _require_coordinator(self):
+        """Return the coordinator, which every multi-agent code path needs."""
+        if self.coordinator is None:
+            raise RuntimeError("This operation requires a MultiAgentCoordinator")
+        return self.coordinator
+
     def run(self):
         """Run the simulation loop."""
         for step in tqdm(
@@ -286,7 +292,8 @@ class Simulator:
         Phase 2: Perform synchronous belief fusion across agents.
         """
         # Access the MultiAgentMapper through coordinator
-        mapper = self.coordinator.map
+        coordinator = self._require_coordinator()
+        mapper = coordinator.map
 
         # CRITICAL: Sync local beliefs from agent["occupancy_map"] to mapper.maps[]
         for agent in self.agents:
@@ -298,8 +305,8 @@ class Simulator:
         if news_sharing:
             # Build neighbor map
             neighbor_map = {}
-            for agent_id in range(self.coordinator.num_agents):
-                neighbor_map[agent_id] = self.coordinator.get_neighbors_in_range(
+            for agent_id in range(coordinator.num_agents):
+                neighbor_map[agent_id] = coordinator.get_neighbors_in_range(
                     agent_id
                 )
 
@@ -444,7 +451,8 @@ class Simulator:
                             "end_ms": hlp_end_ms,
                         }
                     )
-                    self._timestamp_hlp_file.flush()
+                    if self._timestamp_hlp_file is not None:
+                        self._timestamp_hlp_file.flush()
 
                 # Write LLP timestamps
                 if llp_start_ms is not None and self._timestamp_llp_writer is not None:
@@ -458,7 +466,8 @@ class Simulator:
                             "end_ms": llp_end_ms,
                         }
                     )
-                    self._timestamp_llp_file.flush()
+                    if self._timestamp_llp_file is not None:
+                        self._timestamp_llp_file.flush()
 
                 # Store in legacy arrays
                 hlp_time = info_gain_action["_timing_hlp_ms"]
@@ -520,7 +529,7 @@ class Simulator:
             )
 
             # Get collision penalty (0-1 range)
-            penalty = self.coordinator.get_collision_penalty(
+            penalty = self._require_coordinator().get_collision_penalty(
                 agent_id, (proposed_row, proposed_col)
             )
 
@@ -674,7 +683,7 @@ class Simulator:
             )
             h_disp = self.agents[0]["camera"].xy_step
             v_disp = self.agents[0]["camera"].h_step
-            radius_multiplier = self.coordinator.config.get("decentralized", {}).get(
+            radius_multiplier = self._require_coordinator().config.get("decentralized", {}).get(
                 "radius_multiplier", 5
             )
             max_distances = radius_multiplier * np.array(

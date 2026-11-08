@@ -295,10 +295,8 @@ def run_multi_agent_experiment(
 
     # Setup logging
     multi_agent_logger = None
-    try:
+    if coordinator is not None:
         coordinator.mode = news_mode
-    except Exception:
-        pass
 
     # Generate unique run ID for this iteration (timestamp-based for linking logs/plots)
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")

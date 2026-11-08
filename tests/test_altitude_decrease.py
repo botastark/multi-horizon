@@ -348,8 +348,8 @@ def test_action_scoring_down_vs_lateral():
         raw_scores[act] = raw_entropy_ig(belief, *fp)
         sensor_scores[act] = sensor_aware_ig(belief, *fp, sig)
 
-    best_raw = max(raw_scores, key=raw_scores.get)
-    best_sensor = max(sensor_scores, key=sensor_scores.get)
+    best_raw = max(raw_scores, key=lambda a: raw_scores[a])
+    best_sensor = max(sensor_scores, key=lambda a: sensor_scores[a])
 
     print(f"\n[TEST 4] Action scoring at full coverage (alt={current_alt:.1f}m):")
     print(f"  Raw-entropy IG scores:    {raw_scores}")

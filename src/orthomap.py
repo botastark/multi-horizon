@@ -163,6 +163,7 @@ class Field:
                 return pickle.load(f)
         self.predictions_cache = {}
         self._initialize_predictions()
+        return self.predictions_cache
 
 
     def _save_cache(self):

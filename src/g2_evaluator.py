@@ -287,7 +287,7 @@ def _g2_hl_aware(
     gs = getattr(grid_info_obj, "shape", None)
     gc = getattr(grid_info_obj, "center", True)
     use_grid_coords = gl is not None and gs is not None
-    if use_grid_coords:
+    if use_grid_coords and gs is not None:
         _ci = gs[0] // 2 if gc else 0
         _cj = gs[1] // 2 if gc else 0
 
@@ -452,7 +452,7 @@ def _g2_eta_weighted(
     gs = getattr(grid_info_obj, "shape", None)
     gc = getattr(grid_info_obj, "center", True)
     use_grid_coords = gl is not None and gs is not None
-    if use_grid_coords:
+    if use_grid_coords and gs is not None:
         _ci = gs[0] // 2 if gc else 0
         _cj = gs[1] // 2 if gc else 0
 
