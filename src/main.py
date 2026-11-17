@@ -153,6 +153,11 @@ def run_experiment_with_config(config: dict, args):
         grf_r_for_name = "orto"
     else:
         grf_r_for_name = config.get("cluster_radius", 5)
+        # Gaussian field size in metres [x, y] (default 50 x 50); non-default
+        # sizes are tagged in the run folder name, e.g. "r5_60x110m".
+        field_size = [float(v) for v in config.get("field_size", [50, 50])]
+        if field_size != [50.0, 50.0]:
+            grf_r_for_name = f"{grf_r_for_name}_{field_size[0]:g}x{field_size[1]:g}m"
 
     # If strategy-specific `mode_label` is a list, run experiments for each label.
     # Otherwise resolve a single mode_label and run once.
@@ -313,12 +318,15 @@ def run_experiment_with_config(config: dict, args):
             min_alt = None
             overlap = None
             optimal_alt = 21.5
+            # Field size in metres (shared.field_size = [x, y]); 0.125 m cells.
+            # 60 x 110 m (the wheat orthomap's size) gives an 880 x 480 grid.
+            size_x, size_y = (float(v) for v in config.get("field_size", [50, 50]))
 
             class grid_info:
-                x = 50
-                y = 50
+                x = size_x
+                y = size_y
                 length = 0.125
-                shape = (int(y / length), int(x / length))
+                shape = (int(round(y / length)), int(round(x / length)))
                 center = True
 
             use_sensor_model = True

@@ -30,7 +30,11 @@ class Predicter(nn.Module):
         super(Predicter, self).__init__()
         if num_classes == 2:
             self.img_size = img_size
-            self.model = ModifiedClassifier(num_classes=num_classes)
+            # ImageNet initialisation is pointless (and needs a download) when
+            # the fine-tuned weights below replace every parameter.
+            self.model = ModifiedClassifier(
+                num_classes=num_classes, pretrained=model_weights_path is None
+            )
 
         else:
             raise ValueError("Invalid number of classes. Expected 2.")
