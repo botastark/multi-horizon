@@ -565,6 +565,20 @@ def plot_terrain(
             ax_hlp = fig.add_subplot(num_rows, 4, row_offset + 4)
             ax_hlp.set_xlabel("j-axis")
             ax_hlp.set_ylabel("i-axis")
+
+            # MH planners: show what the planner saw and why it decided
+            mh_decision = agent_data.get("mh_decision")
+            if mh_decision is not None:
+                ax_hlp.set_title(
+                    f"Agent {agent_id} - planner decision",
+                    color=agent_color,
+                    fontweight="bold",
+                )
+                _draw_mh_decision_panel(
+                    ax_hlp, mh_decision, agent_color, AGENT_COLORS, ground_truth.shape
+                )
+                continue
+
             ax_hlp.set_title(
                 f"Agent {agent_id} - HLP Regions", color=agent_color, fontweight="bold"
             )
@@ -608,6 +622,159 @@ def plot_terrain(
     plt.tight_layout()
     plt.savefig(save_path, dpi=150)
     plt.close(fig)
+
+
+def _draw_mh_decision_panel(ax, decision, agent_color, agent_colors, grid_shape):
+    """
+    MH-Dec-MCTS decision view for one agent (state at planning time):
+
+    - background: this agent's coverage knowledge (grey = observed at least
+      once, orange = never observed), thin lines = HLP region grid
+    - red box "1" = HLP target region; cyan boxes "2..k" = rest of the HL
+      region sequence in order; dashed line = planned route through them
+    - hatched boxes = regions claimed by teammates' HL intents received
+    - thick line with markers = LLP planned path (triangle = start,
+      arrow = executed first action)
+    - text box: chosen action and LL plan, its information gain (g1),
+      g2 = agent-steps still needed if the agent stays vs. follows the plan,
+      HLP replanning, and whose intents were received
+    """
+    from matplotlib.colors import ListedColormap
+
+    H, W = grid_shape
+    uncovered = decision.get("uncovered")
+    if uncovered is not None:
+        ax.imshow(
+            uncovered.astype(float),
+            cmap=ListedColormap(["#d9d9d9", "#fdae61"]),
+            vmin=0,
+            vmax=1,
+            origin="upper",
+            alpha=0.85,
+            interpolation="nearest",
+        )
+    ax.set_xlim(0, W)
+    ax.set_ylim(H, 0)
+
+    regions = decision.get("regions") or {}
+    row_lines, col_lines = set(), set()
+    for meta in regions.values():
+        (r0, r1), (c0, c1) = meta["bounds"]
+        row_lines.update((r0, r1))
+        col_lines.update((c0, c1))
+    for r in row_lines:
+        ax.axhline(r, color="white", lw=0.4, alpha=0.7)
+    for c in col_lines:
+        ax.axvline(c, color="white", lw=0.4, alpha=0.7)
+
+    def box(rid, **kw):
+        (r0, r1), (c0, c1) = regions[rid]["bounds"]
+        ax.add_patch(patches.Rectangle((c0, r0), c1 - c0, r1 - r0, **kw))
+
+    # Teammates' claimed regions (as received by this agent)
+    for tid, seq in decision.get("teammate_claims", {}).items():
+        tcol = agent_colors[tid % len(agent_colors)]
+        for rid in seq:
+            if rid in regions:
+                box(rid, fill=False, edgecolor=tcol, hatch="///", lw=1.0, alpha=0.9)
+
+    # Own HL sequence: route + ordered boxes
+    seq = [r for r in decision.get("hl_sequence", []) if r in regions]
+    # The HL route starts where the HLP started planning: the end of the
+    # agent's previous LL plan (paper Alg. 2), else its position.
+    start = decision.get("hl_start_ij") or decision.get("start_ij")
+    if seq:
+        route = ([start] if start is not None else []) + [
+            regions[r]["center"] for r in seq
+        ]
+        ax.plot(
+            [p[1] for p in route],
+            [p[0] for p in route],
+            linestyle="--",
+            color=agent_color,
+            lw=1.2,
+            alpha=0.9,
+        )
+        for k, rid in enumerate(seq):
+            is_target = k == 0
+            box(
+                rid,
+                fill=False,
+                edgecolor="red" if is_target else "cyan",
+                lw=2.5 if is_target else 1.5,
+            )
+            ci, cj = regions[rid]["center"]
+            ax.text(
+                cj,
+                ci,
+                str(k + 1),
+                ha="center",
+                va="center",
+                fontsize=7 if is_target else 6,
+                fontweight="bold",
+                color="white",
+                bbox=dict(
+                    boxstyle="round,pad=0.2",
+                    facecolor="red" if is_target else "#1f4e9c",
+                    edgecolor="none",
+                    alpha=0.9,
+                ),
+            )
+
+    # LL planned path
+    path = decision.get("ll_path_ij") or []
+    if path:
+        ax.plot(
+            [p[1] for p in path],
+            [p[0] for p in path],
+            "-o",
+            color=agent_color,
+            lw=2.5,
+            ms=3,
+            markeredgecolor="black",
+            markeredgewidth=0.5,
+        )
+        ax.plot(path[0][1], path[0][0], "^", color=agent_color, ms=9, markeredgecolor="black")
+        if len(path) > 1 and path[1] != path[0]:
+            ax.annotate(
+                "",
+                xy=(path[1][1], path[1][0]),
+                xytext=(path[0][1], path[0][0]),
+                arrowprops=dict(arrowstyle="->", color="black", lw=1.8),
+            )
+
+    # Decision summary
+    actions = decision.get("ll_actions") or []
+    lines = [
+        f"step {decision.get('step')}: action = {actions[0] if actions else 'hover'}",
+        f"LL plan: {', '.join(actions) if actions else '-'}",
+        f"g1 (IG of plan): {decision.get('ll_ig', 0.0):.0f} bits",
+    ]
+    if decision.get("use_g2") and decision.get("g2_stay") is not None and decision.get("g2_plan") is not None:
+        stay, plan = decision["g2_stay"], decision["g2_plan"]
+        lines.append(f"g2 steps left: stay {stay:.1f} -> plan {plan:.1f} (saves {stay - plan:.1f})")
+    else:
+        lines.append("g2: off (HLP does not steer this agent)")
+    if seq:
+        lines.append(
+            f"HLP: target R{seq[0]}, {len(seq)} regions, "
+            + ("replanned" if decision.get("hlp_replanned") else "kept plan")
+        )
+    else:
+        lines.append("HLP: no open regions left")
+    senders = decision.get("ll_intents_from") or []
+    lines.append("intents from: " + (", ".join(f"A{t}" for t in senders) if senders else "none"))
+    ax.text(
+        0.01,
+        0.99,
+        "\n".join(lines),
+        transform=ax.transAxes,
+        ha="left",
+        va="top",
+        fontsize=5.5,
+        family="monospace",
+        bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.85, edgecolor="none"),
+    )
 
 
 def _draw_regions_on_axis(ax, region_metadata, selected_region_id, region_scores):

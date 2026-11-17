@@ -202,7 +202,7 @@ def flatten_hierarchical_config(config: Dict[str, Any]) -> Dict[str, Any]:
     flattened = {}
 
     # Copy top-level settings
-    for key in ["use_mcts_llp", "use_g2", "mode_labels", "intent_sharing"]:
+    for key in ["use_mcts_llp", "use_g2", "g2_weight", "mode_labels", "intent_sharing"]:
         if key in hier:
             flattened[key] = hier[key]
 

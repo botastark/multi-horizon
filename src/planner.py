@@ -3,6 +3,32 @@ from helper import uav_position, H, cH
 from mcts import MCTSPlanner
 
 
+def intent_sharing_enabled(coordinator) -> bool:
+    """Intents (like news) are shared only in BS/BM modes (news_sharing=True)."""
+    if coordinator is None:
+        return False
+    return bool(coordinator.config.get("decentralized", {}).get("news_sharing", False))
+
+
+def d_uct_settings(experiment_config: dict) -> dict:
+    """
+    D-UCT settings from decentralized.d_uct:
+      gamma            tree discount per MCTS iteration (paper Eq. 4-5)
+      decay_factor,
+      threshold_steps  teammate-intent age weighting, in simulation steps (the
+                       old key threshold_sec is accepted and read as steps)
+    """
+    d_uct = experiment_config.get("decentralized", {}).get("d_uct", {})
+    threshold = d_uct.get("threshold_steps", d_uct.get("threshold_sec", 2.0))
+    return {
+        # intent-age weighting: decay_factor ** (age_steps / threshold_steps)
+        "decay_factor": d_uct.get("decay_factor", 0.9),
+        "threshold_steps": float(threshold),
+        # D-UCT tree discount per MCTS iteration (paper Eq. 4-5)
+        "gamma": float(d_uct.get("gamma", 0.99)),
+    }
+
+
 class planning:
 
     def __init__(
@@ -48,6 +74,13 @@ class planning:
             self.rng = np.random.default_rng(seed)
         else:
             self.rng = np.random.default_rng()
+
+        # Set by the simulator before every select_action():
+        #   current_step  - simulation step (intent ages, HLP replan interval)
+        #   coverage_mask - (H, W) bool, cells this agent knows were observed
+        #                   at least once (own + teammates' news); None = unknown
+        self.current_step = None
+        self.coverage_mask = None
 
         # Logging configuration
         self.log_dir = "logs"
@@ -364,245 +397,228 @@ class planning:
         # Default fallback to legacy IG
         return self.ig_based(permitted_actions)
 
-    def dec_mcts_decision(self):
-        """
-        Run Dec-MCTS planning (single-level MCTS with multi-agent support).
+    # ------------------------------------------------------------ Dec-MCTS
+    def _ensure_dec_mcts_planner(self):
+        """Create the Dec-MCTS planner (and the run's shared intent coordinator) once."""
+        from dec_mcts import DecMCTSPlanner, DecMCTSCoordinator
 
-        This is a flat MCTS planner without the LLP/HLP hierarchy:
-        - Single MCTS tree for action selection
-        - Intent sharing for decentralized coordination
-        - D-UCT discounting for async operation
-        - IG-based rollout rewards
+        if hasattr(self, "_dec_mcts_planner"):
+            return self._dec_mcts_planner
 
-        Use as comparison between greedy IG and multi-horizon planning.
+        dec_mcts_coordinator = None
+        if self.coordinator is not None:
+            if not hasattr(self.coordinator, "_dec_mcts_coordinator"):
+                num_agents = getattr(self.coordinator, "num_agents", 1)
+                self.coordinator._dec_mcts_coordinator = DecMCTSCoordinator(
+                    num_agents=num_agents,
+                    neighbor_fn=self.coordinator.get_neighbors_in_range,
+                    enabled=intent_sharing_enabled(self.coordinator),
+                )
+            dec_mcts_coordinator = self.coordinator._dec_mcts_coordinator
 
-        Returns:
-            Tuple of (selected_action, action_scores)
-        """
-        from dec_mcts import (
-            DecMCTSPlanner,
-            DecMCTSCoordinator,
+        dec_mcts_config = self.experiment_config.get("dec_mcts", {})
+        dec_config = self.experiment_config.get("decentralized", {})
+        d_uct_config = d_uct_settings(self.experiment_config)
+
+        config = {
+            "horizon": dec_mcts_config.get(
+                "horizon", self.mcts_params.get("planning_depth", 10)
+            ),
+            "iterations": dec_mcts_config.get(
+                "iterations", self.mcts_params.get("num_iterations", 100)
+            ),
+            "ucb_c": dec_mcts_config.get("ucb_c", self.mcts_params.get("ucb1_c", 1.4)),
+            "discount_factor": dec_mcts_config.get(
+                "discount_factor", self.mcts_params.get("discount_factor", 0.95)
+            ),
+            "overlap_penalty_weight": dec_config.get("overlap_penalty_weight", 0.3),
+            "d_uct_decay": d_uct_config["decay_factor"],
+            "d_uct_threshold_steps": d_uct_config["threshold_steps"],
+            "d_uct_gamma": d_uct_config["gamma"],
+            "parallel": dec_mcts_config.get("parallel", self.mcts_params.get("parallel", 1)),
+            "timeout": dec_mcts_config.get("timeout", self.mcts_params.get("timeout", 5.0)),
+            # Baseline = Dec-MCTS with the same g2 objective as MH (no HLP)
+            "use_g2": dec_mcts_config.get("use_g2", True),
+            "g2_weight": dec_mcts_config.get("g2_weight"),
+        }
+
+        self._dec_mcts_planner = DecMCTSPlanner(
+            agent_id=self.agent_id,
+            camera=self.uav,
+            grid_info=self.uav.grid,
+            conf_dict=self.conf_dict,
+            config=config,
+            seed=self.seed,
         )
+        self._dec_mcts_coordinator = dec_mcts_coordinator
 
-        # Create or get Dec-MCTS planner
-        if not hasattr(self, "_dec_mcts_planner"):
-            # Check if coordinator has a shared Dec-MCTS coordinator
-            dec_mcts_coordinator = None
-            if self.coordinator is not None:
-                if not hasattr(self.coordinator, "_dec_mcts_coordinator"):
-                    num_agents = getattr(self.coordinator, "num_agents", 1)
-                    self.coordinator._dec_mcts_coordinator = DecMCTSCoordinator(
-                        num_agents=num_agents
-                    )
-                dec_mcts_coordinator = self.coordinator._dec_mcts_coordinator
-
-            # Extract config
-            dec_mcts_config = self.experiment_config.get("dec_mcts", {})
-            dec_config = self.experiment_config.get("decentralized", {})
-            d_uct_config = dec_config.get("d_uct", {})
-
-            config = {
-                "horizon": dec_mcts_config.get(
-                    "horizon", self.mcts_params.get("planning_depth", 10)
-                ),
-                "iterations": dec_mcts_config.get(
-                    "iterations", self.mcts_params.get("num_iterations", 100)
-                ),
-                "ucb_c": dec_mcts_config.get(
-                    "ucb_c", self.mcts_params.get("ucb1_c", 1.4)
-                ),
-                "discount_factor": dec_mcts_config.get(
-                    "discount_factor", self.mcts_params.get("discount_factor", 0.95)
-                ),
-                "overlap_penalty_weight": dec_config.get("overlap_penalty_weight", 0.3),
-                "d_uct_decay": d_uct_config.get("decay_factor", 0.9),
-                "d_uct_threshold": d_uct_config.get("threshold_sec", 2.0),
-                "parallel": dec_mcts_config.get(
-                    "parallel", self.mcts_params.get("parallel", 1)
-                ),
-                "timeout": dec_mcts_config.get(
-                    "timeout", self.mcts_params.get("timeout", 5.0)
-                ),
-            }
-
-            self._dec_mcts_planner = DecMCTSPlanner(
-                agent_id=self.agent_id,
-                camera=self.uav,
-                grid_info=self.uav.grid,
-                conf_dict=self.conf_dict,
-                config=config,
-                seed=self.seed,
+        if self.debug_logs:
+            print(f"\n[DEC-MCTS] Agent {self.agent_id} initialized")
+            print(f"  Horizon: {config['horizon']}, Iterations: {config['iterations']}, g2: {config['use_g2']}")
+            print(
+                f"  D-UCT gamma: {config['d_uct_gamma']}, intent decay: {config['d_uct_decay']}, "
+                f"threshold: {config['d_uct_threshold_steps']} steps\n"
             )
-            self._dec_mcts_coordinator = dec_mcts_coordinator
+        return self._dec_mcts_planner
 
-            if self.debug_logs:
-                print(f"\n[DEC-MCTS] Agent {self.agent_id} initialized")
-                print(
-                    f"  Horizon: {config['horizon']}, Iterations: {config['iterations']}"
-                )
-                print(
-                    f"  D-UCT decay: {config['d_uct_decay']}, threshold: {config['d_uct_threshold']}s\n"
-                )
-
-        planner = self._dec_mcts_planner
-
-        # Update state
+    def _dec_mcts_update_state(self):
+        planner = self._ensure_dec_mcts_planner()
         uav_pos = self.uav.get_x()
         planner.update_state(
             position=uav_pos.position,
             altitude=uav_pos.altitude,
             belief=self.M.copy(),
+            step=self.current_step,
+            coverage_mask=self.coverage_mask,
         )
+        self._dec_mcts_receive()
+        return planner
 
-        # Get teammate intents
+    def _dec_mcts_receive(self):
         if self._dec_mcts_coordinator is not None:
-            teammate_intents = self._dec_mcts_coordinator.get_teammate_intents(
-                self.agent_id
+            self._dec_mcts_planner.update_teammate_intents(
+                self._dec_mcts_coordinator.get_teammate_intents(self.agent_id)
             )
-            planner.update_teammate_intents(teammate_intents)
-        else:
-            teammate_intents = {}
 
-        # Run planning
-        intent = planner.plan()
-
-        # Share intent with coordinator
+    def _dec_mcts_share(self, intent):
         if self._dec_mcts_coordinator is not None:
             self._dec_mcts_coordinator.share_intent(intent)
 
-        # Get stats for timing
+    def _dec_mcts_scores(self, planner, intent):
         stats = planner.get_statistics()
-
-        # Build action scores from MCTS values
         action_scores = planner.get_action_values()
-
-        # Add timing information from planner stats
         if "last_planning_time_ms" in stats:
             action_scores["_timing_dec_mcts_ms"] = stats["last_planning_time_ms"]
         if "last_start_ms" in stats:
             action_scores["_timing_dec_mcts_start_ms"] = stats["last_start_ms"]
             action_scores["_timing_dec_mcts_end_ms"] = stats["last_end_ms"]
-
         action = intent.action_sequence[0] if intent.action_sequence else "hover"
         return action, action_scores
 
-    def hierarchical_dec_mcts_decision(self, visited_x, use_mcts_llp=False):
+    def dec_mcts_decision(self):
         """
-        Run Multi-Horizon Dec-MCTS planning with shared beliefs and intents.
-
-        Implements the full MH Dec-MCTS framework from the Multi-Horizon paper:
-        - Two-level planning (LLP + HLP) per agent
-        - Asynchronous intent sharing between agents
-        - Reward decomposition: g = g1(LL intents) + g2(all intents)
-
-        Args:
-            visited_x: List of visited positions
-            use_mcts_llp: If True, use MCTS tree search for LLP; if False, use random rollouts
+        Synchronous Dec-MCTS step (single-level MCTS, no HLP): update state,
+        read teammate intents, plan with the full budget, share the intent.
 
         Returns:
             Tuple of (selected_action, action_scores)
         """
-        from hierarchical_dec_mcts import (
-            HierarchicalDecMCTSPlanner,
-            IntentBus,
-            create_hierarchical_planner,
+        planner = self._dec_mcts_update_state()
+        intent = planner.plan()
+        self._dec_mcts_share(intent)
+        return self._dec_mcts_scores(planner, intent)
+
+    # -------------------------------------------------------- MH-Dec-MCTS
+    def _ensure_hierarchical_planner(self, use_mcts_llp: bool):
+        """Create the MH planner (and the run's shared intent bus) once."""
+        from hierarchical_dec_mcts import IntentBus, create_hierarchical_planner
+
+        if hasattr(self, "_hierarchical_planner"):
+            return self._hierarchical_planner
+
+        intent_bus = None
+        if self.coordinator is not None:
+            if not hasattr(self.coordinator, "_intent_bus"):
+                # One bus per run, shared through the coordinator. Intents are
+                # delivered only to agents in communication range, and only in
+                # news-sharing modes (IG / IGd share nothing).
+                num_agents = getattr(self.coordinator, "num_agents", 1)
+                max_history = (
+                    self.experiment_config.get("hierarchical_dec_mcts", {})
+                    .get("intent_sharing", {})
+                    .get("max_history", 10)
+                )
+                self.coordinator._intent_bus = IntentBus(
+                    num_agents=num_agents,
+                    max_history=max_history,
+                    neighbor_fn=self.coordinator.get_neighbors_in_range,
+                    enabled=intent_sharing_enabled(self.coordinator),
+                )
+            intent_bus = self.coordinator._intent_bus
+        else:
+            # Single agent mode - local intent bus (vertical exchange only)
+            intent_bus = IntentBus(num_agents=1)
+
+        hier_config = self.experiment_config.get("hierarchical_dec_mcts", {})
+        horizon_weights = self.mcts_params.get("horizon_weights", {})
+        d_uct = d_uct_settings(self.experiment_config)
+
+        config = {
+            "llp_horizon": hier_config.get(
+                "llp_horizon", horizon_weights.get("short_horizon_depth", 5)
+            ),
+            "llp_iterations": hier_config.get(
+                "llp_iterations", self.mcts_params.get("num_iterations", 50)
+            ),
+            "llp_discount_factor": hier_config.get("llp_discount_factor", 0.95),
+            "hlp_horizon": hier_config.get("hlp_horizon", 3),  # regions
+            "hlp_iterations": hier_config.get("hlp_iterations", 30),
+            "tile_size": hier_config.get(
+                "tile_size",
+                hier_config.get(
+                    "hlp_tile_size", horizon_weights.get("tile_size", [100, 100])
+                ),
+            ),
+            "hlp_replan_interval": hier_config.get("hlp_replan_interval", 1),  # steps
+            "hlp_candidate_regions": hier_config.get("hlp_candidate_regions", 6),
+            "llp_ucb_c": hier_config.get("llp_ucb_c", 1.41),
+            "hlp_ucb_c": hier_config.get("hlp_ucb_c", 1.0),
+            "use_mcts_llp": use_mcts_llp,
+            "use_g2": hier_config.get("use_g2", False),
+            "g2_weight": hier_config.get("g2_weight"),
+            "d_uct_decay": d_uct["decay_factor"],
+            "d_uct_threshold_steps": d_uct["threshold_steps"],
+            "d_uct_gamma": d_uct["gamma"],
+        }
+
+        num_agents = 1
+        if self.coordinator is not None:
+            num_agents = getattr(self.coordinator, "num_agents", 1)
+
+        self._hierarchical_planner = create_hierarchical_planner(
+            agent_id=self.agent_id,
+            num_agents=num_agents,
+            camera=self.uav,
+            grid_info=self.uav.grid,
+            intent_bus=intent_bus,
+            config=config,
+            conf_dict=self.conf_dict,
+            seed=self.seed,
         )
 
-        # Create or get hierarchical planner
-        if not hasattr(self, "_hierarchical_planner"):
-            # Check if coordinator has a shared intent bus
-            intent_bus = None
-            if self.coordinator is not None:
-                if not hasattr(self.coordinator, "_intent_bus"):
-                    # Create shared intent bus on coordinator
-                    num_agents = getattr(self.coordinator, "num_agents", 1)
-                    self.coordinator._intent_bus = IntentBus(num_agents=num_agents)
-                intent_bus = self.coordinator._intent_bus
-            else:
-                # Single agent mode - create local intent bus
-                intent_bus = IntentBus(num_agents=1)
-
-            # Extract config - prefer hierarchical_dec_mcts section, fallback to mcts_params
-            hier_config = self.experiment_config.get("hierarchical_dec_mcts", {})
-            horizon_weights = self.mcts_params.get("horizon_weights", {})
-
-            config = {
-                "llp_horizon": hier_config.get(
-                    "llp_horizon", horizon_weights.get("short_horizon_depth", 5)
-                ),
-                "llp_iterations": hier_config.get(
-                    "llp_iterations", self.mcts_params.get("num_iterations", 50)
-                ),
-                "llp_discount_factor": hier_config.get("llp_discount_factor", 0.95),
-                "hlp_horizon": hier_config.get(
-                    "hlp_horizon", horizon_weights.get("long_horizon_depth", 3) // 5
-                ),  # Regions, not steps
-                "hlp_iterations": hier_config.get("hlp_iterations", 30),
-                "tile_size": hier_config.get(
-                    "tile_size",
-                    hier_config.get(
-                        "hlp_tile_size", horizon_weights.get("tile_size", [100, 100])
-                    ),
-                ),
-                "hlp_replan_interval": hier_config.get("hlp_replan_interval", 1.0),
-                "llp_ucb_c": hier_config.get("llp_ucb_c", 1.41),
-                "hlp_ucb_c": hier_config.get("hlp_ucb_c", 1.0),
-                "use_mcts_llp": use_mcts_llp,
-                "use_g2": hier_config.get("use_g2", False),
-                "g2_mode": hier_config.get("g2_mode", "hl_aware"),
-            }
-
-            num_agents = 1
-            if self.coordinator is not None:
-                num_agents = getattr(self.coordinator, "num_agents", 1)
-
-            self._hierarchical_planner = create_hierarchical_planner(
-                agent_id=self.agent_id,
-                num_agents=num_agents,
-                camera=self.uav,
-                grid_info=self.uav.grid,
-                intent_bus=intent_bus,
-                config=config,
-                conf_dict=self.conf_dict,
-                seed=self.seed,
-            )
-
+        if self.debug_logs:
             llp_mode = "MCTS tree search" if use_mcts_llp else "random rollouts"
-            if self.debug_logs:
-                print(f"\n[HIERARCHICAL DEC-MCTS] Agent {self.agent_id} initialized")
-                print(
-                    f"  LLP: {llp_mode}, horizon: {config['llp_horizon']}, iterations: {config['llp_iterations']}"
-                )
-                print(
-                    f"  HLP: MCTS, horizon: {config['hlp_horizon']}, tile_size: {config['tile_size']}\n"
-                )
+            print(f"\n[HIERARCHICAL DEC-MCTS] Agent {self.agent_id} initialized")
+            print(
+                f"  LLP: {llp_mode}, horizon: {config['llp_horizon']}, iterations: {config['llp_iterations']}"
+            )
+            print(
+                f"  HLP: MCTS, horizon: {config['hlp_horizon']}, tile_size: {config['tile_size']}\n"
+            )
+        return self._hierarchical_planner
 
-        planner = self._hierarchical_planner
-
-        # Update state from belief and position
+    def _hierarchical_update_state(self, use_mcts_llp: bool):
+        planner = self._ensure_hierarchical_planner(use_mcts_llp)
         uav_pos = self.uav.get_x()
         planner.update_state(
             position=uav_pos.position,
             altitude=uav_pos.altitude,
             belief=self.M.copy(),
+            coverage_mask=self.coverage_mask,
+            step=self.current_step,
         )
+        return planner
 
-        # Run hierarchical planning (includes intent sharing)
-        action, metrics = planner.plan()
-
-        # Build action scores from LL intent
+    @staticmethod
+    def _hierarchical_scores(action, metrics):
         action_scores = {}
         ll_intent = metrics.get("ll_intent")
         if ll_intent and ll_intent.action_sequence:
             for i, act in enumerate(ll_intent.action_sequence):
                 if i < len(ll_intent.ig_sequence):
                     action_scores[act] = ll_intent.ig_sequence[i]
-
-        # Ensure current action has a score
         if action not in action_scores:
             action_scores[action] = metrics.get("expected_ig", 0.0)
-
-        # Add timing breakdown from metrics
         if "hlp_time_ms" in metrics:
             action_scores["_timing_hlp_ms"] = metrics["hlp_time_ms"]
             action_scores["_timing_llp_ms"] = metrics["llp_time_ms"]
@@ -613,8 +629,74 @@ class planning:
             action_scores["_timing_hlp_replanned"] = (
                 1.0 if metrics.get("hlp_replanned", False) else 0.0
             )
-
         return action, action_scores
+
+    def hierarchical_dec_mcts_decision(self, visited_x, use_mcts_llp=False):
+        """
+        Synchronous MH-Dec-MCTS step (HLP then LLP, full budgets).
+
+        Returns:
+            Tuple of (selected_action, action_scores)
+        """
+        planner = self._hierarchical_update_state(use_mcts_llp)
+        action, metrics = planner.plan()
+        return self._hierarchical_scores(action, metrics)
+
+    # ------------------------------------------- simulated asynchronous API
+    def supports_async(self) -> bool:
+        return self.strategy in ("dec_mcts", "mh_dec_mcts_efficient", "mh_dec_mcts_full")
+
+    def begin_async_step(self, belief) -> None:
+        """
+        Simulated asynchrony, phase 1: refresh state and start this step's
+        round (MH: HLP keeps or restarts its cycle, LLP restarts; Dec-MCTS: new tree).
+        """
+        self.M = belief
+        if self.strategy == "dec_mcts":
+            planner = self._dec_mcts_update_state()
+            planner.begin_round()
+        else:
+            planner = self._hierarchical_update_state(self.strategy == "mh_dec_mcts_full")
+            planner.begin_step()
+
+    @staticmethod
+    def _slice_share(total: int, slice_idx: int, n_slices: int) -> int:
+        """Split `total` iterations as evenly as possible over n_slices."""
+        base, extra = divmod(int(total), int(n_slices))
+        return base + (1 if slice_idx < extra else 0)
+
+    def run_async_slice(self, slice_idx: int, n_slices: int) -> None:
+        """Simulated asynchrony, phase 2: one planning slice (intents read at its start)."""
+        if self.strategy == "dec_mcts":
+            planner = self._dec_mcts_planner
+            self._dec_mcts_receive()
+            n = self._slice_share(planner.config["iterations"], slice_idx, n_slices)
+            intent = planner.run_iterations(n)
+            self._dec_mcts_share(intent)
+        else:
+            planner = self._hierarchical_planner
+            planner.run_slice(
+                self._slice_share(planner.llp.num_iterations, slice_idx, n_slices),
+                self._slice_share(planner.hlp.num_iterations, slice_idx, n_slices),
+            )
+
+    def finish_async_step(self):
+        """Simulated asynchrony, phase 3: (action, action_scores) for this step."""
+        if self.strategy == "dec_mcts":
+            planner = self._dec_mcts_planner
+            planner.finish_round()
+            return self._dec_mcts_scores(planner, planner.current_intent)
+        action, metrics = self._hierarchical_planner.finish_step()
+        return self._hierarchical_scores(action, metrics)
+
+    def async_buses(self) -> list:
+        """Intent channels whose delivery is deferred to slice boundaries."""
+        if self.strategy == "dec_mcts":
+            bus = getattr(self, "_dec_mcts_coordinator", None)
+        else:
+            hp = getattr(self, "_hierarchical_planner", None)
+            bus = hp.intent_bus if hp is not None else None
+        return [bus] if bus is not None else []
 
     def mcts_based(self, action_seq=False, **kwargs):
         """

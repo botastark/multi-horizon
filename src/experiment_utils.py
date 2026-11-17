@@ -304,3 +304,55 @@ def extract_region_metadata(planner, action_strategy: str) -> Tuple:
             region_scores = getattr(hp, "current_region_scores", None)
 
     return region_metadata, selected_region_id, region_scores
+
+
+def extract_mh_decision(planner, action_strategy: str) -> Optional[Dict[str, Any]]:
+    """
+    Snapshot of the MH planner's last decision, for the step-wise plot.
+
+    Everything is what the planner SAW when it planned this step (before this
+    step's move/observation): its coverage knowledge, its HL region sequence,
+    its LL plan, the teammate HL intents it had received and the g2 numbers.
+    Positions are converted to grid (i, j) coordinates.
+
+    Returns None for non-MH strategies or before the first plan.
+    """
+    if action_strategy not in ("mh_dec_mcts_efficient", "mh_dec_mcts_full"):
+        return None
+    hp = getattr(planner, "_hierarchical_planner", None)
+    if hp is None or hp.llp.current_intent is None:
+        return None
+
+    llp, hlp = hp.llp, hp.hlp
+    ll = llp.current_intent
+    hl = hlp.current_intent
+    to_grid = hp._world_to_grid
+
+    ll_path = [to_grid(s[0], s[1]) for s in ll.state_sequence]
+    ctx = getattr(llp, "_g2_ctx", None)
+    teammate_claims = {
+        tid: list(intent.region_sequence)
+        for tid, intent in llp._teammate_hl_intents.items()
+        if not intent.is_stale(llp.current_step, llp.max_intent_age_steps)
+    }
+    return {
+        "step": llp.current_step,
+        "regions": hlp.regions,
+        "uncovered": None if llp._uncovered is None else llp._uncovered.copy(),
+        "start_ij": ll_path[0] if ll_path else None,
+        "hl_start_ij": hlp.last_plan_start,
+        "ll_path_ij": ll_path,
+        "ll_actions": list(ll.action_sequence),
+        "ll_ig": float(ll.total_expected_ig),
+        "ll_value": float(ll.value),
+        "hl_sequence": list(hl.region_sequence) if hl is not None else [],
+        "hl_completion": list(hl.completion_sequence) if hl is not None else [],
+        "hl_value": float(hl.value) if hl is not None else 0.0,
+        "hlp_replanned": bool(hlp.last_plan_replanned),
+        "use_g2": bool(llp.use_g2),
+        "g2_stay": None if ctx is None else float(ctx["baseline"]),
+        "g2_plan": llp.last_g2_steps,
+        "g2_weight": float(llp.g2_weight),
+        "teammate_claims": teammate_claims,
+        "ll_intents_from": sorted(llp._teammate_ll_intents.keys()),
+    }

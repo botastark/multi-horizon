@@ -434,9 +434,9 @@ class GreedyIGPlanner:
             return 1.0
 
         discount = 1.0
+        # Teammate states are rebuilt every step (update_teammate_states), so no
+        # wall-clock staleness check is applied here.
         for teammate_id, intent in self._teammate_intents.items():
-            if intent.is_stale():
-                continue
 
             # Compute IoU with teammate's footprint
             iou = compute_footprint_iou(my_footprint, intent.footprint)
@@ -480,11 +480,9 @@ class GreedyIGPlanner:
         # Count overlapping cells with teammates
         total_overlap = 0.0
         for teammate_id, intent in self._teammate_intents.items():
-            if intent.is_stale():
-                continue
-
-            # D-UCT staleness discount
-            staleness_discount = intent.staleness_discount()
+            # States are rebuilt every step, so every entry is current
+            # (no wall-clock staleness weighting).
+            staleness_discount = 1.0
 
             t_imin, t_imax, t_jmin, t_jmax = intent.footprint
             teammate_cells = set()

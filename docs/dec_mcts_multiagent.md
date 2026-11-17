@@ -1,230 +1,58 @@
-# Decentralized Monte Carlo Tree Search (Dec-MCTS) Multi-Agent Baseline
+# Dec-MCTS (single-level) baseline
 
-## Overview
+> Strategy `dec_mcts`. Code: `src/dec_mcts.py`, wired in `src/planner.py` and `src/simulator.py`.
 
-Dec-MCTS is a **single-level decentralized planning** baseline that extends standard MCTS to multi-agent scenarios. Each agent runs independent MCTS planning while incorporating information from neighbors through communication. Unlike greedy methods, Dec-MCTS builds a search tree and simulates future trajectories to make better long-term decisions.
+One MCTS tree per agent, with no HLP. It is the **"MCTS without hierarchy"** baseline: it optimises the **same objective as MH-Dec-MCTS** (information gain + `g2_weight` × agent-steps saved toward observing every cell), runs under the same simulated-asynchronous scheduler, and shares intents the same way. A difference between Dec-MCTS and MH-Dec-MCTS can therefore be attributed to the hierarchy, as in Seiler et al., RA-L 2024. This page describes the current code.
 
-This serves as a mid-tier baseline between myopic greedy approaches and sophisticated multi-horizon methods.
+## Algorithm (per agent, per step)
 
-## How It Works
+1. **Round start** (`begin_round`): a new tree rooted at the agent's position, altitude and (fused) belief, with `remaining_steps = horizon`.
+2. **Slices** (`run_iterations`, `slices_per_step` times per step; see `docs/mh_dec_mcts_multiagent.md` §2). Each slice:
+   - reads the teammate intents delivered so far and refreshes the teammate mask and g2 context;
+   - runs `iterations / slices` iterations:
+     - **Selection/expansion**: D-UCT (`ucb_c`, `d_uct.gamma`) down the tree, adding one untried action. Each node holds the belief after an *expected-posterior* update of its footprint.
+     - **Node reward** = IG of the node's footprint − `overlap_penalty_weight` × (teammate-mask overlap ratio).
+     - **Rollout**: uniformly random admissible actions until `remaining_steps` reaches 0, discounted by `discount_factor`.
+     - **g2 term**: `g2_weight · (g2 if the agent stays − g2 after the tree part of the plan)`. As in the paper, only the tree part is used, not the rollout. There are no high-level plans: our g2 prices all remaining work itself, through its covering spanning tree, so the paper's random HL plans are not needed.
+     - **Backpropagation of discounted returns**: walking up from the leaf, `G = immediate_reward(node) + discount_factor · G`, plus the g2 term, with D-UCT decay of older statistics.
+   - publishes the current plan as its intent: the root child with the highest mean value, then its greedy path.
+3. **Action**: the first action of the current plan.
 
-### 1. Decentralized MCTS Process
+### Changes in this revision
 
-Each agent independently executes:
+- **Backpropagation.** It used to add `leaf.immediate_reward + rollout` to every node on the path, dropping the first action's own IG after the first expansion. It now uses `DecMCTSNode.backpropagate_return`.
+- **g2 term and asynchrony added** (baseline definition).
+- **Intent ages** are in simulation steps.
 
-1. **Selection**: Traverse tree using UCT policy to select promising branches
-2. **Expansion**: Add new child nodes for unexplored actions
-3. **Simulation**: Rollout from leaf node to estimate future value
-4. **Backpropagation**: Update node values along traversed path
+## Coordination
 
-The key difference from single-agent MCTS: agents exchange information during planning to coordinate actions.
+- **Intents** (`DecMCTSIntent`) carry the planned footprints, positions and the `step` they were made at.
+- **Delivery** (`DecMCTSCoordinator`): only to agents in communication range; in async mode at slice boundaries. Each receiver keeps the last intent per teammate.
+- **Modes**: in `IG` / `IGd` modes nothing is delivered. Intents are shared only in news modes (`*_BS`, `*_BM`), which is the same rule as belief news. `position_sharing` (the "d" in IGd) has no effect on Dec-MCTS.
+- **Teammate mask / g2 context**: fresh teammate intents (age ≤ 2 × `threshold_steps`), weighted by `decay_factor ** (age / threshold_steps)` in the mask. In g2, their footprints count as covered and their end positions are roots of the spanning tree.
 
-### 2. Tree Construction
+## Configuration (`configs/strategies/dec_mcts.json` + master `decentralized`)
 
-```
-Root (current state)
-├── Action 1
-│   ├── Obs 1 → Belief update
-│   └── Obs 2 → Belief update
-├── Action 2
-│   └── ...
-└── Action N
-```
+| Key | Current value | Meaning |
+|---|---|---|
+| `dec_mcts.horizon` | 5 | tree + rollout depth (steps) |
+| `dec_mcts.iterations` | 50 | MCTS iterations per step (split over slices) |
+| `dec_mcts.ucb_c` | 1.4 | UCT constant |
+| `dec_mcts.discount_factor` | 0.95 | per-step discount |
+| `dec_mcts.use_g2` | true | add the g2 coverage term (default true when not set) |
+| `dec_mcts.g2_weight` | null | bits per saved step; null = auto (≈ 756) |
+| `dec_mcts.timeout` | 5.0 | wall-clock seconds; **only in synchronous mode** (`async.enabled: false`) |
+| `dec_mcts.parallel` | 1 | read but **not used** |
+| `decentralized.overlap_penalty_weight` | 0.3 | penalty weight for teammate overlap |
+| `decentralized.d_uct.gamma` | 0.99 | D-UCT tree discount per iteration |
+| `decentralized.d_uct.decay_factor` / `threshold_steps` | 0.9 / 2 | intent ageing (steps) |
+| `decentralized.async.enabled` / `slices_per_step` | true / 3 | simulated asynchronous planning |
+| `decentralized.radius_multiplier` | 5 | communication range = 5 × 3.125 m (per axis); `-1` = unlimited |
 
-- **Tree depth**: Controlled by iteration count and expansion policy
-- **Branching**: Action space × observation space
-- **Node values**: Cumulative information gain estimates
+The sweep variants in `configs/strategies/sweeps/dec_mcts_*.json` do not set `use_g2`, so they also run with g2.
 
-### 3. Rollout Policy
+## Known limitations
 
-During simulation phase:
-- **Random actions**: Default rollout policy selects actions uniformly
-- **Depth-limited**: Rollouts terminate at fixed horizon or entropy threshold
-- **Belief propagation**: Each simulated observation updates belief state
-
-### 4. Communication Integration
-
-Agents share information through:
-- **D-UCT algorithm**: Decentralized UCT with message passing
-- **Decay factor**: Recent information weighted more heavily (default: 0.9)
-- **Threshold**: Messages older than threshold are discarded (default: 2.0s)
-- **Range-limited**: Only neighbors within communication_range exchange data
-
-## Key Parameters
-
-### Strategy-Specific (dec_mcts.json)
-
-```json
-{
-  "mcts": {
-    "iterations": 20,
-    "rollout_depth": 3,
-    "exploration_constant": 1.414,
-    "discount_factor": 0.95,
-    "enable_progressive_widening": false
-  },
-  "decentralized": {
-    "communication_range": 15.625,
-    "d_uct": {
-      "decay_factor": 0.9,
-      "threshold_sec": 2.0
-    }
-  }
-}
-```
-
-#### MCTS Parameters
-- **iterations**: Number of MCTS iterations per step (default: 20)
-  - Higher = better decisions but slower
-  - Typical range: 10-50
-- **rollout_depth**: Simulation horizon in steps (default: 3)
-  - Deeper rollouts = more lookahead but more computation
-- **exploration_constant**: UCT exploration parameter (default: √2 ≈ 1.414)
-  - Controls exploration vs exploitation tradeoff
-- **discount_factor**: Future reward discounting (default: 0.95)
-  - γ = 0.95 means rewards 3 steps ahead worth 0.86× immediate reward
-- **enable_progressive_widening**: Advanced branching control (default: false)
-
-#### Decentralized Parameters
-- **communication_range**: Fixed range in meters (default: 15.625m)
-- **decay_factor**: Message age weighting (0-1, default: 0.9)
-  - Older messages contribute less to decision making
-- **threshold_sec**: Maximum message age in seconds (default: 2.0)
-  - Messages older than this are ignored
-
-### Shared Parameters (master_config.json)
-
-- **num_agents**: Number of UAVs in the swarm
-- **cluster_radius**: Spatial correlation parameter
-- **mode_labels**: Communication modes (same as Greedy IG)
-- **n_steps**: Total mission steps
-
-## Communication Modes
-
-### Mode Configuration
-Same as Greedy IG:
-- **IG**: No sharing, independent planning
-- **IGd**: Position sharing enabled
-- **IG_BS/IG_BM**: News sharing (broadcast/per-neighbor)
-- **IGd_BS/IGd_BM**: Position + news sharing
-
-### Limited Testing Mode
-When `limited_testing: true`:
-- **IG_BS**: Infinite communication (communication_range = -1)
-- **IGd_BM**: Limited communication (communication_range = 3 × cluster_radius)
-
-## Computational Complexity
-
-- **Time per step**: O(|A| × I × D × |C|^D)
-  - |A| = number of agents
-  - I = MCTS iterations
-  - D = rollout depth
-  - |C| = candidate actions per node
-- **Scaling**: Exponential with depth, linear with iterations
-- **Computational cost**: Higher than greedy methods due to tree search and simulation
-
-## Tree Search Characteristics
-
-### UCT Selection Formula
-```
-UCT(node) = value(node) + c × √(ln(parent_visits) / node_visits)
-           └─exploitation─┘   └────────exploration────────┘
-```
-
-### Belief Update
-At each tree node after observation:
-```
-belief_new = bayesian_update(belief_old, observation, sensor_model)
-```
-
-### Value Estimation
-Node value = cumulative IG along trajectory from root:
-```
-V(node) = Σ γ^t × IG(t)  for t=0 to depth
-```
-
-## Use Cases
-
-✅ **Good for:**
-- Scenarios requiring multi-step lookahead
-- Moderate computational budgets
-- Balancing exploration and exploitation
-- Comparing single-level vs multi-horizon planning
-
-❌ **Limitations:**
-- Single planning horizon (no hierarchical decomposition)
-- Computational cost grows exponentially with depth
-- May struggle with very long-term strategic positioning
-- No explicit high-level/low-level task decomposition
-
-## Comparison with Other Baselines
-
-| Method | Lookahead | Tree Depth | Coordination |
-|--------|-----------|------------|--------------||
-| Greedy IG | 1 step | None | Reactive |
-| **Dec-MCTS** | Multi-step | Single-level | Communication-based |
-| MH-Dec-MCTS | Multi-horizon | Two-level hierarchical | Hierarchical planning |
-
-## Expected Performance
-
-- **Information Gain**: Good - better than greedy due to lookahead
-- **Coverage**: Strategic positioning through simulation
-- **Planning Quality**: Moderate - limited by single-level tree depth
-- **Scalability**: Good for small-medium swarms (2-8 agents)
-
-## Tuning Guidelines
-
-### For Better Performance
-- ↑ iterations (20 → 50): More accurate value estimates, higher computational cost
-- ↑ rollout_depth (3 → 5): Longer lookahead, exponentially higher computational cost
-- ↑ exploration_constant (1.4 → 2.0): More exploration, less greedy
-
-### For Faster Execution
-- ↓ iterations (20 → 10): Lower computational cost but less optimal
-- ↓ rollout_depth (3 → 2): Significantly lower computational cost, shorter lookahead
-- Disable progressive_widening: Simpler tree structure, lower overhead
-
-### For Better Coordination
-- ↑ communication_range: More information sharing
-- ↓ threshold_sec: Use only very recent messages
-- Use IGd_BM mode: Position + per-neighbor news
-
-## Configuration Example
-
-```json
-{
-  "action_strategy": "dec_mcts",
-  "mcts": {
-    "iterations": 20,
-    "rollout_depth": 3,
-    "exploration_constant": 1.414,
-    "discount_factor": 0.95
-  },
-  "decentralized": {
-    "communication_range": 15.625,
-    "d_uct": {
-      "decay_factor": 0.9,
-      "threshold_sec": 2.0
-    }
-  },
-  "shared": {
-    "num_agents": 4,
-    "cluster_radius": 5,
-    "mode_labels": ["IG_BS", "IGd_BM"]
-  }
-}
-```
-
-## Implementation Details
-
-- **Code**: `src/dec_mcts.py`
-- **Helper functions**: `src/helper.py` (entropy, IG calculations)
-- **Communication**: `src/multi_agent_coordinator.py`
-- **Belief updates**: `src/mapper_LBP.py`, `src/multi_agent_mapper.py`
-
-## References
-
-- Based on UCT (Upper Confidence Bounds for Trees) algorithm
-- Decentralized extension using D-UCT message passing
-- See Browne et al., "A Survey of Monte Carlo Tree Search Methods" (2012)
-- Implementation adapted for continuous spatial information gathering
+- **The overlap penalty is tiny relative to IG** (at most about 0.3 per overlapping teammate footprint, versus hundreds to thousands of bits). Coordination comes from belief fusion and the g2 term, which treats teammates' planned footprints as covered.
+- **Rewards are cached at expansion.** A node's immediate reward uses the teammate mask from the moment it was expanded; later slices only refresh the mask for new expansions (D-UCT discounts the old statistics).
+- **The mean-value root choice is noisy at low iteration counts** (7 actions, 50 iterations per step).

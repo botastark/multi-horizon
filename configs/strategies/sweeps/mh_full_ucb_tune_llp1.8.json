@@ -20,7 +20,7 @@
         25,
         25
       ],
-      "replan_interval": 2.0
+      "replan_interval": 2
     },
     "intent_sharing": {
       "ll_broadcast_interval": 0.1,

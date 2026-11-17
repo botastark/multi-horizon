@@ -55,6 +55,12 @@ def _apply_mh_mode_label(config: dict, mode_label: str):
         elif mode_label == "IGd_BM":
             dec_config["radius_multiplier"] = 5
 
+    # Explicit per-mode communication range (applied last, wins over
+    # limited_testing and strategy files), e.g. {"IG_BS": -1} = unlimited.
+    mode_radius = config.get("mode_radius_multiplier", {}) or {}
+    if mode_label in mode_radius:
+        dec_config["radius_multiplier"] = mode_radius[mode_label]
+
     return actual_news_mode
 
 

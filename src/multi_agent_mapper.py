@@ -523,6 +523,56 @@ class MultiAgentMapper:
             # reset only the used per-neighbor entry
             self.news_map_beliefs[sender_id, neighbor_id, :, :] = 0.5
 
+    def share_coverage_news(
+        self,
+        fp_bounds: Dict[int, Tuple[int, int, int, int]],
+        neighbor_map: Dict[int, List[int]],
+        coverage_masks: Dict[int, np.ndarray],
+    ) -> None:
+        """
+        Share "observed at least once" knowledge over the news channel.
+
+        Mirrors update_news_and_fuse exactly, with boolean footprints instead of
+        beliefs (news carries only the sender's OWN observations, no relaying):
+          BS: one pending buffer per sender; delivered to all current
+              neighbours and cleared once it was delivered to anyone.
+          BM: one pending buffer per (sender, receiver); delivered and cleared
+              per neighbour, so a receiver out of range gets the backlog later.
+
+        Args:
+            fp_bounds: {agent_id: (imin, imax, jmin, jmax)} observed this step
+            neighbor_map: {agent_id: [ids in communication range]}
+            coverage_masks: {agent_id: (H, W) bool} updated in place
+        """
+        if self.news_mode not in ("BS", "BM") or self.news_inference_type == "Bypass":
+            return  # same gating as update_news_belief: no news, no coverage news
+        H, W = self.grid_size
+        n = self.num_agents
+        if getattr(self, "_coverage_news", None) is None:
+            shape = (n, H, W) if self.news_mode == "BS" else (n, n, H, W)
+            self._coverage_news = np.zeros(shape, dtype=bool)
+
+        # 1. Record this step's observations in the pending news
+        for sender, (i0, i1, j0, j1) in fp_bounds.items():
+            if self.news_mode == "BS":
+                self._coverage_news[sender, i0:i1, j0:j1] = True
+            else:
+                self._coverage_news[sender, :, i0:i1, j0:j1] = True
+
+        # 2. Deliver to neighbours and reset what was delivered
+        for sender in fp_bounds:
+            receivers = [r for r in neighbor_map.get(sender, []) if r != sender]
+            if not receivers:
+                continue
+            if self.news_mode == "BS":
+                for r in receivers:
+                    coverage_masks[r] |= self._coverage_news[sender]
+                self._coverage_news[sender] = False
+            else:
+                for r in receivers:
+                    coverage_masks[r] |= self._coverage_news[sender, r]
+                    self._coverage_news[sender, r] = False
+
     def fuse_news_with_neighbors(self, agent_id: int, neighbor_ids: List[int]):
         """
         Fuse news from agent_id into its neighbors.

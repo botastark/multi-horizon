@@ -14,6 +14,7 @@ from helper import (
     uav_position,
 )
 from experiment_utils import (
+    extract_mh_decision,
     extract_region_metadata,
     finalize_planners,
 )
@@ -135,6 +136,13 @@ class Simulator:
         self.display_belief = np.full(
             (self.grid_info.shape[0], self.grid_info.shape[1], 2), 0.5
         )
+
+        # Per-agent knowledge of which cells have been observed at least once:
+        # own footprints, plus teammates' footprints received through news
+        # (BS/BM modes, same channel and range as belief news). Used by the
+        # MH planners' coverage objective (g2).
+        for agent in self.agents:
+            agent["coverage_mask"] = np.zeros(self.grid_info.shape, dtype=bool)
 
     def run(self):
         """Run the simulation loop."""
@@ -265,9 +273,16 @@ class Simulator:
             # Store a copy of the pure local belief (before fusion with other agents)
             agent["local_belief_map"] = belief_map.copy()
 
+            # Record the observed footprint in this agent's coverage knowledge
+            [[fi0, fi1], [fj0, fj1]] = camera.get_range(
+                position=uav_pos.position, altitude=uav_pos.altitude, index_form=True
+            )
+            agent["coverage_mask"][fi0:fi1, fj0:fj1] = True
+
             # Store observation info
             agent_observations[agent_id] = {
                 "fp_ij": fp_vertices_ij,
+                "fp_bounds": (fi0, fi1, fj0, fj1),
                 "submap": submap,
                 "sigmas": sigmas,
                 "camera": camera,
@@ -320,6 +335,13 @@ class Simulator:
             # Phase 2: Update news and fuse (combined step)
             mapper.update_news_and_fuse(agent_observations, neighbor_map)
 
+            # Same news channel for "observed at least once" knowledge
+            mapper.share_coverage_news(
+                {a: obs["fp_bounds"] for a, obs in agent_observations.items()},
+                neighbor_map,
+                {agent["agent_id"]: agent["coverage_mask"] for agent in self.agents},
+            )
+
             # Log fusion stats periodically
             if self.debug_logs and (step == 0 or step % 20 == 0):
                 fusion_stats = mapper.get_stats()
@@ -358,6 +380,9 @@ class Simulator:
     def _select_agent_actions(self, step: int = 0) -> None:
         """
         Phase 3: Compute metrics, select actions for all agents.
+
+        Dec-MCTS and MH-Dec-MCTS use simulated asynchronous planning by default
+        (decentralized.async.enabled); see _select_agent_actions_async.
         """
         if (
             self.action_strategy == "greedy_ig"
@@ -367,122 +392,195 @@ class Simulator:
             self._select_greedy_baseline_actions(step)
             return
 
+        if self._async_settings()["enabled"] and all(
+            agent["planner"].supports_async() for agent in self.agents
+        ):
+            self._select_agent_actions_async(step)
+            return
+
         for agent in self.agents:
-            agent_id = agent["agent_id"]
-            camera = agent["camera"]
+            self._record_agent_metrics(agent)
             planner = agent["planner"]
-            uav_pos = agent["uav_pos"]
-            belief_map = agent["belief_map"]
+            # Step index and coverage knowledge for step-based planners
+            planner.current_step = step
+            planner.coverage_mask = agent["coverage_mask"]
 
-            # Compute metrics
-            agent["observed_ids"].update(observed_m_ids(camera, uav_pos))
-            entropy_val, mse_val, coverage_val = compute_metrics(
-                self.ground_truth_map, belief_map, agent["observed_ids"], self.grid_info
-            )
-            agent["entropy"].append(entropy_val)
-            agent["mse"].append(mse_val)
-            agent["coverage"].append(coverage_val)
-            agent["height"].append(uav_pos.altitude)
-
-            # LLP/Planning Blocking Latency: Wall-clock time from action request to action ready
-            # This includes ALL overhead:
-            #   - Reading teammate intents/states from coordinator
-            #   - Reading HLP guidance (for hierarchical planners)
-            #   - All planner-specific computation (MCTS, IG, etc.)
-            #   - Broadcasting intents back to coordinator
-            #   - Returning action and metrics
-            # This is the critical real-time metric for onboard deployment.
-            # Use high-resolution timer for accurate latency measurement
+            # Planning latency: wall-clock time from action request to action
+            # ready, including reading/broadcasting intents.
             llp_start_time = time.perf_counter()
             next_action, info_gain_action = planner.select_action(
-                belief_map, agent["uav_positions"]
+                agent["belief_map"], agent["uav_positions"]
             )
             llp_end_time = time.perf_counter()
-            llp_latency_ms = (llp_end_time - llp_start_time) * 1000.0
-
-            agent["info_gain_action"] = info_gain_action
-
-            # Initialize legacy arrays on first step
-            if "planning_times" not in agent:
-                agent["planning_times"] = []  # Legacy list format
-                agent["hlp_times"] = []
-                agent["llp_times"] = []
-                agent["hlp_replans"] = []
-
-            # Store legacy format (backward compatibility)
-            agent["planning_times"].append(llp_latency_ms)
-
-            # Write timestamps directly to CSV (main file for all planners)
-            self._timestamp_writer.writerow(
-                {
-                    "run_id": self.run_id,
-                    "run_number": self.run_number,
-                    "step": step,
-                    "agent_id": agent_id,
-                    "start_ms": llp_start_time * 1000.0,
-                    "end_ms": llp_end_time * 1000.0,
-                }
+            self._record_decision(
+                agent, step, next_action, info_gain_action, llp_start_time, llp_end_time
             )
-            self._timestamp_file.flush()
 
-            # For MH planners, write separate HLP and LLP timestamps
-            if "_timing_hlp_ms" in info_gain_action:
-                hlp_start_ms = info_gain_action.get("_timing_hlp_start_ms")
-                hlp_end_ms = info_gain_action.get("_timing_hlp_end_ms")
-                llp_start_ms = info_gain_action.get("_timing_llp_start_ms")
-                llp_end_ms = info_gain_action.get("_timing_llp_end_ms")
+    def _async_settings(self) -> Dict[str, Any]:
+        cfg = getattr(self.agents[0]["planner"], "experiment_config", {}) or {}
+        a = cfg.get("decentralized", {}).get("async", {})
+        return {
+            "enabled": bool(a.get("enabled", True)),
+            "slices_per_step": max(1, int(a.get("slices_per_step", 3))),
+        }
 
-                # Write HLP timestamps
-                if hlp_start_ms is not None and self._timestamp_hlp_writer is not None:
-                    self._timestamp_hlp_writer.writerow(
-                        {
-                            "run_id": self.run_id,
-                            "run_number": self.run_number,
-                            "step": step,
-                            "agent_id": agent_id,
-                            "start_ms": hlp_start_ms,
-                            "end_ms": hlp_end_ms,
-                        }
-                    )
-                    self._timestamp_hlp_file.flush()
+    def _select_agent_actions_async(self, step: int) -> None:
+        """
+        Simulated asynchronous planning (paper-style MH-MCTS / Dec-MCTS,
+        deterministic):
 
-                # Write LLP timestamps
-                if llp_start_ms is not None and self._timestamp_llp_writer is not None:
-                    self._timestamp_llp_writer.writerow(
-                        {
-                            "run_id": self.run_id,
-                            "run_number": self.run_number,
-                            "step": step,
-                            "agent_id": agent_id,
-                            "start_ms": llp_start_ms,
-                            "end_ms": llp_end_ms,
-                        }
-                    )
-                    self._timestamp_llp_file.flush()
+        1. every agent starts its round (MH: HLP keeps/restarts its cycle, LLP
+           restarts; Dec-MCTS: new tree);
+        2. for each of `slices_per_step` slices, every planner (each agent's LLP
+           and HLP, or Dec-MCTS) searches for its share of the step's budget
+           using the intents delivered so far and publishes its current best
+           plan; intent buses are in deferred mode and deliver all new intents
+           (range-limited) only at the slice boundary, so the outcome does not
+           depend on agent order;
+        3. each agent executes the first action of its LLP's best plan.
 
-                # Store in legacy arrays
-                hlp_time = info_gain_action["_timing_hlp_ms"]
-                llp_time = info_gain_action["_timing_llp_ms"]
-                hlp_replanned = bool(info_gain_action["_timing_hlp_replanned"])
-                agent["hlp_times"].append(hlp_time)
-                agent["llp_times"].append(llp_time)
-                agent["hlp_replans"].append(1.0 if hlp_replanned else 0.0)
+        The recorded planning time per agent is its accumulated compute time.
+        """
+        n_slices = self._async_settings()["slices_per_step"]
+        for agent in self.agents:
+            self._record_agent_metrics(agent)
+            planner = agent["planner"]
+            planner.current_step = step
+            planner.coverage_mask = agent["coverage_mask"]
+            planner.begin_async_step(agent["belief_map"])
 
-            # Apply collision avoidance if enabled
-            if self.coordinator and self.coordinator.collision_distance > 0:
-                next_action = self._apply_collision_avoidance(
-                    agent, next_action, info_gain_action, camera
+        buses = []
+        for agent in self.agents:
+            for bus in agent["planner"].async_buses():
+                if all(bus is not other for other in buses):
+                    buses.append(bus)
+        for bus in buses:
+            bus.deferred = True
+
+        compute = {agent["agent_id"]: 0.0 for agent in self.agents}
+        start = time.perf_counter()
+        try:
+            for slice_idx in range(n_slices):
+                for agent in self.agents:
+                    t0 = time.perf_counter()
+                    agent["planner"].run_async_slice(slice_idx, n_slices)
+                    compute[agent["agent_id"]] += time.perf_counter() - t0
+                for bus in buses:
+                    bus.flush()
+        finally:
+            for bus in buses:
+                bus.deferred = False
+
+        for agent in self.agents:
+            next_action, info_gain_action = agent["planner"].finish_async_step()
+            self._record_decision(
+                agent,
+                step,
+                next_action,
+                info_gain_action,
+                start,
+                start + compute[agent["agent_id"]],
+            )
+
+    def _record_agent_metrics(self, agent) -> None:
+        """Per-agent metrics before planning (same as the PA reference loop)."""
+        camera = agent["camera"]
+        uav_pos = agent["uav_pos"]
+        agent["observed_ids"].update(observed_m_ids(camera, uav_pos))
+        entropy_val, mse_val, coverage_val = compute_metrics(
+            self.ground_truth_map, agent["belief_map"], agent["observed_ids"], self.grid_info
+        )
+        agent["entropy"].append(entropy_val)
+        agent["mse"].append(mse_val)
+        agent["coverage"].append(coverage_val)
+        agent["height"].append(uav_pos.altitude)
+
+    def _record_decision(
+        self, agent, step, next_action, info_gain_action, llp_start_time, llp_end_time
+    ) -> None:
+        """Store the chosen action plus timing records for one agent."""
+        agent_id = agent["agent_id"]
+        camera = agent["camera"]
+        uav_pos = agent["uav_pos"]
+        llp_latency_ms = (llp_end_time - llp_start_time) * 1000.0
+
+        agent["info_gain_action"] = info_gain_action
+
+        # Initialize legacy arrays on first step
+        if "planning_times" not in agent:
+            agent["planning_times"] = []  # Legacy list format
+            agent["hlp_times"] = []
+            agent["llp_times"] = []
+            agent["hlp_replans"] = []
+
+        agent["planning_times"].append(llp_latency_ms)
+
+        # Write timestamps directly to CSV (main file for all planners)
+        self._timestamp_writer.writerow(
+            {
+                "run_id": self.run_id,
+                "run_number": self.run_number,
+                "step": step,
+                "agent_id": agent_id,
+                "start_ms": llp_start_time * 1000.0,
+                "end_ms": llp_end_time * 1000.0,
+            }
+        )
+        self._timestamp_file.flush()
+
+        # For MH planners, write separate HLP and LLP timestamps
+        if "_timing_hlp_ms" in info_gain_action:
+            hlp_start_ms = info_gain_action.get("_timing_hlp_start_ms")
+            hlp_end_ms = info_gain_action.get("_timing_hlp_end_ms")
+            llp_start_ms = info_gain_action.get("_timing_llp_start_ms")
+            llp_end_ms = info_gain_action.get("_timing_llp_end_ms")
+
+            if hlp_start_ms is not None and self._timestamp_hlp_writer is not None:
+                self._timestamp_hlp_writer.writerow(
+                    {
+                        "run_id": self.run_id,
+                        "run_number": self.run_number,
+                        "step": step,
+                        "agent_id": agent_id,
+                        "start_ms": hlp_start_ms,
+                        "end_ms": hlp_end_ms,
+                    }
                 )
+                self._timestamp_hlp_file.flush()
 
-            # Log selected action
-            if self.debug_logs:
-                print(
-                    f"[Agent {agent_id}] Step {step}: action={next_action} | "
-                    f"pos=({uav_pos.position[0]:.1f}, {uav_pos.position[1]:.1f})"
+            if llp_start_ms is not None and self._timestamp_llp_writer is not None:
+                self._timestamp_llp_writer.writerow(
+                    {
+                        "run_id": self.run_id,
+                        "run_number": self.run_number,
+                        "step": step,
+                        "agent_id": agent_id,
+                        "start_ms": llp_start_ms,
+                        "end_ms": llp_end_ms,
+                    }
                 )
+                self._timestamp_llp_file.flush()
 
-            # Store action for later position update
-            agent["_next_action"] = next_action
+            agent["hlp_times"].append(info_gain_action["_timing_hlp_ms"])
+            agent["llp_times"].append(info_gain_action["_timing_llp_ms"])
+            agent["hlp_replans"].append(
+                1.0 if bool(info_gain_action["_timing_hlp_replanned"]) else 0.0
+            )
+
+        # Apply collision avoidance if enabled
+        if self.coordinator and self.coordinator.collision_distance > 0:
+            next_action = self._apply_collision_avoidance(
+                agent, next_action, info_gain_action, camera
+            )
+
+        if self.debug_logs:
+            print(
+                f"[Agent {agent_id}] Step {step}: action={next_action} | "
+                f"pos=({uav_pos.position[0]:.1f}, {uav_pos.position[1]:.1f})"
+            )
+
+        # Store action for later position update
+        agent["_next_action"] = next_action
 
     def _apply_collision_avoidance(
         self,
@@ -976,6 +1074,10 @@ class Simulator:
                         "region_metadata": agent_region_metadata,
                         "selected_region_id": agent_selected_region,
                         "region_scores": agent_region_scores,
+                        # MH only: what the planner saw and decided this step
+                        "mh_decision": extract_mh_decision(
+                            agent_planner, self.action_strategy
+                        ),
                     }
                 )
 

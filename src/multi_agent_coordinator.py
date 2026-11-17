@@ -701,9 +701,8 @@ class MultiAgentCoordinator:
                 if other_id == agent_id:
                     continue
 
-                # Check if state is recent (within 5 seconds)
-                if time.time() - state.last_update > 5.0:
-                    continue
+                # Positions are refreshed synchronously every simulation step,
+                # so no wall-clock staleness filter is applied.
 
                 # Compute distance to other agent
                 distance = np.sqrt(
@@ -725,14 +724,16 @@ class MultiAgentCoordinator:
     def get_other_agent_positions(
         self,
         agent_id: int,
-        max_age: float = 5.0,
+        max_age: Optional[float] = None,
     ) -> List[Tuple[int, Tuple[float, float], float]]:
         """
         Get positions of other agents.
 
         Args:
             agent_id: ID of requesting agent
-            max_age: Maximum age of position data in seconds
+            max_age: Optional wall-clock age filter in seconds. Default None:
+                no filter, because the simulator updates every agent's position
+                each step (a wall-clock filter would make results CPU-dependent).
 
         Returns:
             List of (agent_id, position, altitude) tuples
@@ -744,7 +745,7 @@ class MultiAgentCoordinator:
             for other_id, state in self._agent_states.items():
                 if other_id == agent_id:
                     continue
-                if current_time - state.last_update <= max_age:
+                if max_age is None or current_time - state.last_update <= max_age:
                     result.append((other_id, state.position, state.altitude))
 
         return result

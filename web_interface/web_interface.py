@@ -193,12 +193,12 @@ METHOD_CONFIGS = {
                 "description": "HLP discount factor",
             },
             "replan_interval": {
-                "type": "float",
-                "default": 2.0,
-                "min": 0.5,
-                "max": 5.0,
-                "step": 0.5,
-                "description": "HLP replan interval (seconds)",
+                "type": "int",
+                "default": 2,
+                "min": 1,
+                "max": 10,
+                "step": 1,
+                "description": "HLP replan interval (simulation steps)",
             },
             "overlap_penalty_weight": {
                 "type": "float",
@@ -282,12 +282,12 @@ METHOD_CONFIGS = {
                 "description": "HLP discount factor",
             },
             "replan_interval": {
-                "type": "float",
-                "default": 2.0,
-                "min": 0.5,
-                "max": 5.0,
-                "step": 0.5,
-                "description": "HLP replan interval (seconds)",
+                "type": "int",
+                "default": 2,
+                "min": 1,
+                "max": 10,
+                "step": 1,
+                "description": "HLP replan interval (simulation steps)",
             },
             "overlap_penalty_weight": {
                 "type": "float",
@@ -1902,7 +1902,7 @@ def create_experiment_config(method, params):
                     "iterations": params.get("hlp_iterations", 30),
                     "ucb_c": params.get("hlp_ucb_c", 1.0),
                     "discount_factor": params.get("hlp_discount", 0.98),
-                    "replan_interval": params.get("replan_interval", 2.0),
+                    "replan_interval": int(params.get("replan_interval", 2)),
                 }
             )
 

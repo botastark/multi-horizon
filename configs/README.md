@@ -1,256 +1,122 @@
-# Configuration System Documentation
+# Configuration
 
-## Overview
-
-The multi-horizon project uses a **master config + strategy-specific configs** architecture for running experiments. This allows you to:
-- Define shared parameters once (field type, agents, simulation settings)
-- Run multiple strategies (planners) in sequence
-- Keep strategy-specific parameters organized and maintainable
-
-## Directory Structure
+Experiments use a **master config** plus one **strategy config** per planner.
 
 ```
 configs/
-├── master_config.json          # Master configuration (v3.0)
-├── strategies/                 # Strategy-specific configs
-│   ├── greedy_ig.json         # Strategy 1: Greedy IG baseline
-│   ├── dec_mcts.json          # Strategy 2: Dec-MCTS
-│   ├── mh_dec_mcts_full.json  # Strategy 3: MH-Dec-MCTS (full MCTS)
-│   └── mh_dec_mcts_efficient.json  # Strategy 4: MH-Dec-MCTS (efficient)
-└── [other configs]            # Additional test and utility configs
+├── master_config.json            # shared settings + which strategies to run
+├── strategies/
+│   ├── greedy_ig.json
+│   ├── dec_mcts.json
+│   ├── mh_dec_mcts_full.json
+│   ├── mh_dec_mcts_efficient.json
+│   └── sweeps/                   # variants used by sweep.json (see note below)
+├── baseline_greedy_ig_bs_rinf.json   # standalone reference-compatible greedy configs
+└── baseline_greedy_igd_bm_r5.json
 ```
 
-## Master Config Format
-
-**File**: `configs/master_config.json`
-
-```json
-{
-  "_version": "3.0",
-  
-  "strategies": [
-    "greedy_ig",
-    "dec_mcts",
-    "mh_dec_mcts_full",
-    "mh_dec_mcts_efficient"
-  ],
-  
-  "strategy_configs": {
-    "greedy_ig": "configs/strategies/greedy_ig.json",
-    "dec_mcts": "configs/strategies/dec_mcts.json",
-    "mh_dec_mcts_full": "configs/strategies/mh_dec_mcts_full.json",
-    "mh_dec_mcts_efficient": "configs/strategies/mh_dec_mcts_efficient.json"
-  },
-  
-  "shared": {
-    "project_path": "./",
-    "field_type": "Gaussian",
-    "start_position": "corner",
-    "num_agents": 4,
-    "n_steps": 100,
-    "iters": [0, 20],
-    "correlation_types": ["adaptive", "equal", "biased"],
-    "error_margins": [null],
-    "enable_plotting": false,
-    "enable_logging": true
-  },
-  
-  "decentralized": {
-    "communication_range": 15.625,
-    "communication_delay": 0.05,
-    "message_drop_probability": 0.0,
-    "d_uct": {
-      "decay_factor": 0.9,
-      "threshold_sec": 2.0
-    }
-  },
-  
-  "experiment": {
-    "base_log_dir": "trials",
-    "save_trajectory": true,
-    "save_belief_maps": false,
-    "common_metrics": [
-      "cumulative_ig",
-      "coverage_ratio",
-      "fragmentation_score",
-      "messages_sent",
-      "compute_time_ms"
-    ]
-  }
-}
-```
-
-### Key Sections
-
-| Section | Purpose |
-|---------|---------|
-| `strategies` | List of strategies to run (in order) |
-| `strategy_configs` | Mapping from strategy name to config file path |
-| `shared` | Common simulation parameters (field type, agents, steps) |
-| `decentralized` | Common multi-agent communication settings |
-| `experiment` | Common logging and output settings |
-
-## Strategy Config Format
-
-Each strategy has its own config file in `configs/strategies/`.
-
-### Example: Greedy IG
-
-**File**: `configs/strategies/greedy_ig.json`
-
-```json
-{
-  "action_strategy": "greedy_ig",
-  
-  "greedy_ig": {
-    "overlap_penalty_weight": 0.0,
-    "mode_labels": ["IG", "IGd", "IG_BM", "IG_BS", "IGd_BM", "IGd_BS"]
-  },
-  
-  "decentralized": {
-    "radius_multiplier": 5
-  },
-  
-  "experiment": {
-    "name": "greedy_ig_benchmark",
-    "log_dir_suffix": "greedy_ig",
-    "strategy_metrics": []
-  }
-}
-```
-
-### Example: MH-Dec-MCTS (full)
-
-**File**: `configs/strategies/mh_dec_mcts_full.json`
-
-```json
-{
-  "action_strategy": "mh_dec_mcts_full",
-  
-  "hierarchical_dec_mcts": {
-    "use_mcts_llp": true,
-    "mode_labels": ["IG", "IGd", "IG_BM", "IG_BS", "IGd_BM", "IGd_BS"],
-    
-    "llp": {
-      "horizon": 3,
-      "iterations": 50,
-      "ucb_c": 1.4,
-      "discount_factor": 0.95
-    },
-    
-    "hlp": {
-      "horizon": 10,
-      "iterations": 30,
-      "ucb_c": 1.0,
-      "discount_factor": 0.98,
-      "tile_size": [50, 50],
-      "replan_interval": 1.0
-    },
-    
-    "intent_sharing": {
-      "ll_broadcast_interval": 0.1,
-      "hl_broadcast_interval": 0.5,
-      "max_history": 10
-    }
-  },
-  
-  "decentralized": {
-    "overlap_penalty_weight": 0.3
-  },
-  
-  "experiment": {
-    "name": "mh_dec_mcts_full_benchmark",
-    "log_dir_suffix": "mh_dec_mcts_full",
-    "strategy_metrics": [
-      "llp_iterations",
-      "llp_planning_time_ms",
-      "hlp_iterations",
-      "hlp_planning_time_ms",
-      "ll_intents_sent",
-      "hl_intents_sent"
-    ]
-  }
-}
-```
-
-## Config Merging Rules
-
-When a strategy config is loaded, settings are merged as follows:
-
-1. **Shared settings** are applied first (from master config)
-2. **Strategy-specific settings** override shared settings
-3. **Decentralized** section: strategy can override specific fields
-4. **Experiment** section:
-   - `common_metrics` + `strategy_metrics` = final metrics list
-   - `log_dir` = `base_log_dir` + `log_dir_suffix`
-
-## Running Experiments
-
-### Run all strategies
+Run from the project root:
 
 ```bash
 python src/main.py --config configs/master_config.json
 ```
 
-This will run all strategies listed in `master_config.json` in sequence.
+A standalone strategy file (no `strategies` key) can also be passed with `--config`. Missing shared values are then filled with defaults from `config_loader.load_config`.
 
-### Run single strategy (legacy)
+## Master config (`master_config.json`, `_version` 3.0)
 
-```bash
-python src/main.py --config configs/benchmark_greedy_ig.json
+| Section | Contents |
+|---|---|
+| `strategies` | strategy names to run, in order |
+| `strategy_configs` | name → file, **relative to the master config's folder** (e.g. `strategies/greedy_ig.json`) |
+| `shared` | `field_type`, `cluster_radius`, `start_position`, `num_agents`, `n_steps`, `iters` ([first, last) iteration; seed = `seed` + iteration), `correlation_types`, `error_margins`, `mode_labels`, `enable_plotting`, `enable_logging`, `debug_logs` |
+| `decentralized` | shared comm settings, overridden per strategy; see below |
+| `experiment` | logging/output settings; `common_metrics` + each strategy's `strategy_metrics` |
+| `limited_testing` | if true, `IG_BS` runs with `radius_multiplier = 16` (effectively unlimited) and `IGd_BM` with `radius_multiplier = 5`, overriding the strategy files |
+
+### `decentralized`
+
+| Key | Unit | Meaning |
+|---|---|---|
+| `radius_multiplier` | × 3.125 m | communication range, checked per axis (x, y, z); `-1` = unlimited. Takes precedence over `communication_range` |
+| `communication_range` | m | used only when no `radius_multiplier` is set |
+| `d_uct.gamma` | per MCTS iteration | D-UCT tree discount (paper Eq. 4–5) for Dec-MCTS and MH trees; default 0.99 |
+| `d_uct.decay_factor` | – | teammate-intent weight `decay ** (age / threshold_steps)` |
+| `d_uct.threshold_steps` | **simulation steps** | intent staleness scale; intents older than 2× are ignored. The old key `threshold_sec` is still accepted and its value is read as steps |
+| `async.enabled` | – | simulated asynchronous planning for `dec_mcts` and `mh_*` (default true). False: one synchronous plan per agent per step |
+| `async.slices_per_step` | count | planning slices per step; intents are exchanged between slices (default 3) |
+| `overlap_penalty_weight` | – | Dec-MCTS teammate-overlap penalty (not used by MH) |
+| `communication_delay`, `message_drop_probability` | – | not used by the synchronous simulator |
+
+### Mode labels
+
+`mode_labels` selects what is shared; each label is a separate run. `src/main.py` first looks for `mode_labels` inside a section named after the strategy (`greedy_ig.mode_labels`, `dec_mcts.mode_labels`, `mh_dec_mcts_full.mode_labels`, …), then falls back to `shared.mode_labels`. `hierarchical_dec_mcts.mode_labels` is **not** read, so MH strategies always use the shared list unless you add a `mh_dec_mcts_full` / `mh_dec_mcts_efficient` section.
+
+| Label | News (beliefs + coverage) | Intents (Dec-MCTS / MH) | Position IoU discount (greedy only) |
+|---|---|---|---|
+| `IG` | – | – | – |
+| `IGd` | – | – | yes |
+| `IG_BS` / `IG_BM` | broadcast / per-neighbour | yes, in range | – |
+| `IGd_BS` / `IGd_BM` | broadcast / per-neighbour | yes, in range | yes |
+
+## Strategy configs
+
+Merge rule: shared → strategy overrides. The `decentralized` and `experiment` sections are merged key by key. Any other top-level key in the strategy file replaces the shared one. For example, an `n_steps` in a strategy file wins over a sweep's `shared.n_steps`.
+
+### `greedy_ig.json`
+
+`radius_multiplier` 5. `greedy_ig.overlap_penalty_weight` is ignored (the planner always uses 0).
+
+### `dec_mcts.json`
+
+```json
+"dec_mcts": {"horizon": 5, "iterations": 50, "ucb_c": 1.4, "discount_factor": 0.95,
+             "timeout": 5.0, "parallel": 1, "use_g2": true, "g2_weight": null},
+"decentralized": {"overlap_penalty_weight": 0.3, "radius_multiplier": 5}
 ```
 
-Old single-file configs are still supported for backward compatibility.
+- `iterations` is per simulation step, split over the async slices.
+- `use_g2` (default true) adds the same coverage term as MH-Dec-MCTS, so Dec-MCTS is the "MCTS without hierarchy" baseline.
+- `timeout` is a wall-clock budget in seconds, used only in synchronous mode.
+- `parallel` is not used.
 
-## Four Baseline Strategies
-
-| Strategy | Config File | LLP Method | HLP Method | Description |
-|----------|-------------|------------|------------|-------------|
-| 1. Greedy IG | `greedy_ig.json` | N/A | N/A | Single-step IG maximization |
-| 2. Dec-MCTS | `dec_mcts.json` | N/A (single-level) | N/A | UCB tree search (10 steps) |
-| 3. MH-Dec-MCTS (full) | `mh_dec_mcts_full.json` | **UCB tree** | **UCB tree** | Both planners use MCTS |
-| 4. MH-Dec-MCTS (efficient) | `mh_dec_mcts_efficient.json` | **Random rollout** | **UCB tree** | LLP optimized for speed |
-
-**Incremental Progression:**
-- **1 → 2**: Add multi-step planning
-- **2 → 3**: Add hierarchical structure with both planners using MCTS
-- **3 → 4**: Optimize LLP with random rollout (hypothesis: HLP guidance makes LLP tree search unnecessary)
-
-## Hierarchical Config Structure
-
-The `hierarchical_dec_mcts` section supports both flat and nested formats:
-
-### Nested Format (preferred for v3.0)
+### `mh_dec_mcts_full.json` / `mh_dec_mcts_efficient.json`
 
 ```json
 "hierarchical_dec_mcts": {
-  "use_mcts_llp": true,
-  "llp": {
-    "horizon": 3,
-    "iterations": 50,
-    "ucb_c": 1.4
-  },
-  "hlp": {
-    "horizon": 10,
-    "iterations": 30,
-    "ucb_c": 1.0
-  }
+  "use_mcts_llp": true,            // full: true, efficient: false
+  "use_g2": true,                  // add steps-saved term to the LLP reward
+  "g2_weight": null,               // bits per saved step; null = auto (~756)
+  "llp": {"horizon": 3, "iterations": 30, "ucb_c": 1.4, "discount_factor": 0.95},
+  "hlp": {"horizon": 8, "iterations": 30, "ucb_c": 1.0, "discount_factor": 0.98,
+          "tile_size": [25, 25], "replan_interval": 2, "candidate_regions": 6},
+  "intent_sharing": {"ll_broadcast_interval": 0.1, "hl_broadcast_interval": 0.5,
+                     "max_history": 10}
 }
 ```
 
-### Flat Format (backward compatible)
+| Key | Unit | Notes |
+|---|---|---|
+| `llp.horizon` | steps | |
+| `llp.iterations` | rollouts / MCTS iterations **per step** | split over async slices |
+| `hlp.horizon` | regions | |
+| `hlp.iterations` | MCTS iterations **per step** | the HLP tree accumulates them over its cycle (sync mode: per replan) |
+| `hlp.tile_size` | grid cells | 25 cells = 3.125 m = one lateral move |
+| `hlp.replan_interval` | **simulation steps** | length of an HLP search cycle (fresh tree); a new cycle also starts as soon as the target region is fully observed |
+| `hlp.candidate_regions` | count | nearest uncovered regions considered per HLP tree node |
+| `hlp.discount_factor` | – | not used |
+| `intent_sharing.*_broadcast_interval` | – | not used (intents are published every slice) |
 
-```json
-"hierarchical_dec_mcts": {
-  "use_mcts_llp": true,
-  "llp_horizon": 3,
-  "llp_iterations": 50,
-  "llp_ucb_c": 1.4,
-  "hlp_horizon": 10,
-  "hlp_iterations": 30,
-  "hlp_ucb_c": 1.0
-}
-```
+`config_loader.flatten_hierarchical_config` converts the nested `llp` / `hlp` blocks into flat keys (`llp_horizon`, `hlp_replan_interval`, `tile_size`, …). Both nested and flat forms are accepted.
 
-The config loader automatically flattens nested configs for backward compatibility.
+What these parameters do: `docs/mh_dec_mcts_multiagent.md`.
 
+## Sweeps
+
+`./sweep.sh` (reads `sweep.json`) deep-merges overrides into `master_config.json` and runs each experiment. Strategy paths in `sweep.json` are relative to `experiments/temp/`, where the merged configs are written.
+
+**Several files in `strategies/sweeps/` have names that do not match their contents** (see `docs/method_comparison_summary.md`). Runs are labelled by `experiment.name`, not by file name.
+
+## Output
+
+Command-line runs write to `experiments/temp/<run_base>/` and are moved to `experiments/runs/<strategy>/run_<timestamp>_<run_base>/` when a mode finishes. `run_base` = `<strategy>_<field>_r<radius>_<start>_N<agents>_<mode>_comm<R…>__<experiment.name>`.

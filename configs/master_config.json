@@ -40,8 +40,15 @@
     "communication_delay": 0.05,
     "message_drop_probability": 0.0,
     "d_uct": {
+      "_comment": "gamma: D-UCT tree discount per MCTS iteration (paper Eq. 4-5). decay_factor/threshold_steps: teammate-intent weight decay_factor**(age_steps/threshold_steps), ignored when older than 2*threshold_steps",
+      "gamma": 0.99,
       "decay_factor": 0.9,
-      "threshold_sec": 2.0
+      "threshold_steps": 2.0
+    },
+    "async": {
+      "_comment": "Simulated asynchronous planning for dec_mcts and mh_*: each step every planner (each agent's LLP and HLP, or Dec-MCTS) runs its iteration budget in slices_per_step slices; intents are exchanged (range-limited) only between slices. Deterministic. enabled=false: synchronous HLP-then-LLP per step",
+      "enabled": true,
+      "slices_per_step": 3
     }
   },
 

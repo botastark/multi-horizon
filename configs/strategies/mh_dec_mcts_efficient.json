@@ -7,6 +7,8 @@
   "hierarchical_dec_mcts": {
     "use_mcts_llp": false,
     "use_g2": true,
+    "_g2_weight": "bits of IG one saved step is worth in the LLP reward; null = auto (IG of one fresh step at minimum altitude)",
+    "g2_weight": null,
     
     "llp": {
       "_comment": "Low-Level Planner - tactical action selection with random rollout",
@@ -16,13 +18,14 @@
     },
     
     "hlp": {
-      "_comment": "High-Level Planner - strategic region allocation with MCTS tree search",
+      "_comment": "High-Level Planner - MCTS over region sequences; objective = agent-steps saved toward observing every cell at least once. replan_interval is in simulation steps",
       "horizon": 8,
       "iterations": 30,
       "ucb_c": 1.0,
       "discount_factor": 0.98,
       "tile_size": [25, 25],
-      "replan_interval": 2.0
+      "replan_interval": 2,
+      "candidate_regions": 6
     },
     
     "intent_sharing": {
