@@ -274,6 +274,8 @@ def _simulate_trajectory_with_fn(
             break
         pos, alt = result
         ig = compute_ig_fn(llp, pos, alt, coverage_discount)
+        if isinstance(ig, tuple):  # LowLevelPlanner._compute_ig returns (ig, footprint)
+            ig = ig[0]
         total_ig += (llp.discount**step) * ig
         alts.append(alt)
 
@@ -416,7 +418,6 @@ def test_hlp_g2_influence():
         num_iterations=150,
         seed=1,
         use_g2=True,
-        g2_mode="stub",  # stub keeps it simple for the test
     )
     llp_with_g2.update_belief(belief)
 
@@ -479,8 +480,8 @@ def test_hlp_g2_influence():
             "  ⚠ HLP g2 guidance did NOT increase movement toward target — check g2 weight."
         )
 
-    print(f"\n  NOTE: With 'stub' g2 mode and low horizon the effect may be subtle.")
-    print(f"  Use g2_mode='hl_aware' and longer horizon for stronger guidance.")
+    print(f"\n  NOTE: g2 is the step-based coverage estimate (g2_evaluator.py); without a")
+    print(f"  coverage mask the LLP treats cells whose belief is still 0.5 as unobserved.")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

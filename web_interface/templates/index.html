@@ -2098,7 +2098,7 @@
           hlp_ucb_c: "HLP exploration parameter for region selection",
           hlp_discount: "How much HLP values future strategic rewards",
           replan_interval:
-            "How often to update strategic plan (lower → more reactive)",
+            "Replan the region sequence at least every N steps (it also replans when the target region is done)",
         };
 
         return effects[key] || param.description || "Affects planning behavior";

@@ -165,6 +165,15 @@ class Field:
     def _cache_filepath(self):
         return os.path.join(self.cache_dir, "predictions.pkl")
 
+    def _cache_covers_all_altitudes(self) -> bool:
+        """True if the prediction cache exists and has every planning altitude."""
+        filepath = self._cache_filepath()
+        if not os.path.exists(filepath):
+            return False
+        with open(filepath, "rb") as f:
+            cache = pickle.load(f)
+        return all(round(float(a), 2) in cache for a in self.altitudes)
+
     def _load_cache(self):
 
         filepath = self._cache_filepath()
@@ -226,15 +235,29 @@ class Field:
         gdal.UseExceptions()
 
         self.predictor = Predicter(model_weights_path=self.model_path, num_classes=2)
-        dataset = gdal.Open(self.ortomap_path)
-        band1 = dataset.GetRasterBand(1)  # Red channel
-        band2 = dataset.GetRasterBand(2)  # Green channel
-        band3 = dataset.GetRasterBand(3)  # Blue channel
+        if os.path.exists(self.ortomap_path):
+            dataset = gdal.Open(self.ortomap_path)
+            band1 = dataset.GetRasterBand(1)  # Red channel
+            band2 = dataset.GetRasterBand(2)  # Green channel
+            band3 = dataset.GetRasterBand(3)  # Blue channel
 
-        b1 = band1.ReadAsArray()
-        b2 = band2.ReadAsArray()
-        b3 = band3.ReadAsArray()
-        self.img = np.dstack((b1, b2, b3))
+            b1 = band1.ReadAsArray()
+            b2 = band2.ReadAsArray()
+            b3 = band3.ReadAsArray()
+            self.img = np.dstack((b1, b2, b3))
+        elif self._cache_covers_all_altitudes():
+            # The orthomosaic is only needed to classify tiles that are not in
+            # the prediction cache; with a complete cache it is never read.
+            self.img = None
+            print(
+                f"[Field] Orthomosaic not found at {self.ortomap_path}; "
+                f"using cached classifier predictions from {self._cache_filepath()}"
+            )
+        else:
+            raise FileNotFoundError(
+                f"Orthomosaic not found at {self.ortomap_path} and the prediction "
+                f"cache {self._cache_filepath()} does not cover altitudes {list(self.altitudes)}"
+            )
 
         self.tile_pixel_loc = self._parse_tile_file(self.tile_pixel_path)
         self.ground_truth_map = self._read_annotations_to_matrix(self.annotation_path)

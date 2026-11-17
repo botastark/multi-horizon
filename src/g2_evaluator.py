@@ -1,750 +1,381 @@
 """
-g2 Evaluator - Mission Completion Time Estimation
+g2 evaluator: remaining coverage effort, measured in agent-steps.
 
-Centralized g2() function for MH-Dec-MCTS, used by both HLP and LLP planners.
+MH-Dec-MCTS splits the objective as g = g1 + g2 (Seiler et al., "Multi-Horizon
+Multi-Agent Planning Using Decentralised Monte Carlo Tree Search"):
 
-Paper reference: "Multi-Horizon Multi-Agent Planning Using De-centralized Monte Carlo Tree Search"
-Seiler et al., 2024
+  g1  short-horizon information gain of the LL plan (computed in the LLP)
+  g2  long-horizon mission estimate (computed here)
 
-The reward decomposition is:
-    g = g1(LL intents) + g2(all intents)
+Mission goal for g2: every cell of the field must be OBSERVED AT LEAST ONCE
+(by any agent, at any altitude). g2 estimates how many agent-steps the team
+still needs to reach that state, so LOWER IS BETTER. Planners use
+"steps saved" (baseline g2 minus candidate g2) as their reward term.
 
-Available g2 modes (selectable via `mode` parameter):
+Motion model (everything priced at minimum altitude; altitude changes ignored)
+---------------------------------------------------------------------------
+* One lateral move = `step_cells` grid cells (25 = 3.125 m); moves are 4-connected.
+* The field is split into BLOCKS of step_cells x step_cells cells. A block is
+  "open" if any of its cells is still unobserved.
+* Agents stand on LATTICE POSITIONS (block corners). A footprint at minimum
+  altitude centred on lattice point (a, b) observes the kh x kh blocks on each
+  side of it, kh = round(fp_half / step_cells) (= 1: a 2x2 block window).
 
-  "stub"         - Original placeholder. Ignores hl_intents entirely.
-                   Uses fixed coverage rate. Always returns near-zero.
-                   Kept for baseline comparison.
+Remaining work for a set of open blocks = travel of a tour that visits enough
+lattice positions to see every open block:
+  1. pick covering positions greedily (most open blocks first);
+  2. connect them with a minimum spanning tree in true step distance
+     (L1 / step_cells), rooted at the agents' positions (multi-root MST).
+Because covered ground can still be crossed at its true distance, covering the
+middle of an uncovered strip does not increase the estimate, while leaving an
+isolated spot behind adds the detour needed to come back for it.
 
-  "hl_aware"     - HL-intent aware critical path (RECOMMENDED).
-                   Simulates each agent walking its HL region sequence from
-                   its LL end-position. Accounts for travel time + scan time
-                   per region (scan_time = region_entropy / coverage_rate).
-                   g2 = max over agents (critical path bottleneck).
-                   Requires env_state["regions"] for full accuracy.
+Team estimate g2 (sum of agent-steps, not makespan):
+  1. Claimed work: each agent walks its HL region sequence from its start:
+     per still-open region, `reach` (moves until its footprint can see the
+     region's open bounding box) + `inner` (tour over the region's own covering
+     positions, 0 for a one-block region). The agent then stands where it
+     arrived. A region claimed by two agents is paid twice.
+  2. Unclaimed work: all open blocks of regions nobody claimed, via the
+     covering-positions MST rooted at every agent's end position.
 
-  "entropy_rate" - Fast entropy-rate estimate. Does not use HL intents.
-                   g2 = remaining_entropy / (effective_rate * n_agents).
-                   Effective rate penalised by LL footprint overlap.
-                   Falls back gracefully when regions are unavailable.
-
-  "eta_weighted" - Distance-weighted coverage deficit.
-                   For each uncertain region, finds the agent that will cover
-                   it soonest (via HL ETA sequence or estimated travel time).
-                   g2 = sum(region_entropy * min_ETA_r) / total_entropy.
-                   Falls back to entropy_rate when regions unavailable.
-
-All modes scale output by 0.1 to stay comparable to g1 (IG units).
+Known approximations: altitude is ignored (a high-flying agent covers more per
+move than assumed); greedy cover and MST approximate the optimal tour; per-region
+bounding boxes make `reach` optimistic for regions with scattered holes.
 """
 
-from typing import Dict, Optional, Tuple, List, Any
+import math
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+
 import numpy as np
-from collections import OrderedDict
 
-# ---------------------------------------------------------------------------
-# Per-call heavy-parts cache
-# ---------------------------------------------------------------------------
-# During HLP MCTS (30 iterations × 2 g2 calls per agent), the belief and
-# ll_intents are identical across all 60 calls.  This cache avoids rebuilding
-# entropy_map, SAT, and covered-cell structures more than once per unique
-# (belief, ll_intents) combination.
-#
-# Key  : (id(belief), belief.shape, ll_key)  where ll_key is a tuple of
-#         (agent_id, id(intent)) sorted for stability.
-# Value: (belief_ref, heavy_result_tuple)   belief_ref keeps the array alive
-#         so that id() stays valid (Python GC cannot reuse the id).
-_heavy_cache: "OrderedDict[tuple, tuple]" = OrderedDict()
-_HEAVY_CACHE_MAX = 8  # one slot per active agent + a few spare
+Footprint = Tuple[int, int, int, int]  # (imin, imax, jmin, jmax), max exclusive
+GridPos = Tuple[float, float]  # (i, j) in grid cells
 
 
-def _make_ll_key(ll_intents: Dict[int, Any]) -> tuple:
-    """Cheap, stable fingerprint for an ll_intents dict within one planning cycle."""
-    return tuple(sorted((aid, id(intent)) for aid, intent in ll_intents.items()))
-
-
-def _compute_heavy_parts(
-    belief: np.ndarray,
-    ll_intents: Dict[int, Any],
-    regions: Dict,
-) -> Tuple:
+def camera_step_geometry(camera) -> Tuple[float, float]:
     """
-    Compute (and cache) the belief- and ll_intents-dependent quantities shared
-    by all g2 modes:
-
-        entropy_map, total_entropy,
-        ll_covered_cells, ll_covered_entropy,
-        ll_overlap_penalty, ll_execution_time, ll_end_positions,
-        remaining_entropy_map, region_remaining_entropy
-
-    All three non-stub g2 modes need exactly these values.  When called
-    repeatedly with the same belief object and the same intent objects
-    (as happens during HLP MCTS iterations) the result is returned from
-    cache without any numpy work.
-    """
-    cache_key = (id(belief), belief.shape, _make_ll_key(ll_intents))
-    if cache_key in _heavy_cache:
-        cached_ref, result = _heavy_cache[cache_key]
-        if cached_ref is belief:  # same array object → id still valid
-            _heavy_cache.move_to_end(cache_key)
-            return result
-
-    # --- expensive numpy work (only runs on cache miss) ---
-    p = _occupancy_prob(belief)
-    entropy_map = _entropy(p)
-    total_entropy = float(np.sum(entropy_map))
-
-    ll_execution_time = compute_ll_execution_time(ll_intents)
-    ll_covered_cells = compute_ll_covered_cells(ll_intents)
-    ll_overlap_penalty = compute_ll_overlap_penalty(ll_intents)
-    ll_end_positions = compute_ll_end_positions(ll_intents)
-
-    # Build remaining_entropy_map with vectorised zeroing (no Python loop)
-    remaining_entropy_map = entropy_map.copy()
-    if ll_covered_cells:
-        covered_arr = np.array(list(ll_covered_cells), dtype=np.intp)  # (N, 2)
-        H, W = entropy_map.shape
-        r, c = covered_arr[:, 0], covered_arr[:, 1]
-        valid = (r >= 0) & (r < H) & (c >= 0) & (c < W)
-        # covered entropy (vectorised sum)
-        ll_covered_entropy = float(np.sum(entropy_map[r[valid], c[valid]]))
-        remaining_entropy_map[r[valid], c[valid]] = 0.0
-    else:
-        ll_covered_entropy = 0.0
-
-    region_remaining_entropy = _region_entropy_sat(remaining_entropy_map, regions)
-
-    # Per-region hotspot: grid (i, j) of the cell with maximum remaining entropy.
-    # Used by hl_aware / eta_weighted to compute travel time to the *most unexplored*
-    # part of each region rather than its geometric centre.
-    region_hotspot_ij: Dict[int, Tuple[float, float]] = {}
-    H_rem, W_rem = remaining_entropy_map.shape
-    for rid, region in regions.items():
-        (imin, imax), (jmin, jmax) = region["bounds"]
-        r0 = max(0, min(imin, H_rem))
-        r1 = max(0, min(imax, H_rem))
-        c0 = max(0, min(jmin, W_rem))
-        c1 = max(0, min(jmax, W_rem))
-        sub = remaining_entropy_map[r0:r1, c0:c1]
-        if sub.size > 0 and float(np.max(sub)) > 1e-6:
-            flat_idx = int(np.argmax(sub))
-            dr, dc = np.unravel_index(flat_idx, sub.shape)
-            region_hotspot_ij[rid] = (float(r0 + dr), float(c0 + dc))
-        else:
-            ri, rj = region["center"]
-            region_hotspot_ij[rid] = (float(ri), float(rj))
-
-    result = (
-        entropy_map,
-        total_entropy,
-        ll_covered_cells,
-        ll_covered_entropy,
-        ll_overlap_penalty,
-        ll_execution_time,
-        ll_end_positions,
-        remaining_entropy_map,
-        region_remaining_entropy,
-        region_hotspot_ij,
-    )
-
-    if len(_heavy_cache) >= _HEAVY_CACHE_MAX:
-        _heavy_cache.popitem(last=False)  # evict oldest
-    _heavy_cache[cache_key] = (belief, result)  # keep belief alive
-    return result
-
-
-# ---------------------------------------------------------------------------
-# Public dispatcher
-# ---------------------------------------------------------------------------
-
-VALID_MODES = ("stub", "hl_aware", "entropy_rate", "eta_weighted")
-
-
-def g2(
-    ll_intents: Dict[int, Any],
-    hl_intents: Dict[int, Any],
-    env_state: Dict[str, Any],
-    agent_id: Optional[int] = None,
-    mode: str = "hl_aware",
-) -> float:
-    """
-    Estimate mission completion time conditioned on LL+HL intents.
-
-    Args:
-        ll_intents : Dict[agent_id -> LLIntent]  short-horizon action plans
-        hl_intents : Dict[agent_id -> HLIntent]  region allocation plans
-        env_state  : Dict with keys:
-                       "belief"  - np.ndarray belief map (required)
-                       "regions" - Dict[region_id -> {bounds, center, area}]
-                                   required for hl_aware / eta_weighted
-                       "grid_info" - grid metadata (optional, unused currently)
-        agent_id   : Optional calling agent ID (unused; kept for API compat)
-        mode       : One of "stub" | "hl_aware" | "entropy_rate" | "eta_weighted"
+    Movement/footprint geometry in grid cells.
 
     Returns:
-        g2_value : Estimated mission time (lower is better).
+        (step_cells, fp_half): lateral move length in cells, and half-width in
+        cells of the footprint at minimum altitude (same rounding as
+        Camera.get_range).
     """
-    if mode not in VALID_MODES:
-        raise ValueError(f"g2 mode '{mode}' unknown. Choose from {VALID_MODES}")
-
-    if mode == "stub":
-        return _g2_stub(ll_intents, hl_intents, env_state, agent_id)
-    elif mode == "hl_aware":
-        return _g2_hl_aware(ll_intents, hl_intents, env_state, agent_id)
-    elif mode == "entropy_rate":
-        return _g2_entropy_rate(ll_intents, hl_intents, env_state, agent_id)
-    elif mode == "eta_weighted":
-        return _g2_eta_weighted(ll_intents, hl_intents, env_state, agent_id)
+    length = camera.grid.length
+    step_cells = camera.xy_step / length
+    half_m = round(camera.h_range[0] * math.tan(np.deg2rad(camera.fov) / 2) / length) * length
+    return float(step_cells), float(half_m / length)
 
 
-# ---------------------------------------------------------------------------
-# Mode 1 - stub (original broken implementation, kept for comparison)
-# ---------------------------------------------------------------------------
-
-
-def _g2_stub(
-    ll_intents: Dict[int, Any],
-    hl_intents: Dict[int, Any],
-    env_state: Dict[str, Any],
-    agent_id: Optional[int] = None,
-) -> float:
+def auto_g2_weight(camera, conf_dict) -> float:
     """
-    Original stub implementation.
-    Ignores hl_intents completely; uses a fixed nominal coverage rate.
-    hl_intents has zero effect, so HLP MCTS sees no signal.
-    Kept for baseline comparison only.
+    Default value of one saved step, in bits: the expected information of one
+    fresh lateral move at minimum altitude, i.e.
+    (new cells per move) x (IG of observing a p = 0.5 cell at minimum altitude).
+    ~756 bits/step for the default 50 x 50 m Gaussian setup.
     """
-    belief = env_state.get("belief")
-    if belief is None:
-        return 0.0
+    from helper import cH, get_sensor_params
 
-    ll_execution_time = compute_ll_execution_time(ll_intents)
-    ll_covered_cells = compute_ll_covered_cells(ll_intents)
-    ll_overlap_penalty = compute_ll_overlap_penalty(ll_intents)
-
-    total_uncertain_area = compute_uncertain_area(belief, threshold=0.3)
-    remaining_area = max(0, total_uncertain_area - len(ll_covered_cells))
-
-    num_agents = max(1, len(ll_intents)) if ll_intents else 1
-    nominal_coverage_rate = 50.0 * num_agents
-    hl_completion_time = (
-        remaining_area / nominal_coverage_rate if remaining_area > 0 else 0.0
-    )
-
-    total_time = ll_execution_time + hl_completion_time + ll_overlap_penalty
-    return 0.1 * total_time
+    step_cells, fp_half = camera_step_geometry(camera)
+    s0, s1 = get_sensor_params(camera.h_range[0], conf_dict)
+    ig_cell = float(1.0 - cH(np.array([0.5]), s0, s1)[0])
+    return max(ig_cell, 0.0) * 2.0 * fp_half * step_cells
 
 
-# ---------------------------------------------------------------------------
-# Mode 2 - hl_aware (critical path over region sequences)
-# ---------------------------------------------------------------------------
+def regular_tile_layout(
+    grid_shape: Tuple[int, int], tile_size: Tuple[int, int]
+) -> Tuple[int, int]:
+    """Number of tile rows/cols for a regular partition (last tile may be partial)."""
+    H, W = grid_shape
+    th, tw = tile_size
+    return -(-H // th), -(-W // tw)
 
 
-def _g2_hl_aware(
-    ll_intents: Dict[int, Any],
-    hl_intents: Dict[int, Any],
-    env_state: Dict[str, Any],
-    agent_id: Optional[int] = None,
-) -> float:
+def _block_any(mask: np.ndarray, bs: int) -> np.ndarray:
+    """(nbi, nbj) bool: does each bs x bs block contain a True cell."""
+    H, W = mask.shape
+    nbi, nbj = -(-H // bs), -(-W // bs)
+    padded = np.zeros((nbi * bs, nbj * bs), dtype=bool)
+    padded[:H, :W] = mask
+    return padded.reshape(nbi, bs, nbj, bs).any(axis=(1, 3))
+
+
+class CoverageStepModel:
     """
-    HL-intent aware critical path estimation.
+    Coverage state of one agent's knowledge plus step-cost helpers.
 
-    Phase 1: Execute LL intents in parallel; record end-positions + covered cells.
-    Phase 2: Each agent walks its HL region sequence from its LL end-position.
-             per-region cost = travel_time + scan_time
-             scan_time  = region_remaining_entropy / nominal_cells_per_step
-             travel_time = euclidean_dist / xy_speed
-    g2 = max over agents (critical path)
-
-    Requires env_state["regions"] for full accuracy.
-    Falls back gracefully to stub if regions are missing.
+    Region ids follow the HLP partition: id = tile_row * n_tile_cols + tile_col,
+    i.e. row-major over tiles of `tile_size` starting at (0, 0).
     """
-    belief = env_state.get("belief")
-    regions = env_state.get("regions", {})
 
-    if belief is None:
-        return 0.0
+    def __init__(
+        self,
+        uncovered: np.ndarray,
+        tile_size: Tuple[int, int],
+        step_cells: float,
+        fp_half: float,
+    ):
+        """
+        Args:
+            uncovered: (H, W) bool, True where no agent is known to have observed
+                the cell yet.
+            tile_size: (rows, cols) of each HLP region tile, in cells.
+            step_cells: lateral move length in cells (xy_step / grid length).
+            fp_half: half-width in cells of the footprint at minimum altitude.
+        """
+        self.uncovered = np.asarray(uncovered, dtype=bool)
+        self.tile_size = (int(tile_size[0]), int(tile_size[1]))
+        self.step_cells = float(step_cells)
+        self.fp_half = float(fp_half)
+        self.half = max(0.0, self.fp_half - 0.5)  # cell at the footprint edge needs a move
+        self.bs = max(1, int(round(self.step_cells)))  # block size in cells
+        self.kh = max(1, int(round(self.fp_half / self.step_cells)))  # blocks per half footprint
+        self._region_inner: Dict[int, float] = {}
+        self._compute_stats()
 
-    # All heavy numpy work is cached across repeated calls with same belief+ll_intents
-    (
-        entropy_map,
-        total_entropy,
-        ll_covered_cells,
-        ll_covered_entropy,
-        ll_overlap_penalty,
-        ll_execution_time,
-        ll_end_positions,
-        remaining_entropy_map,
-        region_remaining_entropy,
-        region_hotspot_ij,
-    ) = _compute_heavy_parts(belief, ll_intents, regions)
+    # ------------------------------------------------------------------ stats
+    def _compute_stats(self) -> None:
+        H, W = self.uncovered.shape
+        th, tw = self.tile_size
+        nr, nc = regular_tile_layout((H, W), (th, tw))
+        self.n_tile_rows, self.n_tile_cols = nr, nc
 
-    nominal_cells_per_step = 50.0
-    # xy_speed in grid-cell units (agent moves ~1 cell per step at xy_step ≈ grid_length)
-    xy_speed = 1.0
+        padded = np.zeros((nr * th, nc * tw), dtype=bool)
+        padded[:H, :W] = self.uncovered
+        tiles = padded.reshape(nr, th, nc, tw)  # [ri, di, rj, dj]
 
-    # Grid-coord conversion helpers: world (x, y) → grid (i, j)
-    grid_info_obj = env_state.get("grid_info")
-    gl = getattr(grid_info_obj, "length", None)
-    gs = getattr(grid_info_obj, "shape", None)
-    gc = getattr(grid_info_obj, "center", True)
-    use_grid_coords = gl is not None and gs is not None
-    if use_grid_coords:
-        _ci = gs[0] // 2 if gc else 0
-        _cj = gs[1] // 2 if gc else 0
+        self.counts = tiles.sum(axis=(1, 3)).astype(np.int64).ravel()
 
-    def _to_grid(wx, wy):
-        """Convert world (x, y) → grid (i, j)."""
-        if use_grid_coords:
-            return (-wy / gl + _ci, wx / gl + _cj)
-        return (wx, wy)  # fallback (old mixed-coord behaviour)
+        rows_any = tiles.any(axis=3)  # (nr, th, nc)
+        cols_any = tiles.any(axis=1)  # (nr, nc, tw)
+        row_lo = rows_any.argmax(axis=1)
+        row_hi = th - 1 - rows_any[:, ::-1, :].argmax(axis=1)
+        col_lo = cols_any.argmax(axis=2)
+        col_hi = tw - 1 - cols_any[:, :, ::-1].argmax(axis=2)
+        base_i = (np.arange(nr) * th)[:, None]
+        base_j = (np.arange(nc) * tw)[None, :]
+        # Inclusive bounding box of uncovered cells (meaningless when count == 0).
+        self.i_lo = (base_i + row_lo).ravel().astype(float)
+        self.i_hi = (base_i + row_hi).ravel().astype(float)
+        self.j_lo = (base_j + col_lo).ravel().astype(float)
+        self.j_hi = (base_j + col_hi).ravel().astype(float)
 
-    all_agent_ids = set(list(ll_intents.keys()) + list(hl_intents.keys()))
+        self.is_open = self.counts > 0
+        self.open_ids = np.flatnonzero(self.is_open)
 
-    if not all_agent_ids:
-        total_remaining = float(np.sum(remaining_entropy_map))
-        return 0.1 * (ll_execution_time + total_remaining / nominal_cells_per_step)
+        # Blocks (one move wide) and the region each block belongs to.
+        self.blocks = _block_any(self.uncovered, self.bs)  # (nbi, nbj)
+        nbi, nbj = self.blocks.shape
+        bi = np.arange(nbi) * self.bs
+        bj = np.arange(nbj) * self.bs
+        self.block_region = (np.minimum(bi // th, nr - 1)[:, None] * nc
+                             + np.minimum(bj // tw, nc - 1)[None, :])
 
-    agent_completion_times = []
+    @property
+    def num_regions(self) -> int:
+        return self.counts.size
 
-    for aid in all_agent_ids:
-        hl_intent = hl_intents.get(aid, None)
-        start_pos = ll_end_positions.get(aid, None)
+    def total_uncovered(self) -> int:
+        return int(self.counts.sum())
 
-        if hl_intent is None or not hl_intent.region_sequence or not regions:
-            agent_completion_times.append(ll_execution_time)
-            continue
-
-        agent_time = float(ll_execution_time)
-        # Convert LL end-position (world coords) to grid coords for consistent distance
-        pos = _to_grid(start_pos[0], start_pos[1]) if start_pos is not None else None
-
-        for rid in hl_intent.region_sequence:
-            if rid not in regions:
+    def with_footprints(
+        self, footprints: Iterable[Optional[Footprint]]
+    ) -> "CoverageStepModel":
+        """Return a new model in which the given footprints are marked covered."""
+        unc = None
+        H, W = self.uncovered.shape
+        for fp in footprints:
+            if fp is None:
                 continue
-            # Target: most-unexplored cell (grid coords), fallback to region centre
-            target = region_hotspot_ij.get(rid, regions[rid]["center"])
-
-            if pos is not None:
-                dist = np.sqrt((pos[0] - target[0]) ** 2 + (pos[1] - target[1]) ** 2)
-                travel_steps = dist / xy_speed
-            else:
-                travel_steps = 0.0
-
-            region_entropy = region_remaining_entropy.get(rid, 0.0)
-            scan_steps = region_entropy / nominal_cells_per_step
-
-            agent_time += travel_steps + scan_steps
-            pos = target  # chain: next travel starts from this hotspot (grid coords)
-
-        agent_completion_times.append(agent_time)
-
-    critical_path = (
-        max(agent_completion_times) if agent_completion_times else ll_execution_time
-    )
-    return 0.1 * (critical_path + ll_overlap_penalty)
-
-
-# ---------------------------------------------------------------------------
-# Mode 3 - entropy_rate (fast, HL intents unused)
-# ---------------------------------------------------------------------------
-
-
-def _g2_entropy_rate(
-    ll_intents: Dict[int, Any],
-    hl_intents: Dict[int, Any],
-    env_state: Dict[str, Any],
-    agent_id: Optional[int] = None,
-) -> float:
-    """
-    Fast entropy-rate estimate. Does NOT use HL intents.
-
-    g2 = ll_exec_time + remaining_entropy / effective_rate
-    where effective_rate = nominal_rate * N_agents * (1 - overlap_fraction)
-
-    Pro: very cheap, no per-region iteration.
-    Con: HL intents have zero effect - only useful for LLP g2 where
-         region info is unavailable.
-    """
-    belief = env_state.get("belief")
-    if belief is None:
-        return 0.0
-
-    (
-        entropy_map,
-        total_entropy,
-        ll_covered_cells,
-        ll_covered_entropy,
-        ll_overlap_penalty,
-        ll_execution_time,
-        _ll_end_positions,
-        _remaining_entropy_map,
-        _region_remaining_entropy,
-        _region_hotspot_ij,
-    ) = _compute_heavy_parts(belief, ll_intents, env_state.get("regions", {}))
-
-    remaining_entropy = max(0.0, total_entropy - ll_covered_entropy)
-
-    n_agents = max(1, len(ll_intents))
-    nominal_rate = 50.0
-    effective_rate = nominal_rate * n_agents * max(0.05, 1.0 - ll_overlap_penalty)
-
-    hl_completion_time = remaining_entropy / effective_rate
-    return 0.1 * (ll_execution_time + hl_completion_time)
-
-
-# ---------------------------------------------------------------------------
-# Mode 4 - eta_weighted (ETA-weighted coverage deficit)
-# ---------------------------------------------------------------------------
-
-
-def _g2_eta_weighted(
-    ll_intents: Dict[int, Any],
-    hl_intents: Dict[int, Any],
-    env_state: Dict[str, Any],
-    agent_id: Optional[int] = None,
-) -> float:
-    """
-    ETA-weighted coverage deficit.
-
-    For each uncertain region, find the agent covering it soonest
-    (HL ETA sequence if available, else estimated travel time).
-
-    g2 = sum_r( region_entropy_r * min_ETA_r ) / total_remaining_entropy
-
-    Rewards HL plans that dispatch agents promptly to high-entropy areas.
-    Uncovered regions receive worst-case ETA = total scan time.
-
-    Requires env_state["regions"]. Falls back to entropy_rate if missing.
-    """
-    belief = env_state.get("belief")
-    regions = env_state.get("regions", {})
-
-    if belief is None:
-        return 0.0
-
-    if not regions:
-        return _g2_entropy_rate(ll_intents, hl_intents, env_state, agent_id)
-
-    (
-        entropy_map,
-        total_entropy,
-        ll_covered_cells,
-        ll_covered_entropy,
-        ll_overlap_penalty,
-        ll_execution_time,
-        ll_end_positions,
-        remaining_entropy_map,
-        region_remaining_entropy,
-        region_hotspot_ij,
-    ) = _compute_heavy_parts(belief, ll_intents, regions)
-
-    total_remaining = max(0.0, total_entropy - ll_covered_entropy)
-    if total_remaining < 1e-6:
-        return 0.0
-
-    # xy_speed in grid-cell units (see hl_aware for coordinate system rationale)
-    xy_speed = 1.0
-    nominal_cells_per_step = 50.0
-    worst_case_eta = ll_execution_time + total_remaining / nominal_cells_per_step
-
-    # Grid-coord conversion: world (x, y) → grid (i, j)
-    grid_info_obj = env_state.get("grid_info")
-    gl = getattr(grid_info_obj, "length", None)
-    gs = getattr(grid_info_obj, "shape", None)
-    gc = getattr(grid_info_obj, "center", True)
-    use_grid_coords = gl is not None and gs is not None
-    if use_grid_coords:
-        _ci = gs[0] // 2 if gc else 0
-        _cj = gs[1] // 2 if gc else 0
-
-    def _to_grid(wx, wy):
-        if use_grid_coords:
-            return (-wy / gl + _ci, wx / gl + _cj)
-        return (wx, wy)
-
-    weighted_sum = 0.0
-
-    for rid, region in regions.items():
-        region_entropy = region_remaining_entropy.get(rid, 0.0)
-        if region_entropy < 1e-6:
-            continue
-
-        target = region_hotspot_ij.get(rid, region["center"])
-        min_eta = float("inf")
-
-        for aid, hl_intent in hl_intents.items():
-            if hl_intent is None or not hl_intent.region_sequence:
+            imin, imax, jmin, jmax = fp
+            imin, imax = max(0, int(imin)), min(H, int(imax))
+            jmin, jmax = max(0, int(jmin)), min(W, int(jmax))
+            if imax <= imin or jmax <= jmin:
                 continue
-            if rid not in hl_intent.region_sequence:
-                continue
+            if unc is None:
+                if not self.uncovered[imin:imax, jmin:jmax].any():
+                    continue
+                unc = self.uncovered.copy()
+            unc[imin:imax, jmin:jmax] = False
+        if unc is None:
+            return self
+        return CoverageStepModel(unc, self.tile_size, self.step_cells, self.fp_half)
 
-            seq_idx = hl_intent.region_sequence.index(rid)
+    # ------------------------------------------------------- covering tours
+    def _cover_points(self, open_blocks: np.ndarray) -> np.ndarray:
+        """
+        Greedy set of lattice positions (in block units, shape (n, 2)) whose
+        minimum-altitude footprints see every open block.
+        """
+        remaining = open_blocks.copy()
+        if not remaining.any():
+            return np.zeros((0, 2), dtype=np.int64)
+        nbi, nbj = remaining.shape
+        k = self.kh
+        points = []
+        while remaining.any():
+            # count[a, b] = open blocks in rows [a-k, a+k) x cols [b-k, b+k)
+            sat = np.zeros((nbi + 1, nbj + 1), dtype=np.int64)
+            sat[1:, 1:] = remaining.cumsum(0).cumsum(1)
+            a = np.arange(nbi + 1)
+            b = np.arange(nbj + 1)
+            a0, a1 = np.clip(a - k, 0, nbi), np.clip(a + k, 0, nbi)
+            b0, b1 = np.clip(b - k, 0, nbj), np.clip(b + k, 0, nbj)
+            count = (sat[a1][:, b1] - sat[a0][:, b1] - sat[a1][:, b0] + sat[a0][:, b0])
+            pa, pb = np.unravel_index(int(count.argmax()), count.shape)
+            points.append((pa, pb))
+            remaining[max(0, pa - k):pa + k, max(0, pb - k):pb + k] = False
+        return np.asarray(points, dtype=np.int64)
 
-            # Use stored ETA if available
-            if hl_intent.eta_sequence and seq_idx < len(hl_intent.eta_sequence):
-                eta = ll_execution_time + hl_intent.eta_sequence[seq_idx]
-            else:
-                # Estimate by walking region sequence to this region
-                raw_pos = ll_end_positions.get(aid, None)
-                pos = _to_grid(raw_pos[0], raw_pos[1]) if raw_pos is not None else None
-                t = float(ll_execution_time)
-                for r2 in hl_intent.region_sequence[: seq_idx + 1]:
-                    if r2 not in regions:
-                        break
-                    t2 = region_hotspot_ij.get(r2, regions[r2]["center"])
-                    if pos is not None:
-                        dist = np.sqrt((pos[0] - t2[0]) ** 2 + (pos[1] - t2[1]) ** 2)
-                        t += dist / xy_speed
-                    if r2 != rid:
-                        t += (
-                            region_remaining_entropy.get(r2, 0.0)
-                            / nominal_cells_per_step
-                        )
-                    pos = t2  # grid coords throughout
-                eta = t
-
-            min_eta = min(min_eta, eta)
-
-        if min_eta == float("inf"):
-            min_eta = worst_case_eta
-
-        weighted_sum += region_entropy * min_eta
-
-    g2_raw = weighted_sum / total_remaining
-    return 0.1 * g2_raw
-
-
-# ---------------------------------------------------------------------------
-# Shared private helpers
-# ---------------------------------------------------------------------------
-
-
-def _occupancy_prob(belief: np.ndarray) -> np.ndarray:
-    """Extract 2-D occupied-channel probability from belief array."""
-    if belief.ndim == 3:
-        return np.clip(belief[:, :, 1], 1e-10, 1 - 1e-10)
-    return np.clip(belief, 1e-10, 1 - 1e-10)
-
-
-def _entropy(p: np.ndarray) -> np.ndarray:
-    """Binary entropy map (base-2)."""
-    return -p * np.log2(p) - (1 - p) * np.log2(1 - p)
-
-
-def _region_entropy_sat(
-    entropy_map: np.ndarray,
-    regions: Dict[int, Any],
-) -> Dict[int, float]:
-    """
-    Compute total entropy per region using a summed-area table (O(1) per query).
-    Returns dict mapping region_id -> float entropy sum.
-    """
-    if not regions:
-        return {}
-
-    sat = np.pad(
-        entropy_map.cumsum(axis=0).cumsum(axis=1),
-        ((1, 0), (1, 0)),
-        mode="constant",
-        constant_values=0,
-    )
-
-    result = {}
-    for rid, region in regions.items():
-        (imin, imax), (jmin, jmax) = region["bounds"]
-        total = float(
-            sat[imax, jmax] - sat[imin, jmax] - sat[imax, jmin] + sat[imin, jmin]
-        )
-        result[rid] = max(0.0, total)
-
-    return result
-
-
-# ---------------------------------------------------------------------------
-# Public utility functions (used by callers and tests)
-# ---------------------------------------------------------------------------
-
-
-def compute_uncertain_area(belief: np.ndarray, threshold: float = 0.3) -> float:
-    """Count cells with binary entropy above threshold."""
-    if belief is None:
-        return 0.0
-    p = _occupancy_prob(belief)
-    ent = _entropy(p)
-    return float(np.sum(ent > threshold))
-
-
-def compute_ll_execution_time(ll_intents: Dict[int, Any]) -> float:
-    """Maximum LL horizon across all agents (steps when last agent finishes LL)."""
-    if not ll_intents:
-        return 0.0
-    max_horizon = 0.0
-    for intent in ll_intents.values():
-        if intent is None:
-            continue
-        if hasattr(intent, "action_sequence"):
-            h = len(intent.action_sequence)
-        elif hasattr(intent, "horizon"):
-            h = intent.horizon or 5
+    def _tour_steps(self, points: np.ndarray, roots: List[GridPos]) -> float:
+        """Multi-root MST over covering positions, in moves."""
+        n = len(points)
+        if n == 0:
+            return 0.0
+        pos = points.astype(float) * self.bs  # grid coordinates
+        if roots:
+            r = np.asarray(roots, dtype=float)
+            root = np.min(np.abs(pos[:, None, :] - r[None, :, :]).sum(-1), axis=1)
+            root = np.ceil(root / self.step_cells - 1e-9)
         else:
-            h = 5
-        max_horizon = max(max_horizon, h)
-    return float(max_horizon)
+            root = np.zeros(n)
+        if n == 1:
+            return float(root[0])
+        links = np.abs(points[:, None, :] - points[None, :, :]).sum(-1).astype(float)
+        links *= self.bs / self.step_cells
+        return _multi_root_mst(root, links)
+
+    # ------------------------------------------------------------ step costs
+    def reach_steps_all(self, pos: GridPos) -> np.ndarray:
+        """Moves from `pos` until a footprint can see each region's open bounding box."""
+        pi, pj = float(pos[0]), float(pos[1])
+        di = np.maximum(0.0, np.maximum(self.i_lo - pi, pi - self.i_hi))
+        dj = np.maximum(0.0, np.maximum(self.j_lo - pj, pj - self.j_hi))
+        return (np.ceil(np.maximum(0.0, di - self.half) / self.step_cells)
+                + np.ceil(np.maximum(0.0, dj - self.half) / self.step_cells))
+
+    def reach_steps(self, pos: GridPos, r: int) -> float:
+        pi, pj = float(pos[0]), float(pos[1])
+        di = max(0.0, self.i_lo[r] - pi, pi - self.i_hi[r])
+        dj = max(0.0, self.j_lo[r] - pj, pj - self.j_hi[r])
+        return float(
+            np.ceil(max(0.0, di - self.half) / self.step_cells)
+            + np.ceil(max(0.0, dj - self.half) / self.step_cells)
+        )
+
+    def arrival_position(self, pos: GridPos, r: int) -> GridPos:
+        """Where an agent coming from `pos` first sees region r (clamped to its view zone)."""
+        lo_i, hi_i = self.i_lo[r] - self.half, self.i_hi[r] + self.half
+        lo_j, hi_j = self.j_lo[r] - self.half, self.j_hi[r] + self.half
+        return (float(min(max(pos[0], lo_i), hi_i)), float(min(max(pos[1], lo_j), hi_j)))
+
+    def region_inner_steps(self, r: int) -> float:
+        """Moves to see all of region r's open blocks once there (0 for one block)."""
+        if r not in self._region_inner:
+            mask = self.blocks & (self.block_region == r)
+            pts = self._cover_points(mask)
+            if len(pts) <= 1:
+                self._region_inner[r] = 0.0
+            else:
+                links = np.abs(pts[:, None, :] - pts[None, :, :]).sum(-1).astype(float)
+                links *= self.bs / self.step_cells
+                self._region_inner[r] = _multi_root_mst(np.full(len(pts), np.inf), links, free_first=True)
+        return self._region_inner[r]
+
+    def region_cost(self, pos: Optional[GridPos], r: int) -> float:
+        """Moves to finish region r starting at pos (0 if r is already covered)."""
+        if self.counts[r] == 0:
+            return 0.0
+        reach = 0.0 if pos is None else self.reach_steps(pos, r)
+        return reach + self.region_inner_steps(r)
+
+    def exit_position(self, r: int) -> GridPos:
+        """Centre of region r's open bounding box."""
+        return (0.5 * (self.i_lo[r] + self.i_hi[r]), 0.5 * (self.j_lo[r] + self.j_hi[r]))
+
+    def sequence_cost(
+        self, start: Optional[GridPos], sequence: Sequence[int]
+    ) -> Tuple[float, List[float], List[float], Optional[GridPos]]:
+        """
+        Walk a region sequence (regions already covered or repeated are free).
+
+        Returns:
+            (total moves, cumulative moves until each region is reached,
+             cumulative moves until each region is finished, end position)
+        """
+        pos = start
+        total = 0.0
+        etas: List[float] = []
+        finished: List[float] = []
+        seen = set()
+        for r in sequence:
+            if 0 <= r < self.num_regions and self.counts[r] > 0 and r not in seen:
+                seen.add(r)
+                reach = 0.0 if pos is None else self.reach_steps(pos, r)
+                etas.append(total + reach)
+                total += reach + self.region_inner_steps(r)
+                pos = self.arrival_position(pos, r) if pos is not None else self.exit_position(r)
+            else:
+                etas.append(total)
+            finished.append(total)
+        return total, etas, finished, pos
+
+    def leftover_steps(self, claimed: np.ndarray, ends: List[GridPos]) -> float:
+        """Moves for all open blocks of regions nobody claimed (covering-positions MST)."""
+        open_blocks = self.blocks & ~claimed[self.block_region]
+        return self._tour_steps(self._cover_points(open_blocks), ends)
+
+    def team_steps(
+        self, agents: Dict[int, Tuple[Optional[GridPos], Sequence[int]]]
+    ) -> float:
+        """
+        g2: estimated agent-steps until every cell is observed at least once.
+
+        Args:
+            agents: {agent_id: (start position in grid cells or None, HL region sequence)}
+        """
+        total = 0.0
+        claimed = np.zeros(self.num_regions, dtype=bool)
+        ends: List[GridPos] = []
+        for start, sequence in agents.values():
+            cost, _, _, end = self.sequence_cost(start, sequence)
+            total += cost
+            for r in sequence:
+                if 0 <= r < self.num_regions:
+                    claimed[r] = True
+            if end is not None:
+                ends.append(end)
+        return total + self.leftover_steps(claimed, ends)
 
 
-def compute_ll_covered_cells(ll_intents: Dict[int, Any]) -> set:
-    """Set of (i, j) cells covered by any LL intent footprint.
-
-    Uses numpy slicing instead of nested Python loops for speed.
-    Returns an empty set quickly when there are no intents.
+def _multi_root_mst(root: np.ndarray, links: np.ndarray, free_first: bool = False) -> float:
     """
-    if not ll_intents:
-        return set()
-
-    # Collect all (imin, imax, jmin, jmax) rectangles first
-    rects = []
-    for intent in ll_intents.values():
-        if intent is None or not hasattr(intent, "footprint_sequence"):
-            continue
-        for fp in intent.footprint_sequence:
-            if fp is None or len(fp) != 4:
-                continue
-            rects.append(fp)
-
-    if not rects:
-        return set()
-
-    # Build a boolean mask over a bounding box, then convert once to a set.
-    # This avoids O(n_cells) Python-level iterations.
-    imins, imaxs, jmins, jmaxs = zip(*rects)
-    gimin = min(imins)
-    gimax = max(imaxs)
-    gjmin = min(jmins)
-    gjmax = max(jmaxs)
-    H = gimax - gimin
-    W = gjmax - gjmin
-    if H <= 0 or W <= 0:
-        return set()
-
-    mask = np.zeros((H, W), dtype=bool)
-    for imin, imax, jmin, jmax in rects:
-        r0 = imin - gimin
-        r1 = imax - gimin
-        c0 = jmin - gjmin
-        c1 = jmax - gjmin
-        mask[r0:r1, c0:c1] = True
-
-    rows, cols = np.nonzero(mask)
-    return set(zip((rows + gimin).tolist(), (cols + gjmin).tolist()))
-
-
-def compute_ll_end_positions(
-    ll_intents: Dict[int, Any],
-) -> Dict[int, Tuple[float, float]]:
-    """Agent end-positions (x, y) after LL intent execution."""
-    end_positions = {}
-    for aid, intent in ll_intents.items():
-        if intent is None or not hasattr(intent, "state_sequence"):
-            continue
-        if intent.state_sequence:
-            last = intent.state_sequence[-1]
-            if len(last) >= 2:
-                end_positions[aid] = (last[0], last[1])
-    return end_positions
-
-
-def compute_ll_overlap_penalty(ll_intents: Dict[int, Any]) -> float:
+    Minimum spanning forest cost (Prim) where every node may alternatively be
+    attached to a virtual root (the agents) at cost root[k]. With free_first,
+    the first node joins at no cost (plain MST).
     """
-    Fraction of LL-covered cells covered by more than one agent.
-    Range [0, 1]. Higher = more redundant work.
+    best = np.asarray(root, dtype=np.float64).copy()
+    n = best.size
+    if free_first:
+        best[0] = 0.0
+    in_tree = np.zeros(n, dtype=bool)
+    total = 0.0
+    for _ in range(n):
+        k = int(np.where(in_tree, np.inf, best).argmin())
+        total += best[k]
+        in_tree[k] = True
+        np.minimum(best, links[k], out=best)
+    return float(total)
 
-    Uses numpy masks for each agent then counts overlap, avoiding nested Python loops.
+
+def uncovered_from_belief(belief: np.ndarray, tol: float = 1e-9) -> np.ndarray:
     """
-    if not ll_intents or len(ll_intents) < 2:
-        return 0.0
+    Fallback when no explicit coverage mask is available: treat cells whose
+    belief is still exactly at the 0.5 prior as unobserved.
 
-    # Collect per-agent rectangles
-    agent_rects: Dict[Any, list] = {}
-    all_rects = []
-    for aid, intent in ll_intents.items():
-        if intent is None or not hasattr(intent, "footprint_sequence"):
-            continue
-        rects = [
-            fp for fp in intent.footprint_sequence if fp is not None and len(fp) == 4
-        ]
-        if rects:
-            agent_rects[aid] = rects
-            all_rects.extend(rects)
-
-    if not all_rects or len(agent_rects) < 2:
-        return 0.0
-
-    imins, imaxs, jmins, jmaxs = zip(*all_rects)
-    gimin = min(imins)
-    gimax = max(imaxs)
-    gjmin = min(jmins)
-    gjmax = max(jmaxs)
-    H = gimax - gimin
-    W = gjmax - gjmin
-    if H <= 0 or W <= 0:
-        return 0.0
-
-    # Sum of per-agent masks = coverage count per cell
-    coverage_count = np.zeros((H, W), dtype=np.int16)
-    for aid, rects in agent_rects.items():
-        agent_mask = np.zeros((H, W), dtype=bool)
-        for imin, imax, jmin, jmax in rects:
-            agent_mask[imin - gimin : imax - gimin, jmin - gjmin : jmax - gjmin] = True
-        coverage_count += agent_mask  # bool is treated as 0/1 by numpy
-
-    total_cells = int(np.count_nonzero(coverage_count))
-    if total_cells == 0:
-        return 0.0
-
-    overlap_cells = int(np.count_nonzero(coverage_count > 1))
-    return float(overlap_cells) / total_cells
-
-
-# ---------------------------------------------------------------------------
-# Legacy stubs (backward compatibility)
-# ---------------------------------------------------------------------------
-
-
-def evaluate_region_coverage(
-    hl_intents: Dict[int, Any],
-    belief: np.ndarray,
-    grid_info: Any,
-) -> float:
-    """Legacy stub. Use _g2_hl_aware instead."""
-    return 0.0
-
-
-def compute_coordination_penalty(
-    ll_intents: Dict[int, Any],
-    hl_intents: Dict[int, Any],
-) -> float:
-    """Legacy stub. Overlap handled in compute_ll_overlap_penalty."""
-    return 0.0
-
-
-def get_region_uncertainty(
-    belief: np.ndarray,
-    region_bounds: Tuple[int, int, int, int],
-) -> float:
-    """Total entropy in a rectangular region."""
-    imin, imax, jmin, jmax = region_bounds
-    region_belief = belief[imin:imax, jmin:jmax]
-    if region_belief.ndim == 3:
-        region_belief = region_belief[:, :, 1:]
-    return compute_uncertain_area(region_belief)
-
-
-def compute_region_overlap(
-    region1: Tuple[int, int, int, int],
-    region2: Tuple[int, int, int, int],
-) -> float:
-    """Intersection area between two (imin, imax, jmin, jmax) rectangles."""
-    i1_min, i1_max, j1_min, j1_max = region1
-    i2_min, i2_max, j2_min, j2_max = region2
-    i_overlap = max(0, min(i1_max, i2_max) - max(i1_min, i2_min))
-    j_overlap = max(0, min(j1_max, j2_max) - max(j1_min, j2_min))
-    return float(i_overlap * j_overlap)
+    Only reliable without LBP smoothing (LBP also moves unobserved neighbours).
+    The simulator always passes an explicit observed-at-least-once mask.
+    """
+    p = belief[:, :, 1] if belief.ndim == 3 else belief
+    return np.abs(p - 0.5) <= tol

@@ -1,857 +1,296 @@
-# Multi-Horizon Dec-MCTS Multi-Agent Architecture
+# MH-Dec-MCTS: Multi-Horizon Decentralised MCTS
 
-> **Strategies:** `mh_dec_mcts_efficient` and `mh_dec_mcts_full` — Two-level hierarchical planning
+> Strategies `mh_dec_mcts_full` (LLP = MCTS tree search) and `mh_dec_mcts_efficient` (LLP = random rollouts).
+> Code: `src/hierarchical_dec_mcts.py`, `src/g2_evaluator.py`; wiring in `src/planner.py` and `src/simulator.py`.
+> Tests: `tests/test_mh_coverage_g2.py`.
 
----
-
-## 1. Overview
-
-MH-Dec-MCTS is a **hierarchical** planner with two levels:
-- **HLP (High-Level Planner)**: Long-horizon region allocation (slow cycle)
-- **LLP (Low-Level Planner)**: Short-horizon motion planning (fast cycle)
-
-**Key Features:**
-- Two-level planning with reward decomposition: `g = g1(LL) + g2(HL)`
-- Intent sharing at both levels (LL-intent + HL-intent)
-- D-UCT discounting for asynchronous operation
-- HLP guides LLP toward target regions (soft guidance)
+This page describes what the code does **now**. Everything below is measured in **simulation steps** and MCTS iterations; nothing in the planners depends on wall-clock time. Planning is **simulated-asynchronous** (§2), following Seiler et al., RA-L 2024: each robot runs two concurrent planners, an LLP and an HLP, that keep exchanging intents.
 
 ---
 
-## 2. Architecture Diagram
+## 1. What the planner is trying to do
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    AGENT (per agent)                        │
-│                                                             │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │          HierarchicalDecMCTSPlanner                  │   │
-│  │                                                      │   │
-│  │   ┌───────────────┐      ┌────────────────┐          │   │
-│  │   │     HLP       │      │      LLP       │          │   │
-│  │   │  (Regions)    │─────▶│   (Actions)    │          │   │
-│  │   │               │ guid │                │          │   │
-│  │   │  horizon: 3   │ ance │  horizon: 5    │          │   │
-│  │   │  regions      │      │  steps         │          │   │
-│  │   └───────┬───────┘      └───────┬────────┘          │   │
-│  │           │                      │                   │   │
-│  │           ▼                      ▼                   │   │
-│  │     HL-Intent               LL-Intent                │   │
-│  │    (region seq)           (action seq)               │   │
-│  └──────────┬─────────────────────┬─────────────────────┘   │
-│             │                     │                         │
-│             └──────────┬──────────┘                         │
-│                        │                                    │
-│                        ▼                                    │
-│                  ┌───────────┐                              │
-│                  │ IntentBus │◀───── Shared across agents   │
-│                  └───────────┘                              │
-└─────────────────────────────────────────────────────────────┘
-```
+Each agent runs two planners every step:
+
+| Level | Decides | Horizon | Objective |
+|---|---|---|---|
+| **HLP** (high level) | which regions (tiles) to cover next, in which order | `hlp.horizon` regions | agent-steps **saved** toward "every cell observed at least once" |
+| **LLP** (low level) | the next primitive actions (front/back/left/right/up/down/hover) | `llp.horizon` steps | information gain **+** `g2_weight` × agent-steps saved |
+
+The HLP's main goal is **100 % coverage without coming back for missed small spots**:
+
+- **Coverage** means *observed at least once*, by any agent, at any altitude. It is not "belief decided".
+- **Not coming back** is a soft cost: leaving uncovered cells behind is charged the steps needed to return for them later. There is no hard rule forcing an agent to stay in a region.
 
 ---
 
-## 3. Call Flow Diagram
+## 2. One simulation step (simulated asynchrony)
+
+`Simulator.run()` executes all agents together: all plan, then all move, then all observe. With `decentralized.async.enabled: true` (the default) planning uses `Simulator._select_agent_actions_async`:
 
 ```
-main.py
-│
-├── run_multi_agent_experiment()
-│   │
-│   ├── [1] MultiAgentCoordinator()
-│   │       └── LBPBeliefFusion()
-│   │
-│   ├── [2] generate_multi_agent_starts()
-│   │
-│   ├── [3] FOR agent_id in num_agents:
-│   │       └── initialize_agent()
-│   │           ├── Camera()
-│   │           ├── planning("mh_dec_mcts_efficient" or "mh_dec_mcts_full")
-│   │           │   └── create_hierarchical_planner()
-│   │           │       ├── IntentBus()        # Shared
-│   │           │       ├── LowLevelPlanner()
-│   │           │       └── HighLevelPlanner()
-│   │           └── OccupancyMap()
-│   │
-│   └── [4] MAIN LOOP (n_steps):
-│           │
-│           ├── Phase 1: OBSERVE
-│           │   └── process_agent_observations()
-│           │
-│           ├── Phase 2: FUSE BELIEFS
-│           │   └── perform_belief_fusion()
-│           │
-│           ├── Phase 3: SELECT ACTIONS
-│           │   └── select_agent_actions()
-│           │       FOR each agent:
-│           │           └── HierarchicalDecMCTSPlanner.select_action()
-│           │               │
-│           │               ├── [A] receive_intents()
-│           │               │       └── intent_bus.get_teammate_ll/hl_intents()
-│           │               │
-│           │               ├── [B] HLP.plan(grid_position)
-│           │               │       ├── _get_teammate_target_regions()
-│           │               │       ├── _compute_region_score() for each region
-│           │               │       └── Return HLIntent (region sequence)
-│           │               │
-│           │               ├── [C] LLP.update_hl_guidance(hl_intent)
-│           │               │
-│           │               ├── [D] LLP.plan(current_state)
-│           │               │       ├── _compute_teammate_coverage_mask()
-│           │               │       ├── MCTS iterations:
-│           │               │       │   ├── _simulate_trajectory()
-│           │               │       │   │   └── _compute_ig()
-│           │               │       │   └── Pick best trajectory
-│           │               │       └── Return LLIntent (action sequence)
-│           │               │
-│           │               └── [E] BROADCAST INTENTS
-│           │                       ├── intent_bus.broadcast_ll_intent()
-│           │                       └── intent_bus.broadcast_hl_intent()
-│           │
-│           └── Phase 4: UPDATE POSITIONS
-│               └── update_agent_positions()
+for step in range(n_steps):
+    metrics + logging
+    # --- planning (simulated asynchronous) ---
+    for each agent: begin_async_step()
+        HLP: keep its search tree, or start a new cycle (replan due: every
+             replan_interval steps / target region finished / no plan)
+        LLP: start a fresh round (new tree) at the current state
+    intent buses -> deferred mode
+    for slice in range(slices_per_step):            # default 3
+        for each agent (any order; result is order-independent):
+            read intents delivered so far (teammates' LL/HL, own LL -> HLP)
+            HLP: hlp.iterations / slices more MCTS iterations, publish current best HL plan
+            LLP: llp.iterations / slices more iterations, publish current best LL plan
+        flush buses: deliver this slice's intents (range-limited) to receivers
+    each agent executes the first action of its LLP's current best plan
+    # --- world ---
+    all agents move; observe; update local belief (OG + LBP); mark own footprint
+    news fusion (BS/BM modes only) + coverage news
 ```
+
+- Within a slice every planner sees the intents published at the end of the previous slice. The planners therefore run concurrently, as in the paper, but the outcome is **deterministic** and independent of agent order (`test_async_is_deterministic_and_order_independent`).
+- Search trees persist while the intents they depend on keep changing, so they use the paper's **D-UCT** (§7):
+  - LLP and Dec-MCTS trees: across the slices of one step. They then restart, because the first action has been executed (receding horizon).
+  - HLP tree: across its whole cycle (`hlp.replan_interval` steps), so the HLP accumulates `replan_interval × hlp.iterations` iterations and effectively runs at a slower rate.
+- Budgets are per **step**: `llp.iterations`, `hlp.iterations` and `dec_mcts.iterations` are the iterations each planner gets per simulation step. Dec-MCTS's wall-clock `timeout` is not used in this mode.
+- With `async.enabled: false`, each agent instead calls `HierarchicalDecMCTSPlanner.plan()` once per step, in agent order: HLP (full budget on replan), then LLP (full budget), then broadcast. Later agents then see earlier agents' intents from the same step.
 
 ---
 
-## 4. Key Components
+## 3. What is shared, by mode
 
-### 4.1 IntentBus (`hierarchical_dec_mcts.py`)
+The mode label (`mode_labels`) controls all information exchange. The same rules apply to Dec-MCTS.
 
-```python
-class IntentBus:
-    """Thread-safe communication for intent sharing."""
-    
-    def __init__(self, num_agents, max_history=10):
-        self._ll_intents: Dict[int, LLIntent] = {}
-        self._hl_intents: Dict[int, HLIntent] = {}
-        self._ll_history: Dict[int, List[LLIntent]] = defaultdict(list)
-        self._hl_history: Dict[int, List[HLIntent]] = defaultdict(list)
-        self._lock = threading.RLock()
-    
-    def broadcast_ll_intent(self, intent: LLIntent):
-        with self._lock:
-            self._ll_intents[intent.agent_id] = intent
-            # Keep history for temporal reasoning
-            self._ll_history[intent.agent_id].append(intent)
-    
-    def get_teammate_ll_intents(self, agent_id) -> Dict[int, LLIntent]:
-        return {k: v for k, v in self._ll_intents.items() if k != agent_id}
-```
+| Mode | Belief news | Coverage knowledge (observed-at-least-once) | LL/HL intents |
+|---|---|---|---|
+| `IG`, `IGd` | none | own observations only | **none** (IntentBus disabled) |
+| `IG_BS`, `IGd_BS` | broadcast news to agents in range | same channel as news | to agents in range |
+| `IG_BM`, `IGd_BM` | per-neighbour news to agents in range | same channel as news | to agents in range |
 
-### 4.2 Intent Structures
+Details:
 
-**LL-Intent (Low-Level):**
-```python
-@dataclass
-class LLIntent:
-    agent_id: int
-    action_sequence: List[str]           # ['front', 'front', 'right', ...]
-    state_sequence: List[Tuple]          # [(row, col, alt), ...]
-    footprint_sequence: List[Tuple]      # [(imin, imax, jmin, jmax), ...]
-    ig_sequence: List[float]             # Expected IG per step
-    total_expected_ig: float
-    timestamp: float
-    horizon: int = 5
-    value: float = 0.0
-    
-    def staleness_discount(self, decay=0.9, threshold=2.0):
-        """Fast decay for short-horizon intents."""
-        age = time.time() - self.timestamp
-        return decay ** (age / threshold)
-```
-
-**HL-Intent (High-Level):**
-```python
-@dataclass
-class HLIntent:
-    agent_id: int
-    region_sequence: List[int]           # [region_3, region_7, region_12]
-    eta_sequence: List[float]            # Estimated time to reach
-    completion_sequence: List[float]     # Estimated completion time
-    score_sequence: List[float]          # Priority scores
-    current_target_region: int           # Immediate target
-    target_center: Tuple[float, float]   # Center of target region
-    timestamp: float
-    horizon: int = 3
-    
-    def staleness_discount(self, decay=0.95, threshold=5.0):
-        """Slow decay for long-horizon intents."""
-        age = time.time() - self.timestamp
-        return decay ** (age / threshold)
-```
+- **Range** is `MultiAgentCoordinator.get_neighbors_in_range` (`radius_multiplier` × 3.125 m, checked per axis in x/y/z; `-1` = unlimited).
+- **Intents** go to the agents in range of the sender. In async mode they are delivered at the end of each planning slice (deferred bus). A receiver keeps the last intent it got from each teammate. When the teammate moves out of range, that intent stays in the inbox and ages (§7).
+- **Coverage news** (`MultiAgentMapper.share_coverage_news`) mirrors belief news exactly. News carries only the sender's **own** footprints (no relaying):
+  - **BS**: one pending buffer per sender, cleared once it has been delivered to anyone. Agents out of range at that moment never get it.
+  - **BM**: one pending buffer per (sender, receiver), delivered and cleared when that receiver is in range. The backlog arrives later.
+- **The "d" in IGd has no effect on MH-Dec-MCTS** (or Dec-MCTS). `position_sharing` is only used by greedy IG. For MH, `IG_BM` and `IGd_BM` are identical runs.
+- **`limited_testing: true`** in the master config overrides the radius per mode: `IG_BS` → R16 (covers the whole 50 m field, effectively unlimited) and `IGd_BM` → R5 (15.625 m). See `src/main.py::_apply_mh_mode_label`.
 
 ---
 
-## 5. High-Level Planner (HLP)
+## 4. g2: remaining coverage effort in steps (`src/g2_evaluator.py`)
 
-### 5.1 Region Partitioning
+`CoverageStepModel` is built from the agent's **uncovered** mask (the inverse of its coverage knowledge).
 
-```python
-class HighLevelPlanner:
-    def __init__(self, agent_id, num_agents, grid_shape, tile_size=(100, 100)):
-        self.regions = self._partition_grid()
-    
-    def _partition_grid(self) -> Dict[int, Dict]:
-        """Divide grid into rectangular regions."""
-        regions = {}
-        region_id = 0
-        
-        for i in range(0, H, tile_h):
-            for j in range(0, W, tile_w):
-                regions[region_id] = {
-                    "bounds": ((i, min(i+tile_h, H)), (j, min(j+tile_w, W))),
-                    "center": ((i + i_end) / 2, (j + j_end) / 2),
-                    "area": (i_end - i) * (j_end - j),
-                }
-                region_id += 1
-        
-        return regions
-```
+Geometry (default Gaussian field: 400×400 cells of 0.125 m; everything priced at **minimum altitude**, altitude changes ignored):
 
-### 5.2 Region Scoring
+| Quantity | Value | Meaning |
+|---|---|---|
+| `step_cells` | 25 | one lateral move = 3.125 m = 25 cells; moves are 4-connected |
+| block | 25×25 cells | the field as a 16×16 grid of one-move blocks; a block is *open* if any cell in it is unobserved |
+| lattice positions | block corners | where an agent stands; at minimum altitude (5.41 m, footprint 50×50 cells) it sees the 2×2 blocks around it |
 
-```python
-def _compute_region_score(self, region_id, agent_position, teammate_targets):
-    """Score = uncertainty - distance_penalty - teammate_conflict."""
-    
-    # Base score: remaining uncertainty
-    remaining_uncertainty = 1.0 - self._region_coverage[region_id]
-    
-    # Distance penalty
-    center = self.regions[region_id]["center"]
-    distance = np.linalg.norm(agent_position - center)
-    distance_penalty = 0.3 * (distance / max_distance)
-    
-    # Teammate conflict with D-UCT discount
-    conflict_penalty = 0.0
-    for teammate_id, (targets, staleness_discount) in teammate_targets.items():
-        if region_id in targets:
-            conflict_penalty += 0.5 * staleness_discount
-    
-    return max(0.0, remaining_uncertainty - distance_penalty - conflict_penalty)
-```
+**Remaining work for a set of open blocks** is the length of a tour that visits enough lattice positions to see every open block:
 
-### 5.3 HLP Planning
+1. Pick covering positions greedily (the position that sees the most open blocks first).
+2. Connect them with a minimum spanning tree in true step distance (Manhattan / 25). The tree is rooted at the agents' positions (multi-root, Prim's algorithm in NumPy).
 
-**Current Implementation: MCTS Region Search**
+**Team estimate** g2 (sum of agent-steps; lower is better):
 
-```python
-def plan(self, current_position) -> HLIntent:
-    if not self._should_replan():
-        return self.current_intent  # Reuse cached plan
-    
-    # Get teammate target regions
-    teammate_targets = self._get_teammate_target_regions()
-    
-    # Run MCTS over region sequences
-    best_sequence = self._run_mcts_region_search(current_position, teammate_targets)
-    
-    # Build intent from best sequence
-    region_sequence = best_sequence
-    eta_sequence = []
-    completion_sequence = []
-    score_sequence = []
-    
-    cumulative_time = 0.0
-    pos = current_position
-    
-    for region_id in region_sequence:
-        # Compute marginal score
-        score = self._compute_region_score(region_id, pos, teammate_targets)
-        
-        # Estimate completion time
-        eta = self._estimate_region_completion_time(region_id, pos)
-        cumulative_time += eta
-        
-        eta_sequence.append(cumulative_time)
-        completion_sequence.append(cumulative_time + eta)
-        score_sequence.append(score)
-        
-        pos = self.regions[region_id]["center"]
-    
-    return HLIntent(
-        agent_id=self.agent_id,
-        region_sequence=region_sequence,
-        current_target_region=region_sequence[0] if region_sequence else None,
-        target_center=self.regions[region_sequence[0]]["center"],
-        value=sum(score_sequence),
-        iterations=self.num_iterations,
-        ...
-    )
-```
+1. **Claimed work.** Every agent walks its HL region sequence from its start. For each still-open region it pays `reach` (moves until its footprint can see the region's open bounding box) plus `inner` (tour over the region's own covering positions; 0 for a one-block region). It then stands where it arrived. A region claimed twice is paid twice.
+2. **Unclaimed work.** All open blocks in regions nobody claimed are priced by the covering-positions spanning tree, rooted at every agent's end position.
 
-**Note:** HLP now uses **full MCTS tree search** over region sequences, making it symmetric with LLP. The MCTS search explores different region orderings using UCB selection, random rollout policies, and marginal g₂ evaluation for complete sequences.
+Why this form:
+
+- **Covering the middle of an uncovered strip costs nothing extra.** Covered ground can still be crossed at its true distance.
+- **Covering an end of a strip, or a whole area, lowers g2.**
+- **An isolated missed spot adds the detour needed to come back for it.** That detour is the "come back later" cost that makes the planners finish areas before moving on.
+
+Two earlier drafts were rejected:
+
+- **Independent trip per region from the nearest agent.** This pulls agents toward the median of the remaining work.
+- **Area / swath sweep + zone-to-zone spanning tree.** This prices one-tile-wide strips at half their real cost. Covering a strip's middle then *raised* g2, and the LLP learned to hover. It was found by tracing a run and is pinned by `test_g2_covering_part_of_a_strip_never_costs_more`.
+
+Sanity values (checked in `tests/test_mh_coverage_g2.py`):
+
+- Whole field open, one agent at a corner: **g2 = 128** (8 strips × 16 moves, the lawnmower count).
+- A one-tile-wide strip along an edge: 15. Covering its middle leaves 15; covering one end gives 11.
+- Half the field open plus a small hole far inside the done half: **+8** for the hole.
+- Random states: covering a footprint lowers g2 on average. It raised it in 7 of 300 cases, by at most 3 moves (greedy cover and MST are not exactly monotone).
+
+Inputs per agent:
+
+- Its own coverage mask.
+- Footprints of fresh teammate LL intents, which are treated as "will be covered".
+- Teammates' end positions (last state of their LL intent) and their HL sequences.
+
+Teammate intents older than `2 × d_uct.threshold_steps` are ignored here.
+
+If no coverage mask is passed (standalone use, e.g. the smoke test), cells whose belief is still exactly 0.5 count as unobserved. This is only exact without LBP smoothing.
+
+Cost: about 1–5 ms per evaluation (worst case with the whole field open).
 
 ---
 
-## 6. Low-Level Planner (LLP)
+## 5. HLP: region sequence (`HighLevelPlanner`)
 
-### 6.1 Teammate Coverage Mask
+- **Regions**: `tile_size` tiles; ids are row-major. With the default `[25, 25]` there are 256 regions of 3.125 m. Footprints are always multiples of 25 cells, so a region is usually either fully observed or untouched.
+- **Bottom-up input (paper Alg. 2)**: the HLP plans from the **end of this agent's own latest LL plan**, and the cells that plan will observe count as covered. In async mode this is the LLP's current best plan at the start of each slice. At the first slice of a step it is the previous step's plan, whose first action has already been executed. Without an LL plan (step 0), it plans from the current position. If the own LL plan will finish the current target region, a new HLP cycle starts at the next step.
+- **Value of a sequence**: `g2(own sequence = []) − g2(own sequence = seq)`, the agent-steps the team saves when this agent commits to `seq`. It is usually ≤ 0, because claiming a region costs its reach while leaving it to the spanning tree is a lower bound. The search therefore effectively picks the cheapest order, and the absolute value is not meaningful on its own.
+- **Search**: anytime MCTS over **ordered** sequences of length `hlp.horizon`, with D-UCT statistics. The tree key is the tuple of regions chosen so far. Each `run_iterations(n)` re-reads the context (coverage, own LL plan, teammate intents), re-scores the incumbent and the greedy sequence, and grows the tree by n iterations. The published intent is the best-valued sequence under the current context.
+  - Actions at a node are the `hlp.candidate_regions` uncovered regions with the fewest reach steps from the position after the sequence so far (ties: more uncovered cells first).
+  - Rollout fills up the sequence greedily with the nearest uncovered region.
+  - The plain greedy sequence is always evaluated too, so MCTS can only improve on it.
+  - UCB uses `hlp.ucb_c`; values are in steps.
+- **New cycle (fresh tree)** every `hlp.replan_interval` steps, or as soon as the current target region has no uncovered cells left in this agent's knowledge (including cells its own LL plan will cover), or when there is no plan. Between cycles the tree keeps growing, and the plan can still change from slice to slice (anytime).
+- **HL intent fields**:
+  - `region_sequence`
+  - `eta_sequence`: cumulative steps until each region is reached
+  - `completion_sequence`: cumulative steps until each region is fully observed
+  - `score_sequence`: steps spent on each region
+  - `value`: steps saved
+- `current_region_scores` (used by the viewer) is now the **fraction of each region observed at least once**.
 
-```python
-def _compute_teammate_coverage_mask(self) -> np.ndarray:
-    """Discount cells covered by teammate LL intents."""
-    coverage_discount = np.ones((H, W), dtype=float)
-    
-    for teammate_id, ll_intent in self._teammate_ll_intents.items():
-        if ll_intent.is_stale():
-            continue
-        
-        staleness = ll_intent.staleness_discount()
-        
-        for step_idx, fp in enumerate(ll_intent.footprint_sequence):
-            step_discount = self.intent_discount ** step_idx * staleness
-            coverage_discount[fp_slice] *= step_discount
-    
-    return coverage_discount
-```
-
-### 6.2 LLP Reward Computation (Paper-Correct)
-
-**No explicit alignment bonus** - alignment emerges through g2 conditioning:
-
-```python
-def _simulate_trajectory(self, start_state, actions, coverage_discount):
-    """
-    Simulate trajectory and compute reward: r_LLP = g1 + g2
-    
-    g1: Immediate IG (discounted sum)
-    g2: Mission completion time estimate (includes HL intents)
-    
-    Alignment emerges because g2 is conditioned on LL trajectory,
-    and HLP guides by setting target regions that reduce g2.
-    """
-    # Compute g1: discounted IG over trajectory
-    g1_reward = 0.0
-    for step_idx, action in enumerate(actions):
-        ig = self._compute_ig(next_pos, next_alt, coverage_discount)
-        g1_reward += (self.discount ** step_idx) * ig
-    
-    # Compute g2: mission completion time
-    g2_value = self._compute_g2_for_trajectory(
-        state_sequence, footprint_sequence, ig_sequence
-    )
-    
-    # Total reward (no explicit alignment bonus)
-    total_reward = g1_reward + g2_value
-    return total_reward, state_sequence, footprint_sequence, ig_sequence
-```
-
-### 6.3 LLP Planning (Random Rollout MCTS)
-
-```python
-def plan(self, current_state) -> LLIntent:
-    coverage_discount = self._compute_teammate_coverage_mask()
-    
-    best_reward = -inf
-    best_actions = []
-    
-    # Random rollout MCTS
-    for _ in range(self.num_iterations):
-        # Sample random action sequence
-        actions = [random.choice(self.actions) for _ in range(self.horizon)]
-        
-        # Simulate and evaluate using g1 + g2
-        reward, states, footprints, igs = self._simulate_trajectory(
-            current_state, actions, coverage_discount
-        )
-        
-        if reward > best_reward:
-            best_reward = reward
-            best_actions = actions
-            best_states = states
-            best_footprints = footprints
-            best_igs = igs
-    
-    return LLIntent(
-        agent_id=self.agent_id,
-        action_sequence=best_actions,
-        state_sequence=best_states,
-        footprint_sequence=best_footprints,
-        ig_sequence=best_igs,
-        total_expected_ig=sum(best_igs),
-        value=best_reward,  # This is g1 + g2
-        ...
-    )
-```
-
-**Key Properties:**
-- Uses random rollout sampling (simplified MCTS without UCB tree)
-- Evaluates complete trajectories using g1 + g2 reward
-- Coordination through teammate coverage discount mask
-- HLP guidance emerges naturally through g2 conditioning
-
-**Why Random Rollout (Not UCB Tree)?**
-
-The LLP uses a simplified MCTS approach called **random rollout sampling** instead of the full UCB tree search used in Dec-MCTS:
-
-| Aspect | Dec-MCTS (UCB Tree) | MH-LLP (Random Rollout) |
-|--------|---------------------|-------------------------|
-| **Search method** | UCB tree with Selection→Expansion→Simulation→Backpropagation | Random sampling of complete trajectories |
-| **Tree structure** | Builds explicit tree, reuses nodes across iterations | No tree structure, each iteration is independent |
-| **Action selection** | UCB1 formula balances exploitation vs exploration | Uniform random sampling |
-| **Memory** | O(iterations × horizon) nodes stored | O(1) - only stores best trajectory |
-| **Compute per iteration** | Tree traversal + UCB calculation | Direct trajectory simulation |
-| **Planning horizon** | 10 steps | 3 steps (shorter) |
-
-**Why this design choice?**
-
-1. **Computational efficiency**: LLP runs frequently (every step) and needs to be fast
-   - Random sampling: ~50 iterations × 3 steps = 150 simulations
-   - UCB tree would need more iterations to build meaningful tree statistics
-
-2. **Short horizon**: With only 3 steps, exhaustive search space is manageable
-   - 7 actions³ = 343 possible sequences (small enough for random sampling)
-   - UCB tree benefits more from longer horizons where search space is huge
-
-3. **HLP provides guidance**: The g2 reward component already incorporates long-horizon reasoning
-   - HLP (with full UCB tree) handles strategic region allocation
-   - LLP focuses on short-term tactical motion planning
-   
-4. **Hierarchical division of labor**:
-   - HLP: Complex search (UCB tree over regions, marginal g2 evaluation)
-   - LLP: Fast reactive planning (random rollout, immediate IG + g2)
-
-**What "MCTS" means in LLP:**
-The LLP is called "MCTS" because it uses Monte Carlo simulation (random rollouts) to estimate trajectory values, which is a core MCTS concept. However, it's a **simplified MCTS variant** that skips the tree-building and UCB selection phases, keeping only the simulation component.
-
-**Implementation Details** ([hierarchical_dec_mcts.py](../src/hierarchical_dec_mcts.py)):
-
-| Function | Line | Purpose |
-|----------|------|---------|
-| `LowLevelPlanner.plan()` | ~747 | **Main planning loop** - generates random action sequences |
-| `_simulate_trajectory()` | ~661 | **Trajectory simulation** - evaluates g1 + g2 for action sequence |
-| `_compute_ig()` | ~511 | **IG computation** - applies teammate coverage discount |
-| `_compute_teammate_coverage_mask()` | ~480 | **Coordination** - creates discount mask from teammate intents |
-
-**Key code snippet** (line 781 in `plan()`):
-```python
-for _ in range(self.num_iterations):  # 50 iterations
-    # Random action sequence (THIS IS THE RANDOM ROLLOUT)
-    actions = [np.random.choice(self.actions) for _ in range(self.horizon)]  # 3 steps
-    
-    # Simulate and evaluate using g1 + g2
-    reward, states, footprints, igs = self._simulate_trajectory(
-        current_state, actions, coverage_discount
-    )
-    
-    # Keep best trajectory found
-    if reward > best_reward:
-        best_reward = reward
-        best_actions = actions
-        ...
-```
-
-**No UCB tree construction** - the code shows:
-- No `DecMCTSNode` class instantiation (unlike Dec-MCTS)
-- No `best_child()` or `_tree_policy()` calls
-- No tree structure stored (`self._tree` exists but marked as `_tree_valid = False`)
-- Each iteration samples independently: `np.random.choice(self.actions)`
+If `use_g2` is false, the HLP still plans and broadcasts, but its plan does not influence the agent's own actions.
 
 ---
 
-**For comparison: HLP's UCB Tree Implementation** ([hierarchical_dec_mcts.py](../src/hierarchical_dec_mcts.py)):
+## 6. LLP: actions (`LowLevelPlanner`)
 
-| Function | Line | Purpose |
-|----------|------|---------|
-| `HighLevelPlanner._run_mcts_region_search()` | ~1183 | **Main MCTS loop** - builds UCB tree over region sequences |
-| `_mcts_iteration()` | ~1222 | **Selection + Expansion + Backprop** - full MCTS iteration |
-| `_select_best_region_ucb()` | ~1298 | **UCB selection** - chooses region using UCB1 formula |
-| `_rollout_region_sequence()` | ~1328 | **Random completion** - completes partial sequence to horizon |
-| `_backpropagate()` | ~1379 | **Update tree** - propagates value back through path |
+Reward of a candidate action sequence (`_simulate_trajectory`):
 
-**Key code snippet** (line 1236 in `_mcts_iteration()`):
-```python
-# Selection phase: traverse tree using UCB
-while len(sequence) < self.horizon:
-    node = tree[state]
-    node["visits"] += 1
-    
-    unexplored = [r for r in available_regions if r not in node["children"]]
-    
-    if unexplored:
-        # Expansion: pick random unexplored action
-        action = random.choice(unexplored)
-        node["children"][action] = {"visits": 0, "value": 0.0}
-        # ... rollout and backpropagate
-    else:
-        # Selection: use UCB1 formula (THIS IS THE UCB TREE)
-        action = self._select_best_region_ucb(node, available_regions)
-        # ... traverse to child
-        
-# UCB1 formula (line 1318):
-exploitation = child_value / child_visits
-exploration = ucb_c * np.sqrt(np.log(parent_visits) / child_visits)
-ucb_score = exploitation + exploration
+```
+r = Σ_k discount^k · IG_k  (×teammate mask)   +   g2_weight · (g2_baseline − g2_after)      # second term only if use_g2
 ```
 
-**HLP builds explicit tree** - dictionary structure stores:
-- Visit counts per state-action pair
-- Cumulative values for each node
-- Parent-child relationships for tree traversal
-    
-    return total_reward, state_sequence, footprints, igs
-```
+- **g1 (IG)** is sensor-aware: `H(p) − E[H(posterior)]` per cell, using the noise of that altitude. It is evaluated on the current belief, which is **not** updated along the rollout, so a footprint visited twice counts twice.
+- **Teammate mask.** For each fresh teammate LL intent of age `a`, its first `a` footprints have already been executed and are skipped. The k-th remaining footprint gets weight `w_k = intent_discount^k · d_uct.decay^(a/threshold_steps)`, and IG inside it is multiplied by `(1 − w_k)`. A teammate's next footprint from a fresh intent therefore gets zero IG; later, less certain footprints are suppressed less.
+- **g2 term.** `g2_baseline` is g2 if the agent stays put, and `g2_after` is g2 after the trajectory. Their difference is the number of steps the trajectory saves: moving toward the next HL region, covering never-observed cells, and closing small leftover spots.
+- **`g2_weight`** converts steps into bits. With `null` it is set automatically to the IG of one fresh step at minimum altitude: (new cells per lateral move at minimum altitude, 50 × 25 = 1250) × (1 − cH(0.5)) ≈ 1250 × 0.60 ≈ 756 bits per step.
+- **Search** is an anytime round per step (`begin_round`, then `run_iterations` per slice). Each slice re-reads the context (teammate mask, own HL plan, g2 context) and re-scores the incumbent plan before searching more:
+  - `efficient`: random rollouts of length `llp.horizon` over admissible actions.
+  - `full`: D-UCT tree search (`llp.ucb_c`, `d_uct.gamma`).
+  - In both, the published plan is the best-scoring sampled trajectory. The paper instead extracts the greedy tree path.
+- The **LL intent** carries `action_sequence`, `state_sequence` (world x, y, alt), `footprint_sequence` (grid bounds), `ig_sequence` and `step`.
 
 ---
 
-## 7. Hierarchical Planner Integration
+## 7. D-UCT and intent ageing
 
-```python
-class HierarchicalDecMCTSPlanner:
-    def __init__(self, agent_id, num_agents, camera, grid_info, intent_bus, ...):
-        self.llp = LowLevelPlanner(agent_id, camera, grid_info, ...)
-        self.hlp = HighLevelPlanner(agent_id, num_agents, grid_info.shape, ...)
-        self.intent_bus = intent_bus
-    
-    def plan(self) -> Tuple[str, Dict]:
-        # Step 1: Receive teammate intents
-        self.receive_intents()
-        
-        # Step 2: Run HLP (may reuse cached plan)
-        grid_pos = camera.convert_xy_ij(self._current_position)
-        hl_intent = self.hlp.plan(grid_pos)
-        
-        # Step 3: Update LLP with HLP guidance
-        self.llp.update_hl_guidance(hl_intent)
-        
-        # Step 4: Run LLP
-        current_state = (x, y, altitude)
-        ll_intent = self.llp.plan(current_state)
-        
-        # Step 5: Broadcast intents
-        self.intent_bus.broadcast_ll_intent(ll_intent)
-        self.intent_bus.broadcast_hl_intent(hl_intent)
-        
-        return ll_intent.action_sequence[0], metrics
-```
+Two different mechanisms; both are configured in `decentralized.d_uct`:
+
+1. **D-UCT tree discounting** (`gamma`, default 0.99; the paper uses 0.9999 with far larger budgets). The paper's Eq. 4–5 (`src/d_uct.py`) applies to the LLP, HLP and Dec-MCTS trees. Each episode's weight decays by `gamma` per later iteration of the same tree:
+
+   ```
+   C_t(s) = Σ_u γ^(t−u) 1_s(u)
+   D-UCT(s, s') = V_t(s')/C_t(s') + c·sqrt(ln C_t(s) / C_t(s'))
+   ```
+
+   This discounts statistics collected under older intents.
+
+2. **Intent ageing.** Intents carry the `step` at which they were made (HL intents are re-stamped when re-published):
+
+   ```
+   age        = current_step − intent.step
+   weight     = decay_factor ** (age / threshold_steps)       # teammate mask
+   ignored if   age > 2 × threshold_steps
+   ```
+
+   This matters when a teammate is out of range and its last intent ages in the receiver's inbox. The old key `threshold_sec` is still read and its value is interpreted as steps.
 
 ---
 
-## 8. Reward Decomposition
+## 7b. Step plot: the "planner decision" panel
 
-The total reward follows the paper's formulation (Seiler et al., 2024):
+With `enable_plotting: true`, column 4 of each agent's row in `plots/<iter>/steps/step_<t>.png` shows what the planner saw and decided at that step (`viewer._draw_mh_decision_panel`, data from `experiment_utils.extract_mh_decision`):
 
-```
-g = g1(LL intents) + g2(all intents)
-```
-
-### Paper-Correct Implementation (Current)
-
-**LLP Reward:**
-```
-r_LLP = g1 + g2
-
-g1 = Σ_t γ^t * IG(t)
-     └── Immediate information gain (discounted)
-
-g2 = remaining_uncovered_area / nominal_coverage_rate
-     └── Mission completion time estimate
-```
-
-**HLP Reward:**
-```
-r_HLP = g2(with my HL intent) - g2(with null HL intent)
-        └── Marginal contribution only
-```
-
-### Key Properties
-
-✅ **Two-component reward**: LLP uses g1 (IG) + g2 (mission completion time)
-✅ **Centralized g2**: Single g2() function in `g2_evaluator.py` used by both planners
-✅ **Time-like g2**: Lower values = better (faster mission completion)
-✅ **Marginal HLP**: HLP evaluates its contribution, not absolute region value
-
-### g2 Implementation
-
-Located in `src/g2_evaluator.py`:
-
-**Two-Phase Evaluation** (Algorithm 2 from paper):
-
-```python
-def g2(ll_intents, hl_intents, env_state, agent_id=None):
-    """
-    Phase 1: Execute LL intents (fixed)
-        - Compute LL execution time
-        - Get cells covered by LL footprints
-        - Compute LL overlap penalty
-        - Get agent end positions after LL
-    
-    Phase 2: Estimate HL completion
-        - Remaining area = total uncertain - LL covered
-        - Estimate time to complete using HL intents
-        - Starting from LL end positions
-    
-    Return: g2 = LL_time + HL_time + overlap_penalty
-    """
-```
-
-**Key Properties:**
-- ✅ Time-like (units: coverage time)
-- ✅ Conditioned on LL intents (Phase 1 → Phase 2)
-- ✅ g2 decreases as LL progresses
-- ✅ HL naturally avoids LL-covered regions
-- ✅ Bottom-up information flow (LL → HL)
-- ✅ HLP guidance emerges through g2 conditioning
+- **Background**: this agent's coverage knowledge at planning time: grey = observed at least once (own or received by news), orange = never observed. Thin white lines show the region grid.
+- **HLP plan**: red box "1" is the target region; boxes "2…k" are the rest of the ordered region sequence; a dashed line shows the planned route, starting where the HLP started planning (end of the previous LL plan).
+- **Teammates' claims**: hatched boxes in the teammate's colour, only for HL intents this agent actually received.
+- **LLP plan**: a thick line from the start triangle; the arrow marks the executed first action.
+- **Text box**:
+  - chosen action and full LL plan
+  - g1 (IG of the plan)
+  - g2 steps left if the agent stays vs. follows the plan (= steps saved)
+  - whether the HLP started a new cycle this step ("replanned") or kept growing its tree ("kept plan")
+  - which teammates' intents were received
 
 ---
 
-## 9. Belief Fusion (Same Infrastructure)
+## 8. Configuration
 
-MH-Dec-MCTS uses the same belief fusion as other strategies:
+Nested form in `configs/strategies/mh_dec_mcts_*.json`; `config_loader.flatten_hierarchical_config` turns `llp.x` into `llp_x` and `hlp.x` into `hlp_x`.
 
-```
-1. Per-agent: OG update + local LBP (mapper_LBP.py)
-2. Coordinator: LBPBeliefFusion with news mode (multi_agent_coordinator.py)
-3. Pairwise potentials: equal/biased/adaptive
-```
-
----
-
-## 10. Configuration
-
-### Benchmark Configuration (`configs/strategies/mh_dec_mcts_efficient.json` or `configs/strategies/mh_dec_mcts_full.json`)
-
-```json
-{
-  "action_strategy": "mh_dec_mcts_efficient",
-  "num_agents": 4,
-  "n_steps": 100,
-  "iters": [0, 20],
-  "correlation_types": ["adaptive", "equal", "biased"],
-  
-  "hierarchical_dec_mcts": {
-    "mode_labels": ["IG","IGd","IG_BM","IG_BS","IGd_BM","IGd_BS"],
-    "llp_horizon": 3,
-    "llp_iterations": 50,
-    "llp_ucb_c": 1.4,
-    "llp_discount_factor": 0.95,
-    
-    "hlp_horizon": 10,
-    "hlp_iterations": 30,
-    "hlp_ucb_c": 1.0,
-    "hlp_discount_factor": 0.98,
-    
-    "tile_size": [50, 50],
-    "hlp_replan_interval": 1.0,
-    
-    "intent_sharing": {
-      "ll_broadcast_interval": 0.1,
-      "hl_broadcast_interval": 0.5,
-      "max_history": 10
-    }
-  },
-  
-  "decentralized": {
-    "communication_range": 15.625,
-    "overlap_penalty_weight": 0.3,
-    "d_uct": {
-      "decay_factor": 0.9,
-      "threshold_sec": 2.0
-    }
-  }
-}
-```
-
-**Key Parameters:**
-- **LLP**: `llp_horizon=3` steps, `llp_iterations=50`, random rollout MCTS (Note: `llp_ucb_c=1.4` is a legacy parameter - **not used** since LLP uses random sampling, not UCB tree)
-- **HLP**: `hlp_horizon=10` regions, `hlp_iterations=30`, UCB tree MCTS with `hlp_ucb_c=1.0`
-- **tile_size**: `[50, 50]` defines region grid (50×50 tiles per region)
-- **Communication**: `communication_range=15.625m` (matches other strategies for comparison)
-- **Mode Labels**: 6 modes available - `IG` (no sharing), `IGd` (position sharing), `IG_BS`/`IG_BM` (IG + news sharing), `IGd_BS`/`IGd_BM` (IGd + news sharing)
-- **Intent sharing**: LL broadcasts every 0.1s, HL every 0.5s
+| Key | Default in configs | Unit / meaning | Used |
+|---|---|---|---|
+| `use_mcts_llp` | full: true, efficient: false | LLP search type (set by the strategy name) | yes |
+| `use_g2` | true | add the g2 term to the LLP reward | yes |
+| `g2_weight` | null | bits per saved step (null = auto ≈ 756) | yes |
+| `llp.horizon` | 3 | steps | yes |
+| `llp.iterations` | 30 | rollouts / MCTS iterations per step (split over slices) | yes |
+| `llp.ucb_c` | 1.4 | UCB constant (full only) | yes |
+| `llp.discount_factor` | 0.95 | per-step discount of g1 | yes |
+| `hlp.horizon` | 8 | regions per sequence | yes |
+| `hlp.iterations` | 30 | MCTS iterations **per step** (async; split over slices; the tree accumulates over the cycle). Sync mode: per replan | yes |
+| `hlp.ucb_c` | 1.0 | UCB constant (values in steps) | yes |
+| `hlp.tile_size` | [25, 25] | region size in cells | yes |
+| `hlp.replan_interval` | 2 | **simulation steps** (was seconds) | yes |
+| `hlp.candidate_regions` | 6 | HLP branching factor | yes |
+| `hlp.discount_factor` | 0.98 | — | **no** (not read) |
+| `intent_sharing.max_history` | 10 | sender-side history length | yes |
+| `intent_sharing.ll/hl_broadcast_interval` | 0.1 / 0.5 | — | **no** (intents are published every slice) |
+| `decentralized.d_uct.gamma` | 0.99 | D-UCT tree discount per iteration, §7 | yes |
+| `decentralized.d_uct.decay_factor` / `threshold_steps` | 0.9 / 2 | intent ageing, §7 | yes |
+| `decentralized.async.enabled` | true | simulated asynchronous planning, §2 | yes |
+| `decentralized.async.slices_per_step` | 3 | intent exchanges per step | yes |
+| `decentralized.overlap_penalty_weight` | 0.3 | — | **no** for MH (Dec-MCTS only) |
+| `g2_mode` | — | removed; a warning is logged if present | no |
 
 ---
 
-## 11. Full MCTS for HLP (Step 7)
+## 8b. How the hierarchy compares: MH-MCTS paper, CNR slides, this code
 
-**Status:** ✅ Implemented
-
-The HLP now uses **full MCTS tree search** over region sequences, making it symmetric with LLP:
-
-### MCTS Components
-
-| Component | Implementation |
-|-----------|----------------|
-| **State** | `frozenset` of visited regions |
-| **Action** | Next region ID to visit |
-| **Planning** | UCB tree search with random rollout |
-| **Horizon** | Tree depth = `hlp_horizon` regions |
-| **Rollout** | Random region ordering to complete sequence |
-| **Reward** | Marginal g₂ (full sequence evaluation) |
-| **Selection** | UCB with exploration constant = 1.0 |
-| **Expansion** | Add random unexplored region |
-| **Backpropagation** | Update visit counts and cumulative values |
-
-### Key Features
-
-✅ **Full UCB tree search**: Unlike LLP which uses random rollout, HLP builds and traverses UCB tree  
-✅ **Marginal g₂ evaluation**: Evaluates complete region sequence's contribution  
-✅ **Strategic planning**: Handles long-horizon region allocation (10 regions vs LLP's 3 steps)  
-✅ **Coordination**: Bottom-up LL→HL flow via g₂ conditioning  
-
-### Algorithm Flow
-
-```python
-def _run_mcts_region_search(start_position, teammate_targets):
-    tree = {frozenset(): {'visits': 0, 'value': 0.0, 'children': {}}}
-    
-    for iteration in range(num_iterations):
-        # 1. Selection: traverse tree using UCB
-        state = frozenset()  # root
-        sequence = []
-        path = []
-        
-        while len(sequence) < horizon:
-            available_regions = get_unvisited(state)
-            
-            if has_unexplored_children(state):
-                # 2. Expansion: pick random unexplored region
-                action = random.choice(unexplored)
-                sequence.append(action)
-                path.append((state, action))
-                
-                # 3. Simulation: random rollout to complete sequence
-                value = rollout_and_evaluate(sequence, start_position)
-                
-                # 4. Backpropagation: update tree
-                backpropagate(tree, path, value)
-                break
-            else:
-                # Selection: UCB to pick best child
-                action = select_best_ucb(state, available_regions)
-                sequence.append(action)
-                path.append((state, action))
-                state = frozenset(sequence)
-        
-    return best_sequence_found
-```
-
-### Benefits Over Greedy
-
-✅ **Better exploration**: Discovers non-obvious region orderings  
-✅ **Sequence optimization**: Considers full trajectory, not just individual regions  
-✅ **Adaptivity**: Adjusts to teammate conflicts through marginal g₂  
-✅ **Consistency**: Both planning levels use same algorithmic approach
+| Aspect | MH-MCTS paper (Seiler et al., RA-L 2024) | Slides (CNR work, slides 21–24; code `threaded_dual_horizon.py`, removed) | This code (`hierarchical_dec_mcts.py`) |
+|---|---|---|---|
+| Planners per robot | 2 MCTS planners (LLP + HLP), each a Dec-MCTS agent; 2N agents in total | LLP + HLP worker threads behind a `ThreadedDualHorizonPlanner` | 2 anytime planners (LLP + HLP) per robot, each with its own tree |
+| Execution | asynchronous; intents every 0.1 s; receding horizon | asynchronous threads | simulated asynchronous: concurrent slices with intent exchange between slices (`slices_per_step`), deterministic; receding horizon (first action executed) |
+| Objective | one joint g = g1(LL intents) + g2(all intents) | heuristic HLP region score (entropy + coverage bonus + isolation bonus + distance penalty + hysteresis); LLP = IG blended with alignment | joint g = g1 (IG) + g2_weight × steps saved; g2 = remaining agent-steps to observe every cell |
+| Top-down (HLP → LLP) | through g2: the LLP is rewarded for plans that shorten the mission given the HL intent; no constraints | soft alignment bonus toward the target region (never a penalty), adaptive blend weights | through g2 (paper style); soft, no constraints |
+| Bottom-up (LLP → HLP) | g2 for the HLP starts **after the robot's own LL intent** (its end position and covered cells) | "local IG true vs expected, uncertainty reduction, belief updates" | same as the paper: at every slice the HLP starts from the end of its own LLP's current plan, and that plan's cells count as covered |
+| Horizontal | all LL and HL intents exchanged between robots (all in range) | LLP↔LLP, HLP↔HLP, shared belief; "tree reuse" | LL + HL intents to agents in range in BS/BM modes, every slice; belief + coverage news after each step; HLP tree reused within its cycle |
+| HLP state/actions | goal areas = **dynamic clusters of still-open targets** (isolated targets are their own cluster); a plan orders **all** remaining areas | fixed region partition; MCTS depth 15 | fixed 25×25-cell tiles; ordered sequence of `hlp.horizon` (8) regions; nearest-6 candidates |
+| g2 | Alg. 2: run the LL intents, then repeatedly move the earliest-free robot to the next open area of its HL plan; **mean** completion time; unassigned work does not occur | — | sum of agent-steps; HL chains + covering-positions spanning tree for unclaimed blocks |
+| Weighting | g2 × speed / mean target distance (Eq. 8); insensitive as long as > 0 | blend 0.6/0.4 adapted by coverage/uncertainty/fragmentation | g2_weight = IG of one fresh step (≈ 756 bits/step) |
+| D-UCT | discounted UCT in persistent trees, γ = 0.9999 | — | same mechanism (`d_uct.gamma`, default 0.99); separate step-based intent ageing (`decay_factor`, `threshold_steps`) |
+| Dec-MCTS baseline | run **with g2** and random HL plans, so the comparison isolates the hierarchy | — | run **with g2** and no HL plans (our g2 prices unplanned work itself, so random plans are not needed); same async scheduler |
+| LLP horizon | 100 m paths (half executed) | MCTS depth 5 | 3 steps, first action executed |
 
 ---
 
-## 12. Comparison: Incremental Planner Progression
+## 9. Known limitations
 
-The framework supports **4 baselines** representing incremental planning complexity:
-
-| Aspect | 1. Greedy IG | 2. Dec-MCTS | 3. MH-Dec-MCTS<br>(full) | 4. MH-Dec-MCTS<br>(efficient) |
-|--------|-------------|------------|---------------------------|-------------------------------|
-| **Levels** | 1 | 1 | 2 (HLP + LLP) | 2 (HLP + LLP) |
-| **Lookahead** | 1 step | 10 steps | HLP: 10 regions<br>LLP: 3 steps | HLP: 10 regions<br>LLP: 3 steps |
-| **Search method** | Enumerate actions | **UCB tree** | HLP: **UCB tree**<br>LLP: **UCB tree** | HLP: **UCB tree**<br>LLP: **Random rollout** |
-| **Tree structure** | None | Yes | HLP: Yes<br>LLP: Yes | HLP: Yes<br>LLP: No |
-| **Action selection** | Max IG | UCB1 formula | HLP: UCB1<br>LLP: UCB1 | HLP: UCB1<br>LLP: Random sampling |
-| **Intent** | Footprint | Trajectory (10 steps) | LL (3 steps) + HL (region seq) | LL (3 steps) + HL (region seq) |
-| **Region allocation** | None | None | Yes (HLP MCTS) | Yes (HLP MCTS) |
-| **Guidance** | None | None | HLP → LLP via g2 | HLP → LLP via g2 |
-| **Reward** | IG only | IG + overlap penalty | g1 (IG) + g2 (mission time) | g1 (IG) + g2 (mission time) |
-| **Iterations** | 1 per action | 100 | HLP: 30<br>LLP: 50 | HLP: 30<br>LLP: 50 |
-| **Computation** | Lowest<br>(~7 evals) | Medium<br>(~1000 sims) | Highest<br>(~450 sims, best quality) | High<br>(~450 sims, optimized) |
-| **Memory** | O(1) | O(iter × horizon) | HLP: O(iter × regions)<br>LLP: O(iter × horizon) | HLP: O(iter × regions)<br>LLP: O(1) |
-| **use_mcts_llp** | N/A | N/A | **True** | **False** |
-
-**Incremental Progression:**
-1. **Greedy IG**: Reactive baseline, no lookahead
-2. **Dec-MCTS**: Adds multi-step planning with UCB tree search
-3. **MH-Dec-MCTS (full)**: Adds hierarchical structure, both HLP and LLP use full MCTS tree search
-4. **MH-Dec-MCTS (efficient)**: Optimizes (3) by replacing LLP tree search with random rollout to reduce computational cost
-
-**Key Design Insight (3) → (4):**
-- Baseline **(3)** establishes the full hierarchical approach with both planners using MCTS
-- Baseline **(4)** tests an optimization hypothesis: Can we replace LLP's expensive tree search with simple random rollout and maintain similar performance?
-  - **Rationale**: HLP already provides strategic guidance via g₂, so LLP may not need full tree search
-  - **Trade-off**: (4) is computationally cheaper but may find slightly lower-quality short-horizon plans
-  - **Result**: Experiments compare whether the performance loss (if any) justifies the computational savings
+- g2 ignores altitude: an agent flying high covers more per move than g2 assumes, so g2 overestimates the remaining work for high-flying agents.
+- Per-region bounding boxes make `reach` optimistic for regions with scattered holes. Greedy cover and the MST approximate the real tour (rare small non-monotonicity, see §4).
+- g1 does not update the belief along a rollout (repeat visits count twice).
+- With MCTS LLP, UCB values are in bits (hundreds to thousands) against `ucb_c ≈ 1.4`, so the tree search is close to greedy exploitation.
+- Coverage knowledge does not relay through intermediaries. With BS, an agent that is out of range when the news is sent never learns about those cells, and may later re-cover them.
 
 ---
 
-## 13. Debugging Tips
-
-### Check HLP Decisions (MCTS)
-```python
-# In HierarchicalDecMCTSPlanner.plan():
-print(f"Agent {self.agent_id} HLP:")
-print(f"  Target region: {hl_intent.current_target_region}")
-print(f"  Best sequence: {hl_intent.region_sequence}")
-print(f"  Sequence value: {hl_intent.value}")
-print(f"  MCTS iterations: {hl_intent.iterations}")
-print(f"  Region coverage: {dict(self.hlp._region_coverage)}")
-print(f"  Teammate targets: {self.hlp._get_teammate_target_regions()}")
-```
-
-### Check LLP Guidance
-```python
-# In LowLevelPlanner.plan():
-if self._hl_guidance:
-    print(f"LLP guidance: target_center={self._hl_guidance.target_center}")
-print(f"Coverage discount stats: min={coverage_discount.min():.2f}, mean={coverage_discount.mean():.2f}")
-```
-
-### Check Intent Bus
-```python
-# In HierarchicalDecMCTSPlanner.receive_intents():
-ll = self.intent_bus.get_teammate_ll_intents(self.agent_id)
-hl = self.intent_bus.get_teammate_hl_intents(self.agent_id)
-print(f"Agent {self.agent_id} received:")
-print(f"  LL intents from: {list(ll.keys())}")
-print(f"  HL intents from: {list(hl.keys())}")
-for tid, hi in hl.items():
-    print(f"    Agent {tid} targeting region {hi.current_target_region}")
-```
-
-### Check Region Partitioning
-```python
-# At initialization:
-print(f"HLP partitioned into {len(self.hlp.regions)} regions")
-for rid, r in self.hlp.regions.items():
-    print(f"  Region {rid}: bounds={r['bounds']}, center={r['center']}")
-```
-
-### Check Trajectory Simulation
-```python
-# In _simulate_trajectory():
-for step_idx, action in enumerate(actions):
-    print(f"  Step {step_idx}: action={action}, ig={ig:.2f}, g1={g1_reward:.2f}, g2={g2_value:.2f}")
-```
+**Planned:** HLP regions are fixed tiles for now. The paper's dynamic clusters of still-uncovered cells (isolated spots as their own cluster), planned over the whole remaining mission, are the next step to test.
 
 ---
 
-## 14. File References
+## 10. Files
 
-| File | Purpose |
-|------|---------|
-| `src/main.py` | Entry point, experiment loop |
-| `src/experiment_utils.py` | Agent init, observation, fusion utilities |
-| `src/hierarchical_dec_mcts.py` | HierarchicalDecMCTSPlanner, LLP, HLP, IntentBus |
-| `src/multi_agent_coordinator.py` | MultiAgentCoordinator, LBPBeliefFusion |
-| `src/mapper_LBP.py` | OccupancyMap (per-agent local LBP) |
-| `src/planner.py` | Planner factory (dispatches to hierarchical) |
-| `src/helper.py` | H(), cH(), adaptive_weights_matrix() |
-
----
-
-## 15. Visualization Support
-
-The planner exposes metadata for visualization:
-
-```python
-# In planner.py or main.py:
-region_metadata = planner._hierarchical_planner.current_region_metadata
-selected_region = planner._hierarchical_planner.current_selected_region
-region_scores = planner._hierarchical_planner.current_region_scores
-
-# Use in plot_terrain():
-plot_terrain(
-    ...,
-    region_metadata=region_metadata,
-    selected_region_id=selected_region,
-    region_scores=region_scores,
-)
-```
+| File | Role |
+|---|---|
+| `src/hierarchical_dec_mcts.py` | `LLIntent`, `HLIntent`, `IntentBus` (range-limited, deferred delivery), `LowLevelPlanner`, `HighLevelPlanner` (both anytime), `HierarchicalDecMCTSPlanner` (`begin_step` / `run_slice` / `finish_step`, or sync `plan`), `create_hierarchical_planner` |
+| `src/d_uct.py` | D-UCT statistics (paper Eq. 4–5) |
+| `src/g2_evaluator.py` | `CoverageStepModel` (g2 in steps), multi-root MST |
+| `src/planner.py` | builds the planner from config; creates the range-limited `IntentBus`; passes `current_step` and `coverage_mask` |
+| `src/simulator.py` | step loop; simulated-async scheduler (`_select_agent_actions_async`); per-agent `coverage_mask`; calls coverage news |
+| `src/multi_agent_mapper.py` | belief news and `share_coverage_news` |
+| `tests/test_mh_coverage_g2.py` | regression tests for all of the above |

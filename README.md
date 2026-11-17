@@ -86,14 +86,16 @@ For running multiple parameter combinations via command line:
 | # | Strategy | LLP | HLP | Description |
 |---|----------|-----|-----|-------------|
 | 1 | **Greedy IG** | N/A | N/A | Reactive baseline, single-step IG maximization |
-| 2 | **Dec-MCTS** | N/A | N/A | Single-level MCTS with 10-step planning horizon |
-| 3 | **MH-Dec-MCTS (full)** | MCTS | MCTS | Both planners use UCB tree search |
-| 4 | **MH-Dec-MCTS (efficient)** | Random | MCTS | LLP optimized with random rollout |
+| 2 | **Dec-MCTS** | N/A | N/A | Single-level MCTS (5-step horizon) with the same g2 coverage objective as MH, but no hierarchy |
+| 3 | **MH-Dec-MCTS (full)** | MCTS | MCTS | LLP tree search + HLP region sequencing |
+| 4 | **MH-Dec-MCTS (efficient)** | Random | MCTS | LLP random rollouts + HLP region sequencing |
 
 **Incremental progression:**
-- 1 → 2: Add multi-step planning
-- 2 → 3: Add hierarchical structure (both levels use MCTS)
+- 1 → 2: Add multi-step planning and the long-horizon coverage objective (g2)
+- 2 → 3: Add only the hierarchy (HLP + LLP per robot, as in Seiler et al. 2024)
 - 3 → 4: Optimize LLP (test if HLP guidance makes LLP tree search unnecessary)
+
+**MH-Dec-MCTS objective (current):** the HLP plans an ordered sequence of regions so the team observes **every cell at least once** in as few agent-steps as possible. Leaving small uncovered spots behind costs the detour needed to come back for them. The LLP maximises information gain plus `g2_weight` × agent-steps saved. Each robot's HLP and LLP plan concurrently, in simulated-asynchronous slices with intent exchange between slices. This is deterministic and measured in simulation steps, never wall-clock time. Details: [docs/mh_dec_mcts_multiagent.md](docs/mh_dec_mcts_multiagent.md).
 
 ## Configuration System
 
@@ -186,19 +188,33 @@ python plotter.py --compare-timing --news-mode IGd_BM
 All timing data is automatically collected from `timestamps.csv` files in each experiment run.
 
 **Communication Modes:**
-All strategies support 6 modes (configured in `master_config.json` under `mode_labels`):
-- `IG`: Independent IG planner (no position or belief sharing)
-- `IGd`: IG planner with position-based overlap discounting
-- `IG_BS`: IG planner with broadcast belief ("news") sharing
-- `IG_BM`: IG planner with per-neighbor belief ("news") sharing
-- `IGd_BS`: Discounted IG planner with broadcast belief sharing
-- `IGd_BM`: Discounted IG planner with per-neighbor belief sharing
+All strategies support 6 modes (configured in `master_config.json` under `mode_labels`). Everything is exchanged only between agents within communication range (`radius_multiplier`).
+- `IG`: no sharing at all (no news, no intents)
+- `IGd`: greedy IG only: discount IG by footprint overlap with teammates' positions. Same as `IG` for Dec-MCTS/MH
+- `IG_BS`: broadcast news (beliefs, and observed-at-least-once coverage for MH) + intents (Dec-MCTS/MH)
+- `IG_BM`: per-neighbour news + intents (Dec-MCTS/MH)
+- `IGd_BS` / `IGd_BM`: as `IG_BS` / `IG_BM`, plus the greedy overlap discount
+
+With `limited_testing: true` (current master config), `IG_BS` runs with R16 (whole field) and `IGd_BM` with R5 (15.625 m).
 
 ## Documentation
 
 - 📋 [Configuration Guide](configs/README.md) - Complete config system documentation
 - 📈 [Method Comparison](docs/method_comparison_summary.md) - 4 baseline comparison
-- 🎯 [MH-Dec-MCTS Architecture](docs/mh_dec_mcts_multiagent.md) - Hierarchical planner details
+- 🎯 [MH-Dec-MCTS Architecture](docs/mh_dec_mcts_multiagent.md) - Hierarchical planner, g2 coverage objective, what is shared per mode
+- 🌲 [Dec-MCTS](docs/dec_mcts_multiagent.md) - Single-level MCTS baseline
+- ⚡ [Greedy IG](docs/greedy_ig_multiagent.md) - Greedy baseline and its two code paths
+
+## Tests
+
+The tests are plain scripts (pytest is not required); run them from the project root:
+
+```bash
+python tests/test_mh_coverage_g2.py      # g2 coverage objective, HLP/LLP, intent sharing, Dec-MCTS backprop
+python tests/test_planners_smoke.py --iters 2   # all 4 planners, single agent, on the Gaussian map
+```
+
+Known pre-existing failures: `tests/test_config_propagation.py` (some sweep file names don't match their contents) and `tests/test_llp_altitude.py` (test B uses an old `_compute_ig` return signature).
 
 ## Project Structure
 
@@ -210,7 +226,8 @@ multi-horizon/
 ├── src/                      # Source code
 │   ├── main.py              # Main entry point
 │   ├── config_loader.py     # Multi-strategy config loader
-│   ├── hierarchical_dec_mcts.py  # MH-Dec-MCTS implementation
+│   ├── hierarchical_dec_mcts.py  # MH-Dec-MCTS implementation (HLP, LLP, IntentBus)
+│   ├── g2_evaluator.py      # g2: remaining coverage effort in agent-steps
 │   ├── dec_mcts.py          # Dec-MCTS implementation
 │   └── ...
 ├── web_interface/            # Optional web interface

@@ -1,134 +1,42 @@
-# Greedy Information Gain Multi-Agent Baseline
+# Greedy IG baseline
 
-## Overview
+> Strategy `greedy_ig`. Code: `src/greedy_ig_planner.py`, `src/planner.py::greedy_ig_decision`, `src/simulator.py::_select_greedy_baseline_actions`.
 
-The Greedy IG strategy is a **single-step lookahead baseline** that selects actions purely based on immediate information gain maximization. Each agent independently evaluates all possible next positions and chooses the one that maximizes expected belief reduction about the underlying spatial field.
+Single-step lookahead. Each agent scores every admissible action by the sensor-aware information gain of the footprint it would observe next, `IG = H(p) − E[H(posterior)]` summed over cells, and takes the best one. There is no planning horizon and no intent sharing. Coordination comes from belief fusion (news) and, in IGd modes, from discounting overlap with teammates.
 
-This is the simplest and fastest baseline, serving as a lower bound for comparison with more sophisticated planning methods.
+## Two code paths, depending on the mode
 
-## How It Works
+| Mode | Code path | Action choice |
+|---|---|---|
+| `IG_BS` | `Simulator._select_greedy_baseline_actions` | selfish argmax; ties broken by fixed priority (left, right, front, back, up, down, hover) |
+| `IGd_BM` | `Simulator._select_greedy_baseline_actions` | agents decide in a random order (RNG seed 17). Each action's IG is multiplied by `1 − IoU` with every teammate in range (per-axis distance ≤ `radius_multiplier` × step), using the teammates' **already chosen next** positions where available |
+| `IG`, `IGd`, `IG_BM`, `IGd_BS` | `planning.greedy_ig_decision` → `GreedyIGPlanner` | argmax; IGd variants multiply IG by Π(1 − IoU) against teammates in comm range at their **current** positions (null-policy assumption) |
 
-### 1. Action Selection Process
+The first path reproduces the reference (PA) implementation for the two modes used in the main comparison. The two paths are not equivalent for the other modes.
 
-At each time step, for each agent:
-1. **Generate candidates**: Enumerate all reachable positions from current location
-2. **Evaluate IG**: For each candidate position, compute expected information gain using current belief map
-3. **Select maximum**: Choose the position with highest IG value
-4. **No lookahead**: Decisions are myopic - no consideration of future steps beyond immediate next position
+## What is shared
 
-### 2. Information Gain Calculation
+- **Belief news** (`*_BS`, `*_BM`): fused into each neighbour's belief every step; see `docs/mh_dec_mcts_multiagent.md` §3 for the BS/BM delivery rules.
+- **Positions** (`IGd*`): used only for the IoU discount. Positions are refreshed every step; no wall-clock age filter is applied.
 
-The information gain for a candidate position is computed as:
-- **IG = H(current belief) - E[H(belief after observation)]**
-- Uses the sensor model to predict expected entropy reduction
-- Incorporates camera footprint and sensor noise characteristics
+## Configuration
 
-### 3. Multi-Agent Coordination
+| Key | Value | Notes |
+|---|---|---|
+| `greedy_ig.overlap_penalty_weight` | 0.0 | **ignored**: the planner hardcodes 0 (pure IG, as in the paper) |
+| `decentralized.radius_multiplier` | 5 | comm range 5 × 3.125 m = 15.625 m, per axis; `-1` = unlimited |
+| `multi_agent.shared_observation_rng` | (baseline configs) | share one observation RNG across agents, for PA-compatible runs |
 
-Greedy IG uses **decentralized coordination** through:
-- **Communication range**: Agents share information within a specified radius
-- **Position sharing**: Optional - agents can broadcast their current positions
-- **News sharing**: Optional - agents can share recent observations (news)
-- **No explicit collision avoidance**: Overlap penalty can be added but is set to 0 by default
+The greedy tie-breaking RNG is seeded with 0 (not the per-iteration seed).
 
-## Key Parameters
+### `limited_testing: true` (master config)
 
-### Strategy-Specific (greedy_ig.json)
+`src/main.py::_apply_mh_mode_label` overrides the radius per mode, for every strategy:
 
-```json
-{
-  "greedy_ig": {
-    "overlap_penalty_weight": 0.0
-  },
-  "decentralized": {
-    "radius_multiplier": 5
-  }
-}
-```
+- `IG_BS` → `radius_multiplier = 16` (16 × 3.125 m = 50 m covers the whole field, so this is effectively unlimited; folders are named `commR16`)
+- `IGd_BM` → `radius_multiplier = 5` (15.625 m)
 
-- **overlap_penalty_weight**: Penalty for visiting positions near other agents (default: 0.0)
-- **radius_multiplier**: Communication range as multiple of grid step size
-  - Formula: `communication_range = radius_multiplier × grid_step`
-  - Example: `5 × 3.125m = 15.625m`
+## Limitations
 
-### Shared Parameters (master_config.json)
-
-- **num_agents**: Number of UAVs in the swarm
-- **cluster_radius**: Spatial correlation parameter for Gaussian field
-- **mode_labels**: Communication modes (IG, IGd, IG_BS, IG_BM, IGd_BS, IGd_BM)
-  - **IG**: Information gain only, no sharing
-  - **IGd**: Position sharing enabled
-  - **IG_BS/IG_BM**: News sharing with broadcast/per-neighbor modes
-  - **IGd_BS/IGd_BM**: Position + news sharing
-
-## Communication Modes
-
-### Limited Testing Mode
-When `limited_testing: true` in master config:
-- **IG_BS**: Infinite communication range (radius_multiplier = -1)
-- **IGd_BM**: Limited communication at 3× cluster_radius
-
-### Standard Mode
-Uses default `radius_multiplier: 5` for all modes unless overridden by limited_testing.
-
-## Computational Complexity
-
-- **Time per step**: O(|A| × |C|)
-  - |A| = number of agents
-  - |C| = number of candidate positions per agent (typically 9-25)
-- **No tree search**: No MCTS simulation overhead
-- **Extremely fast**: Minimal computational cost compared to tree-based methods
-
-## Use Cases
-
-✅ **Good for:**
-- Fast baseline comparison
-- Real-time applications requiring immediate response
-- Scenarios where myopic decisions are acceptable
-- Understanding pure belief-driven behavior
-
-❌ **Limitations:**
-- No long-term planning or strategic positioning
-- May get stuck in local optima
-- Poor performance in scenarios requiring coordination or future positioning
-- Cannot anticipate dynamic changes or multi-step strategies
-
-## Comparison with Other Baselines
-
-| Method | Lookahead | Tree Search | Coordination |
-|--------|-----------|-------------|--------------||
-| **Greedy IG** | 1 step | None | Reactive only |
-| Dec-MCTS | Tree depth | Single-level MCTS | Communication-based |
-| MH-Dec-MCTS | Multi-horizon | Two-level hierarchical | Hierarchical planning |
-
-## Expected Performance
-
-- **Information Gain**: Moderate - good immediate coverage but suboptimal long-term
-- **Coverage**: Tends to spread out initially, may miss strategic areas
-- **Messages Sent**: Depends on communication mode and range
-- **Scalability**: Excellent - linear with agents and steps
-
-## Configuration Example
-
-```json
-{
-  "action_strategy": "greedy_ig",
-  "greedy_ig": {
-    "overlap_penalty_weight": 0.0
-  },
-  "decentralized": {
-    "radius_multiplier": 5
-  },
-  "shared": {
-    "num_agents": 4,
-    "cluster_radius": 5,
-    "mode_labels": ["IG_BS", "IGd_BM"]
-  }
-}
-```
-
-## References
-
-- Pure greedy information gain is a standard baseline in adaptive sensing and active learning
-- Implements single-step lookahead version of the general information-theoretic planning framework
-- See `src/greedy_ig_planner.py` for implementation details
+- Myopic: no lookahead, so it can leave small uncovered spots and come back for them later.
+- No explicit collision avoidance.
