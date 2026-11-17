@@ -205,6 +205,14 @@ With `limited_testing: true` (current master config), `IG_BS` runs with R16 (who
 - 🌲 [Dec-MCTS](docs/dec_mcts_multiagent.md) - Single-level MCTS baseline
 - ⚡ [Greedy IG](docs/greedy_ig_multiagent.md) - Greedy baseline and its two code paths
 
+## Collecting metrics
+
+```bash
+python collect_metrics.py --match <substring of run folder names> --out experiments/summaries/<name>
+```
+
+This writes the per-run metrics (step at which 100 % of cells were observed, coverage at steps 25/50, final and mean MSE/entropy, mean altitude, planning time) plus a mean ± std summary per strategy and curve plots. See `configs/README.md`, "Experiment configs".
+
 ## Tests
 
 The tests are plain scripts (pytest is not required); run them from the project root:

@@ -11,6 +11,8 @@ configs/
 │   ├── mh_dec_mcts_full.json
 │   ├── mh_dec_mcts_efficient.json
 │   └── sweeps/                   # variants used by sweep.json (see note below)
+├── experiments/
+│   └── gaussian_60x110_ig_bs_n4.json   # Gaussian r=5 at orthomap size, IG_BS unlimited range, 4 agents, 20 runs
 ├── baseline_greedy_ig_bs_rinf.json   # standalone reference-compatible greedy configs
 └── baseline_greedy_igd_bm_r5.json
 ```
@@ -29,7 +31,7 @@ A standalone strategy file (no `strategies` key) can also be passed with `--conf
 |---|---|
 | `strategies` | strategy names to run, in order |
 | `strategy_configs` | name → file, **relative to the master config's folder** (e.g. `strategies/greedy_ig.json`) |
-| `shared` | `field_type`, `cluster_radius`, `start_position`, `num_agents`, `n_steps`, `iters` ([first, last) iteration; seed = `seed` + iteration), `correlation_types`, `error_margins`, `mode_labels`, `enable_plotting`, `enable_logging`, `debug_logs` |
+| `shared` | `field_type`, `cluster_radius`, `field_size` (Gaussian only: [x, y] in m, default [50, 50], 0.125 m cells; [60, 110] = orthomap size → 880 × 480 grid; non-default sizes are tagged in run folder names, e.g. `r5_60x110m`), `start_position` (`corner`: fixed corners; `sample`: random lattice start per agent quadrant, seeded per run), `num_agents`, `n_steps`, `iters` ([first, last) iteration; seed = `seed` + iteration), `correlation_types`, `error_margins`, `mode_labels`, `mode_radius_multiplier` (per-mode range override, e.g. `{"IG_BS": -1}` = unlimited; applied last), `enable_plotting`, `enable_logging`, `debug_logs` |
 | `decentralized` | shared comm settings, overridden per strategy; see below |
 | `experiment` | logging/output settings; `common_metrics` + each strategy's `strategy_metrics` |
 | `limited_testing` | if true, `IG_BS` runs with `radius_multiplier = 16` (effectively unlimited) and `IGd_BM` with `radius_multiplier = 5`, overriding the strategy files |
@@ -116,6 +118,17 @@ What these parameters do: `docs/mh_dec_mcts_multiagent.md`.
 `./sweep.sh` (reads `sweep.json`) deep-merges overrides into `master_config.json` and runs each experiment. Strategy paths in `sweep.json` are relative to `experiments/temp/`, where the merged configs are written.
 
 **Several files in `strategies/sweeps/` have names that do not match their contents** (see `docs/method_comparison_summary.md`). Runs are labelled by `experiment.name`, not by file name.
+
+## Experiment configs (`configs/experiments/`)
+
+Self-contained master configs for specific studies; strategy paths are relative to that folder. Example:
+
+```bash
+python src/main.py --config configs/experiments/gaussian_60x110_ig_bs_n4.json
+python collect_metrics.py --match r5_60x110m_sample_N4_IG_BS_commRinf --out experiments/summaries/gaussian_60x110_ig_bs_n4
+```
+
+`collect_metrics.py` parses every matching run (`txt/run.log`, `txt/timestamps.csv`) and writes `per_run_metrics.csv`, `summary.csv` / `summary.md` (mean ± std per strategy) and the plots `curves.png` and `steps_to_full_coverage.png`.
 
 ## Output
 
