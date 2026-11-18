@@ -152,10 +152,6 @@ class CommunicationBus:
             msg = self._queues[agent_id].get(timeout=timeout)
             self._stats["messages_received"] += 1
 
-            # Filter stale messages
-            if time.time() - msg.timestamp > msg.ttl:
-                return None  # Message expired
-
             return msg
         except queue.Empty:
             return None
@@ -675,10 +671,6 @@ class MultiAgentCoordinator:
         with self._states_lock:
             for other_id, state in self._agent_states.items():
                 if other_id == agent_id:
-                    continue
-
-                # Check if state is recent (within 5 seconds)
-                if time.time() - state.last_update > 5.0:
                     continue
 
                 # Compute distance to other agent

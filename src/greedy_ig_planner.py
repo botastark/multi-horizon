@@ -27,9 +27,8 @@ Reference: Equation (1) in the paper for IG definition
 
 import numpy as np
 from typing import Dict, Tuple, Optional, Any
-from dataclasses import dataclass, field
-import time
-from helper import StalenessMixin, footprint_dict_to_bounds, footprint_iou, select_argmax_action
+from dataclasses import dataclass
+from helper import footprint_dict_to_bounds, footprint_iou, information_gain, select_canonical_action
 
 
 
@@ -112,7 +111,7 @@ def compute_footprint_iou(
 
 
 @dataclass
-class GreedyIGIntent(StalenessMixin):
+class GreedyIGIntent:
     """
     Intent for greedy IG planner.
 
@@ -131,8 +130,7 @@ class GreedyIGIntent(StalenessMixin):
     footprint: Tuple[int, int, int, int] = (0, 0, 0, 0)  # (imin, imax, jmin, jmax)
     # Expected IG for this action
     expected_ig: float = 0.0
-    # Timestamp for staleness tracking
-    timestamp: float = field(default_factory=time.time)
+    step: int = 0  # planning cycle that produced this intent
 
 # =============================================================================
 # Greedy IG Planner
@@ -350,8 +348,6 @@ class GreedyIGPlanner:
         else:
             belief_occupied = source_belief
 
-        belief_entropy = H(belief_occupied)
-
         self.camera.set_position(current_position)
         self.camera.set_altitude(current_altitude)
 
@@ -371,14 +367,7 @@ class GreedyIGPlanner:
             prior = belief_occupied[row_slice, col_slice]
 
             sigma0, sigma1 = self._get_sensor_params(next_alt)
-            prior_entropy = belief_entropy[row_slice, col_slice]
-            conditional_entropy = cH(
-                prior,
-                np.round(sigma0, 7),
-                np.round(sigma1, 7),
-            )
-            ig = prior_entropy - conditional_entropy
-            ig = np.where(np.isclose(prior_entropy, conditional_entropy), 0.0, ig)
+            ig = information_gain(prior, sigma0, sigma1)
 
             action_data[action] = {
                 "ig": float(np.sum(ig)),
@@ -413,9 +402,6 @@ class GreedyIGPlanner:
 
         discount = 1.0
         for teammate_id, intent in self._teammate_intents.items():
-            if intent.is_stale():
-                continue
-
             # Compute IoU with teammate's footprint
             iou = compute_footprint_iou(my_footprint, intent.footprint)
 
@@ -510,10 +496,8 @@ class GreedyIGPlanner:
         for item in scored_actions:
             if item[1] == best_score:
                 best_actions.append(item)
-        tie_rng = getattr(self.camera, "rng", self.rng)
-        selected_action = select_argmax_action(
-            tie_rng,
-            {item[0]: item[1] for item in best_actions},
+        selected_action = select_canonical_action(
+            {item[0]: (item[1],) for item in best_actions}
         )
         (
             best_action,
@@ -528,6 +512,7 @@ class GreedyIGPlanner:
         # Create intent
         self.current_intent = GreedyIGIntent(
             agent_id=self.agent_id,
+            step=self._stats["plans_generated"] + 1,
             action=best_action,
             position=current_position,
             altitude=current_altitude,

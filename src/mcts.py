@@ -1,8 +1,13 @@
 import copy
 import numpy as np
 from typing import Any
-from helper import uav_position, H, expected_posterior
-import time
+from helper import (
+    uav_position,
+    H,
+    expected_posterior,
+    sampled_posterior,
+    select_canonical_action,
+)
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
@@ -34,11 +39,12 @@ class SearchNodeOps:
             next_state["remaining_steps"] = max(0, next_state["remaining_steps"] - 1)
         return next_state
 
-    def belief_update(self, belief, imin, imax, jmin, jmax, Pz0, Pz1, p10, p11):
-        """Update belief over the observed area using expected posterior."""
-        expected_post = Pz1 * p11 + Pz0 * p10
-        belief[imin:imax, jmin:jmax, 1] = expected_post
-        belief[imin:imax, jmin:jmax, 0] = 1 - expected_post
+    def belief_update(self, belief, imin, imax, jmin, jmax, Pz0, Pz1, p10, p11, rng=None):
+        """Sequential Bayes update of the observed area with a sampled observation."""
+        rng = self._rng if rng is None else rng
+        updated = sampled_posterior(Pz1, p10, p11, rng)
+        belief[imin:imax, jmin:jmax, 1] = updated
+        belief[imin:imax, jmin:jmax, 0] = 1 - updated
         return belief
 
     def backpropagate(self, reward):
@@ -71,6 +77,7 @@ class MCTSNode(SearchNodeOps):
         self.camera = camera  # Camera object for action space and position updates
         self.untried_actions = sorted(camera.permitted_actions(self.state["uav_pos"]))
         self.conf_dict = conf_dict  # Optional configuration dictionary for sensor model
+        self.immediate_reward = 0.0  # Reward for reaching this node from its parent
         # Use provided seed or inherit from parent
         if seed is not None:
             self._rng = np.random.default_rng(seed)
@@ -102,15 +109,17 @@ class MCTSNode(SearchNodeOps):
         # all possible actions have been tried
         return len(self.untried_actions) == 0
 
-    def best_child(self, c_param=1.4) -> "MCTSNode":
+    def best_child(self, c_param=1.4, value_bounds=None) -> "MCTSNode":
         # select child using UCB:the highest Upper Confidence Bound
         best_node, best_score = None, -float("inf")
+        low, high = value_bounds if value_bounds is not None else (0.0, 1.0)
+        span = high - low if high > low else 1.0
 
         for action, child in self.children.items():
             if child.visit_count == 0:
                 ucb = float("inf")
             else:
-                exploitation = child.value / child.visit_count  # the average reward
+                exploitation = (child.value / child.visit_count - low) / span
                 exploration = c_param * np.sqrt(
                     2.0 * np.log(self.visit_count) / child.visit_count
                 )
@@ -142,6 +151,7 @@ class MCTSNode(SearchNodeOps):
         # add child for untried action
         action = self.untried_actions.pop()
         new_state = self.apply_action(self.state, action, copy_belief=True)
+        reward = self._observe(new_state, self.plan_cfg.get("reward_function"), self._rng)
         child = MCTSNode(
             new_state,
             camera=self.camera,
@@ -150,13 +160,15 @@ class MCTSNode(SearchNodeOps):
             conf_dict=self.conf_dict,
             plan_cfg=self.plan_cfg,
         )
+        child.immediate_reward = reward
         self.children[action] = child
         return child
 
     def compute_reward(self, obs_submap, Pz0, Pz1, p_m1_z0, p_m1_z1):
         curr_entropy = H(obs_submap)
         expected_entropy = Pz0 * H(p_m1_z0) + Pz1 * H(p_m1_z1)
-        return np.sum(curr_entropy - expected_entropy)
+        ig = curr_entropy - expected_entropy
+        return np.sum(np.where(np.isclose(curr_entropy, expected_entropy), 0.0, ig))
 
     def _coverage_reward(self, state, imin, imax, jmin, jmax):
         # Ensure covered_mask exists
@@ -250,50 +262,40 @@ class MCTSNode(SearchNodeOps):
             reward_function = self.plan_cfg.get("reward_function", None)
 
         for t in range(max_depth):
-            # 1. Get permitted actions from camera
             actions = self._filtered_actions_for_state(state)
-
-            # 2. Select an action randomly TODO could be smarter
-
+            if not actions:
+                break
             action = actions[rng.integers(len(actions))]
-
-            # 3. Apply the action to get the next state
             state = self.apply_action(state, action, copy_belief=False)
-            s0, s1 = self.sensor_model(state["uav_pos"])
-
-            [[imin, imax], [jmin, jmax]] = self.camera.get_range(
-                position=state["uav_pos"].position,
-                altitude=state["uav_pos"].altitude,
-                index_form=True,
-            )
-
-            # 4. Simulate observation and
-            obs_submap = state["belief"][imin:imax, jmin:jmax, 1]
-            a, b, p10, p11 = expected_posterior(obs_submap, s0, s1)
-
-            # 5. Compute immediate reward based on reward_function
-            if reward_function == "long_horizon_coverage":
-                reward = self._long_horizon_coverage_reward(
-                    state, imin, imax, jmin, jmax
-                )
-            elif reward_function == "coverage":
-                reward = self._coverage_reward(state, imin, imax, jmin, jmax)
-            elif reward_function == "ig":
-                reward = self.compute_reward(obs_submap, a, b, p10, p11)
-            elif self.plan_cfg.get("use_coverage_reward", True):
-                reward = self._coverage_reward(state, imin, imax, jmin, jmax)
-            else:
-                reward = self.compute_reward(obs_submap, a, b, p10, p11)
-
+            total_reward += discount * self._observe(state, reward_function, rng)
             discount *= discount_factor
-            total_reward += discount * reward
-
-            # 6. Update belief based on observation
-            state["belief"] = self.belief_update(
-                state["belief"], imin, imax, jmin, jmax, a, b, p10, p11
-            )
 
         return total_reward
+
+    def _observe(self, state, reward_function, rng):
+        """Score the footprint at state's position and apply a sampled observation to its belief."""
+        s0, s1 = self.sensor_model(state["uav_pos"])
+        [[imin, imax], [jmin, jmax]] = self.camera.get_range(
+            position=state["uav_pos"].position,
+            altitude=state["uav_pos"].altitude,
+            index_form=True,
+        )
+        obs_submap = state["belief"][imin:imax, jmin:jmax, 1]
+        a, b, p10, p11 = expected_posterior(obs_submap, s0, s1)
+
+        if reward_function == "long_horizon_coverage":
+            reward = self._long_horizon_coverage_reward(state, imin, imax, jmin, jmax)
+        elif reward_function == "coverage":
+            reward = self._coverage_reward(state, imin, imax, jmin, jmax)
+        elif reward_function == "ig" or not self.plan_cfg.get("use_coverage_reward", False):
+            reward = self.compute_reward(obs_submap, a, b, p10, p11)
+        else:
+            reward = self._coverage_reward(state, imin, imax, jmin, jmax)
+
+        state["belief"] = self.belief_update(
+            state["belief"], imin, imax, jmin, jmax, a, b, p10, p11, rng
+        )
+        return reward
 
     @staticmethod
     def apply_virtual_loss(path, vloss=1.0):
@@ -340,6 +342,7 @@ class MCTSPlanner:
         plan_cfg=None,
     ):
         plan_cfg = plan_cfg or {}
+        initial_state["remaining_steps"] = max_depth
         # Initialize coverage mask if not present
         if "covered_mask" not in initial_state:
             H, W = initial_state["belief"].shape[:2]
@@ -351,6 +354,7 @@ class MCTSPlanner:
         self.parallel = parallel
         self.ucb1_c = ucb1_c
         self._rng = np.random.default_rng(seed)
+        self._return_bounds = None
 
     def _simulate_only(self, node, seed):
         # Worker thread function: NO TREE TOUCHING
@@ -359,27 +363,37 @@ class MCTSPlanner:
             rng=rng, discount_factor=self.discount_factor, max_depth=self.max_depth
         )
 
-    def search(self, num_iterations=100, timeout=None, return_action_scores=False) -> Any:
-        start_time = time.time()
+    def _episode_return(self, path, rollout_reward):
+        """Discounted reward of the whole plan, also tracked to scale UCB."""
+        gamma = self.discount_factor
+        total = sum(gamma**depth * n.immediate_reward for depth, n in enumerate(path[1:]))
+        total += gamma ** (len(path) - 1) * rollout_reward
+        if self._return_bounds is None:
+            self._return_bounds = (total, total)
+        else:
+            low, high = self._return_bounds
+            self._return_bounds = (min(low, total), max(high, total))
+        return total
+
+    def search(self, num_iterations=100, return_action_scores=False) -> Any:
+        # Every root action is scored once, whatever the budget.
+        num_iterations = max(num_iterations, len(self.root.untried_actions))
+        self._return_bounds = None
         if self.parallel == 1:
             # Serial execution (default)
             for _ in range(num_iterations):
-                if timeout is not None and (time.time() - start_time) >= timeout:
-                    break
                 node, path = self.tree_policy()
-                reward = node.rollout(
+                rollout_reward = node.rollout(
                     rng=self._rng,
                     discount_factor=self.discount_factor,
                     max_depth=self.max_depth,
                 )
-                node.backpropagate(reward)
+                node.backpropagate(self._episode_return(path, rollout_reward))
         else:
             # Parallel execution
             with ThreadPoolExecutor(max_workers=self.parallel) as executor:
                 futures = {}
                 for _ in range(num_iterations):
-                    if timeout is not None and (time.time() - start_time) >= timeout:
-                        break
                     node, path = self.tree_policy()
                     MCTSNode.apply_virtual_loss(path, vloss=1.0)
                     child_seed = int(self._rng.integers(2**32))
@@ -397,7 +411,9 @@ class MCTSPlanner:
                         traceback.print_exc()
                         continue
                     path = futures[fut]
-                    MCTSNode.backprop_with_reward(path, reward, vloss=1.0)
+                    MCTSNode.backprop_with_reward(
+                        path, self._episode_return(path, reward), vloss=1.0
+                    )
 
         best_action = self.best_action()
         if return_action_scores:
@@ -417,7 +433,7 @@ class MCTSPlanner:
                 path.append(child)
                 return child, path
             else:
-                node = node.best_child(c_param=self.ucb1_c)
+                node = node.best_child(c_param=self.ucb1_c, value_bounds=self._return_bounds)
                 path.append(node)
         return node, path
 
@@ -426,10 +442,9 @@ class MCTSPlanner:
         # Choose the action from root's children with the highest avg value
         if not self.root.children:
             return None  # no simulations produced children
-        best = max(
-            self.root.children.values(), key=lambda n: n.value / max(1, n.visit_count)
+        return select_canonical_action(
+            {a: (n.value / max(1, n.visit_count),) for a, n in self.root.children.items()}
         )
-        return best.action_from_parent
 
     def extract_solution(self, max_depth=None, return_states=False):
         """

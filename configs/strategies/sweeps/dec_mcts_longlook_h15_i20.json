@@ -11,7 +11,7 @@
     "parallel": 1
   },
   "decentralized": {
-    "overlap_penalty_weight": 0.3,
+    "overlap_penalty_weight": 1.0,
     "radius_multiplier": 5
   },
   "experiment": {

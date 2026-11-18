@@ -98,7 +98,7 @@ def _mh_shared_params(hlp_horizon_description):
             "min": 0.5,
             "max": 5.0,
             "step": 0.5,
-            "description": "HLP replan interval (seconds)",
+            "description": "HLP replan interval (steps)",
         },
         "overlap_penalty_weight": {
             "type": "float",
@@ -182,7 +182,7 @@ METHOD_CONFIGS = {
             },
             "overlap_penalty_weight": {
                 "type": "float",
-                "default": 0.3,
+                "default": 1.0,
                 "min": 0.0,
                 "max": 1.0,
                 "step": 0.1,
@@ -1836,7 +1836,7 @@ def create_experiment_config(method, params):
             )
         if "decentralized" in config:
             config["decentralized"]["overlap_penalty_weight"] = params.get(
-                "overlap_penalty_weight", 0.3
+                "overlap_penalty_weight", 1.0
             )
 
     elif method in ["mh_dec_mcts_efficient", "mh_dec_mcts_full"]:

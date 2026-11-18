@@ -1,4 +1,3 @@
-import time
 # pairwise_factor_weights: equal, biased, adaptive
 import numpy as np
 import os
@@ -22,11 +21,7 @@ def H(var):
         if v2 == 0.0:
             v2 = 1.0
 
-
-
-
-
-    return -(v1 * np.log2(v1) + v2 * np.log2(v2))
+    return -v1 * np.log2(v1) - v2 * np.log2(v2)
 
 
 def expected_posterior(var, sigma0, sigma1):
@@ -70,6 +65,51 @@ def cH(var, sigma0, sigma1):
 
 
     return cH
+
+
+def information_gain(prior, sigma0, sigma1):
+    """Per-cell IG = H(prior) - H(m|z), zero where the two agree. Greedy's scoring formula."""
+    prior_entropy = H(prior)
+    conditional_entropy = cH(prior, np.round(sigma0, 7), np.round(sigma1, 7))
+    ig = prior_entropy - conditional_entropy
+    return np.where(np.isclose(prior_entropy, conditional_entropy), 0.0, ig)
+
+
+def sampled_posterior(Pz1, p10, p11, rng):
+    """
+    Sequential Bayes update for planning: draw z from its predictive distribution, return p(m|z).
+
+    Averaged over z this has the same mean as the prior, but each drawn posterior is more
+    certain, so observing a cell again along a plan is worth less.
+    """
+    z_is_one = rng.random(np.shape(Pz1)) < Pz1
+    return np.where(z_is_one, p11, p10)
+
+
+def teammate_overlap_discount(footprint, teammate_plans, step_discount=0.8):
+    """
+    IGd discount for a footprint against teammates' plans.
+
+    teammate_plans holds one footprint list per teammate, nearest step first. Each teammate
+    counts once, through its most overlapping step, and later steps count less because a plan
+    is less certain further out. With one footprint per teammate this is greedy IGd: the
+    product of (1 - IoU).
+    """
+    discount = 1.0
+    for footprints in teammate_plans:
+        strongest = 0.0
+        for k, teammate_footprint in enumerate(footprints):
+            overlap = footprint_iou(footprint, teammate_footprint)
+            strongest = max(strongest, step_discount**k * overlap)
+        discount *= 1.0 - strongest
+    return discount
+
+
+def teammate_in_range(own_state, teammate_state, radius):
+    """True if every (x, y, z) offset is within radius. A None radius or state means no limit."""
+    if radius is None or teammate_state is None:
+        return True
+    return all(abs(a - b) <= r for a, b, r in zip(own_state, teammate_state, radius))
 
 
 def get_sensor_params(altitude: float, conf_dict=None):
@@ -129,23 +169,6 @@ def footprint_iou(footprint1, footprint2):
         return 0.0
 
     return float(intersection_area / union_area)
-
-
-def select_argmax_action(rng, action_scores):
-    """Select the max-score action, using rng for exact-score ties."""
-    sorted_actions = sorted(
-        action_scores.items(),
-        key=lambda item: item[1][0] if isinstance(item[1], (list, tuple)) else item[1],
-        reverse=True,
-    )
-    best_action, best_score = sorted_actions.pop(0)
-    best_value = best_score[0] if isinstance(best_score, (list, tuple)) else best_score
-    best_actions = [best_action]
-    for action, score in sorted_actions:
-        value = score[0] if isinstance(score, (list, tuple)) else score
-        if value == best_value:
-            best_actions.append(action)
-    return rng.choice(best_actions)
 
 
 def adaptive_weights_matrix(obs_map):
@@ -280,7 +303,7 @@ def compute_entropy(belief):
     assert np.all(np.less_equal(l1, 0.0))
     assert np.all(np.less_equal(l2, 0.0))
 
-    entropy = np.sum(-(v1 * l1 + v2 * l2))
+    entropy = np.sum(-v1 * l1 - v2 * l2)
 
     assert np.all(np.greater_equal(entropy, 0.0))
 
@@ -400,7 +423,6 @@ class FastLogger:
 
         # Table header - different format for multi-agent
         if multi_agent:
-            # All planners: no timing columns (see timestamps.csv files)
             self._w(
                 f"{'Step':<6}{'Entropy':<12}{'MSE':<10}{'Coverage':<10}{'Heights':<30}{'Actions':<35}{'IGs':<45}\n"
             )
@@ -461,7 +483,6 @@ class FastLogger:
         act_list = "[" + ", ".join(str(a) if a else "-" for a in actions) + "]"
         ig_list = "[" + ", ".join(f"{ig:.4f}" if ig else "-" for ig in igs) + "]"
 
-        # Write log entry (no timing columns - see timestamps.csv files)
         self._w(
             f"{step_s:<6}{ent_s:<12}{mse_s:<10}{cov_s:<10}{h_list:<30}{act_list:<35}{ig_list:<45}\n"
         )
@@ -559,26 +580,6 @@ def make_param_tag(mcts_params):
         return "mcts_" + "_".join(parts)
     h = hashlib.md5(_json.dumps(mcts_params, sort_keys=True).encode()).hexdigest()[:8]
     return f"mcts_{h}"
-
-
-class StalenessMixin:
-    """Age helpers for intent dataclasses that have a ``timestamp`` field."""
-
-    STALE_MAX_AGE = 2.0
-    STALE_DECAY = 0.9
-    STALE_THRESHOLD_SEC = 2.0
-
-    def is_stale(self, max_age=None):
-        """Return True if the intent is older than max_age seconds."""
-        limit = self.STALE_MAX_AGE if max_age is None else max_age
-        return time.time() - self.timestamp > limit
-
-    def staleness_discount(self, decay_factor=None, threshold_sec=None):
-        """D-UCT discount for the intent's age: 1.0 when fresh, below 1.0 when stale."""
-        decay = self.STALE_DECAY if decay_factor is None else decay_factor
-        threshold = self.STALE_THRESHOLD_SEC if threshold_sec is None else threshold_sec
-        age = time.time() - self.timestamp
-        return decay ** max(0, age / threshold)
 
 
 ACTION_TIE_PRIORITY = {
