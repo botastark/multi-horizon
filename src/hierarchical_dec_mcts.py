@@ -42,7 +42,22 @@ import math
 import numpy as np
 from collections import defaultdict
 import copy
-from helper import StalenessMixin, cH as _cH, get_sensor_params as _get_sensor_params_fn
+from helper import (
+    ACTION_TIE_PRIORITY,
+    information_gain,
+    expected_posterior,
+    sampled_posterior,
+    get_sensor_params as _get_sensor_params_fn,
+    teammate_in_range,
+    teammate_overlap_discount,
+)
+from g2_evaluator import REGION_OPEN_ENTROPY
+
+_TIE_TOLERANCE = 1e-9  # same as greedy's select_canonical_action
+
+
+def _tie_rank(action: str) -> int:
+    return ACTION_TIE_PRIORITY.get(action, 99)
 
 
 
@@ -57,7 +72,7 @@ from helper import StalenessMixin, cH as _cH, get_sensor_params as _get_sensor_p
 
 
 @dataclass
-class LLIntent(StalenessMixin):
+class LLIntent:
     """
     Low-Level Intent: Short-horizon motion plan.
 
@@ -76,8 +91,8 @@ class LLIntent(StalenessMixin):
     ig_sequence: List[float] = field(default_factory=list)
     # Total expected IG for this plan
     total_expected_ig: float = 0.0
-    # Timestamp when intent was generated
-    timestamp: float = field(default_factory=time.time)
+    # Planning cycle (step) that produced this intent
+    step: int = 0
     # Planning horizon (number of steps)
     horizon: int = 5
     # Confidence/value of this plan (from MCTS)
@@ -86,17 +101,13 @@ class LLIntent(StalenessMixin):
     iterations: int = 0
 
 @dataclass
-class HLIntent(StalenessMixin):
+class HLIntent:
     """
     High-Level Intent: Long-horizon region/cluster plan.
 
     Contains the agent's planned sequence of regions to cover,
     including estimated completion times and priority scores.
     """
-
-    STALE_MAX_AGE = 5.0  # HLP plans stay valid longer than LLP intents
-    STALE_DECAY = 0.95
-    STALE_THRESHOLD_SEC = 5.0
 
     agent_id: int
     # Sequence of region IDs the agent plans to visit
@@ -111,8 +122,8 @@ class HLIntent(StalenessMixin):
     current_target_region: Optional[int] = None
     # Center position of current target
     target_center: Optional[Tuple[float, float]] = None
-    # Timestamp when intent was generated
-    timestamp: float = field(default_factory=time.time)
+    # Planning cycle (step) that produced this intent
+    step: int = 0
     # Planning horizon (number of regions)
     horizon: int = 3
     # Value of this plan (from MCTS)
@@ -245,7 +256,9 @@ class LowLevelPlanner:
         num_iterations: int = 100,
         ucb_c: float = 1.41,
         discount: float = 0.95,
-        intent_discount: float = 0.8,  # Discount for teammate intent influence
+        intent_discount: float = 0.8,  # Weight of each further step of a teammate's plan
+        discount_teammates: bool = True,  # False: plain IG, teammate plans are ignored
+        comm_radius: Optional[Tuple[float, float, float]] = None,  # None: unlimited
         use_mcts_llp: bool = False,  # Use MCTS for LLP instead of random rollouts
         use_g2: bool = False,  # Compute g2 mission time estimate (slower but more accurate)
         g2_mode: str = "hl_aware",  # g2 mode: stub | hl_aware | entropy_rate | eta_weighted
@@ -263,7 +276,9 @@ class LowLevelPlanner:
             num_iterations: MCTS iterations per planning cycle
             ucb_c: UCB exploration constant
             discount: Reward discount factor
-            intent_discount: Discount for teammate intent cells
+            intent_discount: Weight of each further step of a teammate's plan
+            discount_teammates: If False, teammate plans do not reduce IG (plain IG)
+            comm_radius: (dx, dy, dz) limit for hearing a teammate; None means unlimited
             use_mcts_llp: If True, use MCTS tree search for LLP; if False, use random rollouts
             use_g2: If True, compute g2 mission time estimates (more accurate but slower)
             g2_mode: Which g2 implementation to use (stub|hl_aware|entropy_rate|eta_weighted)
@@ -277,6 +292,8 @@ class LowLevelPlanner:
         self.ucb_c = ucb_c
         self.discount = discount
         self.intent_discount = intent_discount
+        self.discount_teammates = discount_teammates
+        self.comm_radius = comm_radius
         self.use_mcts_llp = use_mcts_llp
         self.use_g2 = use_g2
         self.g2_mode = g2_mode
@@ -307,10 +324,6 @@ class LowLevelPlanner:
         # RNG for reproducible randomization
         self._rng = np.random.default_rng(seed)
 
-        # Cache for teammate intent staleness (memoization)
-        self._teammate_staleness_cache: Dict[int, bool] = {}
-        self._last_staleness_check_time: float = 0.0
-
         # IG cache: key -> ig_array; invalidated via version counter (avoids tobytes() hashing)
         self._ig_cache: Dict[Any, np.ndarray] = {}
         self._belief_version: int = 0
@@ -325,6 +338,16 @@ class LowLevelPlanner:
         self._cam_h_step: float = camera.h_step
         self._cam_xy_step: float = camera.xy_step
         self._cam_h_range = camera.h_range
+        h, xy = camera.h_step, camera.xy_step
+        self._action_steps = {
+            "up": (0.0, 0.0, h),
+            "down": (0.0, 0.0, -h),
+            "front": (0.0, xy, 0.0),
+            "back": (0.0, -xy, 0.0),
+            "right": (xy, 0.0, 0.0),
+            "left": (-xy, 0.0, 0.0),
+            "hover": (0.0, 0.0, 0.0),
+        }
 
         # Admissible-actions cache (grid never changes, so keyed on rounded pos+alt)
         self._admissible_cache: Dict[Tuple, List[str]] = {}
@@ -363,61 +386,41 @@ class LowLevelPlanner:
         """Return (s0, s1) sensor noise for altitude. See helper.get_sensor_params."""
         return _get_sensor_params_fn(altitude, self.conf_dict)
 
-    def _compute_teammate_coverage_mask(self) -> np.ndarray:
+    def _compute_teammate_coverage_mask(
+        self, own_state: Optional[Tuple[float, float, float]] = None
+    ) -> List[List[Tuple[int, int, int, int]]]:
         """
-        Compute mask of cells teammates plan to cover.
+        Collect the teammate plans that reduce this agent's IG.
 
-        Returns a discount map where cells covered by teammates have reduced IG.
-        Uses memoized staleness checks to reduce redundant calls.
+        Returns one footprint list per teammate in communication range, in plan order. A
+        teammate's next footprint counts fully.
         """
-        H, W = self.grid_info.shape
-        coverage_discount: Optional[np.ndarray] = None
-        current_time = time.time()
+        if not self.discount_teammates:
+            return []
 
-        # Refresh staleness cache every 0.5 seconds (memoization)
-        if current_time - self._last_staleness_check_time > 0.5:
-            self._teammate_staleness_cache = {
-                tid: intent.is_stale()
-                for tid, intent in self._teammate_ll_intents.items()
-            }
-            self._last_staleness_check_time = current_time
-
-        for teammate_id, ll_intent in self._teammate_ll_intents.items():
-            if self._teammate_staleness_cache.get(teammate_id, True):
+        plans = []
+        for intent in self._teammate_ll_intents.values():
+            # state_sequence[0] is the start; index 1 belongs to the first footprint.
+            teammate_state = intent.state_sequence[1] if len(intent.state_sequence) > 1 else None
+            if own_state is not None and not teammate_in_range(
+                own_state, teammate_state, self.comm_radius
+            ):
                 continue
-
-            if coverage_discount is None:
-                coverage_discount = np.ones((H, W), dtype=np.float32)
-
-            # D-UCT: Apply staleness discount for asynchronous drift
-            staleness_factor = ll_intent.staleness_discount()
-
-            # Apply decreasing discount for future steps
-            for step_idx, fp in enumerate(ll_intent.footprint_sequence):
-                step_discount = self.intent_discount**step_idx * staleness_factor
-                imin, imax, jmin, jmax = fp
-                # Clamp to valid bounds
-                imin = max(0, min(imin, H))
-                imax = max(0, min(imax, H))
-                jmin = max(0, min(jmin, W))
-                jmax = max(0, min(jmax, W))
-
-                # Reduce IG in cells teammate will cover
-                coverage_discount[imin:imax, jmin:jmax] *= step_discount
-
-        if coverage_discount is None:
-            return np.ones((H, W), dtype=np.float32)
-
-        return coverage_discount
+            plans.append(list(intent.footprint_sequence))
+        return plans
 
     def _compute_ig(
         self,
         position: Tuple[float, float],
         altitude: float,
-        coverage_discount: np.ndarray,
+        teammate_plans: Any,
+        occupancy_map: Optional[np.ndarray] = None,
     ) -> Tuple[float, Optional[Tuple[int, int, int, int]]]:
         """
         Compute Information Gain for a position, considering teammate intents.
+
+        teammate_plans comes from _compute_teammate_coverage_mask; a per-cell weight array is
+        also accepted. occupancy_map replaces the current belief for simulated later steps.
 
         Returns (ig_value, (imin, imax, jmin, jmax)) so callers can reuse the
         footprint bounds without a second computation.  Returns (0.0, None) on
@@ -462,44 +465,35 @@ class LowLevelPlanner:
 
         footprint = (imin, imax, jmin, jmax)
 
-        # Check cache — invalidate only when belief version changed (O(1), no tobytes())
-        if self._belief_version != self._ig_cache_belief_version:
-            self._ig_cache = {}
-            self._ig_cache_belief_version = self._belief_version
-
-        # Return cached IG array if available (cache key includes altitude for sensor-aware IG)
-        if cache_key in self._ig_cache:
-            ig_array = self._ig_cache[cache_key]
+        if occupancy_map is not None:
+            ig_array = self._ig_array(occupancy_map[imin:imax, jmin:jmax], altitude)
         else:
-            # Extract belief probabilities (occupied channel)
-            if self.belief.ndim == 3:
-                belief_slice = self.belief[imin:imax, jmin:jmax, 1]
+            # Check cache — invalidate only when belief version changed (O(1), no tobytes())
+            if self._belief_version != self._ig_cache_belief_version:
+                self._ig_cache = {}
+                self._ig_cache_belief_version = self._belief_version
+
+            # Cache key includes altitude for sensor-aware IG
+            if cache_key in self._ig_cache:
+                ig_array = self._ig_cache[cache_key]
             else:
-                belief_slice = self.belief[imin:imax, jmin:jmax]
+                ig_array = self._ig_array(self._occupancy_map()[imin:imax, jmin:jmax], altitude)
+                self._ig_cache[cache_key] = ig_array
 
-            # Sensor-aware IG = H(prior) - E[H(posterior | observation)]
-            # Uses sensor noise sigma(altitude): lower altitude → smaller sigma → more IG per cell
-            s0, s1 = self._get_sensor_params(altitude)
+        if isinstance(teammate_plans, np.ndarray):
+            return float(np.sum(ig_array * teammate_plans[imin:imax, jmin:jmax])), footprint
 
-            # Compute per-cell entropy of prior
-            eps = 1e-10
-            p = np.clip(belief_slice, eps, 1 - eps)
-            h_prior = -p * np.log2(p) - (1 - p) * np.log2(1 - p)
+        discount = teammate_overlap_discount(footprint, teammate_plans, self.intent_discount)
+        return float(np.sum(ig_array)) * discount, footprint
 
-            # Compute conditional entropy using imported _cH (same as planner.py / greedy_ig)
-            h_cond = _cH(belief_slice, s0, s1)
+    def _occupancy_map(self) -> np.ndarray:
+        """Return the occupied-channel probability of the current belief."""
+        return self.belief[:, :, 1] if self.belief.ndim == 3 else self.belief
 
-            # IG per cell; clamp small negatives from floating-point error to 0
-            ig_array = np.maximum(h_prior - h_cond, 0.0)
-
-            # Cache the IG array so per-cell discounting works
-            self._ig_cache[cache_key] = ig_array
-
-        # Apply teammate coverage discount per-cell (spatially targeted suppression)
-        discount_slice = coverage_discount[imin:imax, jmin:jmax]
-        discounted_ig = ig_array * discount_slice
-
-        return float(np.sum(discounted_ig)), footprint
+    def _ig_array(self, belief_slice: np.ndarray, altitude: float) -> np.ndarray:
+        """Per-cell sensor-aware IG = H(prior) - E[H(posterior | observation)]."""
+        s0, s1 = self._get_sensor_params(altitude)
+        return information_gain(belief_slice, s0, s1)
 
     def _compute_g2_for_trajectory(
         self,
@@ -566,7 +560,7 @@ class LowLevelPlanner:
         self,
         start_state: Tuple[float, float, float],
         actions: List[str],
-        coverage_discount: np.ndarray,
+        teammate_plans: Any,
     ) -> Tuple[
         float,
         List[Tuple[float, float, float]],
@@ -574,14 +568,15 @@ class LowLevelPlanner:
         List[float],
     ]:
         """
-        Simulate a trajectory and compute total reward (g1 + g2).
+        Simulate a trajectory and compute total reward (g1 - g2).
 
-        Paper-correct reward decomposition:
-            r_LLP = g1(LL prefix) + g2(LL prefix, HL intents, teammate intents)
+        Reward decomposition:
+            r_LLP = g1(LL prefix) - g2(LL prefix, HL intents, teammate intents)
 
         Where:
-        - g1: Immediate task quality (sum of discounted IG)
-        - g2: Mission completion time estimate (from g2_evaluator)
+        - g1: Immediate task quality (sum of discounted IG). Each step sees the belief left by
+          the steps before it, so overlapping footprints earn less.
+        - g2: Mission completion time estimate (from g2_evaluator); less time is better
 
         Returns:
             (total_reward, state_sequence, footprint_sequence, ig_sequence)
@@ -594,6 +589,7 @@ class LowLevelPlanner:
 
         current_pos = start_state[:2]
         current_alt = start_state[2]
+        simulated_map: Optional[np.ndarray] = None  # copied on the first simulated observation
 
         # NO camera state mutations - compute state transitions directly
         for step_idx, action in enumerate(actions):
@@ -606,9 +602,21 @@ class LowLevelPlanner:
 
             # Compute IG and footprint in one call — footprint reused directly,
             # no second computation needed
-            ig, fp = self._compute_ig(next_pos, next_alt, coverage_discount)
+            ig, fp = self._compute_ig(next_pos, next_alt, teammate_plans, simulated_map)
             step_reward = (self.discount**step_idx) * ig
             g1_reward += step_reward
+
+            if fp is not None and step_idx < len(actions) - 1:
+                if simulated_map is None:
+                    simulated_map = self._occupancy_map().copy()
+                imin, imax, jmin, jmax = fp
+                s0, s1 = self._get_sensor_params(next_alt)
+                _, Pz1, p10, p11 = expected_posterior(
+                    simulated_map[imin:imax, jmin:jmax], s0, s1
+                )
+                simulated_map[imin:imax, jmin:jmax] = sampled_posterior(
+                    Pz1, p10, p11, self._rng
+                )
 
             # Record trajectory
             state_sequence.append((next_pos[0], next_pos[1], next_alt))
@@ -626,8 +634,8 @@ class LowLevelPlanner:
                 state_sequence, footprint_sequence, ig_sequence
             )
 
-        # Total LLP reward = g1 + g2 (g2=0 if disabled)
-        total_reward = g1_reward + g2_value
+        # g2 is a mission time, so a shorter mission scores higher (g2=0 if disabled)
+        total_reward = g1_reward - g2_value
 
         return total_reward, state_sequence, footprint_sequence, ig_sequence
 
@@ -635,22 +643,16 @@ class LowLevelPlanner:
         self, pos: Tuple[float, float], alt: float, action: str
     ) -> Optional[Tuple[Tuple[float, float], float]]:
         """Apply action to state without camera mutations (uses cached camera properties)."""
-        if action == "up" and alt + self._cam_h_step <= self._cam_h_range[1]:
-            return pos, alt + self._cam_h_step
-        elif action == "down" and alt - self._cam_h_step >= self._cam_h_range[0]:
-            return pos, alt - self._cam_h_step
-        elif action == "front" and pos[1] + self._cam_xy_step <= self._cam_y_range[1]:
-            return (pos[0], pos[1] + self._cam_xy_step), alt
-        elif action == "back" and pos[1] - self._cam_xy_step >= self._cam_y_range[0]:
-            return (pos[0], pos[1] - self._cam_xy_step), alt
-        elif action == "right" and pos[0] + self._cam_xy_step <= self._cam_x_range[1]:
-            return (pos[0] + self._cam_xy_step, pos[1]), alt
-        elif action == "left" and pos[0] - self._cam_xy_step >= self._cam_x_range[0]:
-            return (pos[0] - self._cam_xy_step, pos[1]), alt
-        elif action == "hover":
-            return pos, alt
-        else:
+        step = self._action_steps.get(action)
+        if step is None:
             return None
+        x = min(max(pos[0] + step[0], self._cam_x_range[0]), self._cam_x_range[1])
+        y = min(max(pos[1] + step[1], self._cam_y_range[0]), self._cam_y_range[1])
+        z = min(max(alt + step[2], self._cam_h_range[0]), self._cam_h_range[1])
+        # Same rule as Camera.x_future: clip to the field, inadmissible if nothing moved.
+        if x == pos[0] and y == pos[1] and round(z, 8) == round(alt, 8) and action != "hover":
+            return None
+        return (x, y), z
 
     def _admissible_actions(self, pos: Tuple[float, float], alt: float) -> List[str]:
         """Return admissible actions for (pos, alt) with a position-keyed cache.
@@ -668,137 +670,108 @@ class LowLevelPlanner:
         self._admissible_cache[key] = result
         return result
 
+    def _beats_best(
+        self,
+        reward: float,
+        actions: List[str],
+        best_reward: float,
+        best_actions: List[str],
+    ) -> bool:
+        """True if this trajectory is better; numeric ties use greedy's first-action order."""
+        if reward > best_reward + _TIE_TOLERANCE:
+            return True
+        if reward < best_reward - _TIE_TOLERANCE or not best_actions:
+            return False
+        return _tie_rank(actions[0]) < _tie_rank(best_actions[0])
+
     def _mcts_tree_search(
         self,
         current_state: Tuple[float, float, float],
-        coverage_discount: np.ndarray,
+        teammate_plans: Any,
     ) -> Tuple[List[str], float, List[Tuple], List[Tuple], List[float]]:
         """
         MCTS tree search for LLP action selection.
 
+        Nodes are keyed by the action sequence from the root, so hovering or moving back and
+        forth reaches a new node instead of mixing deeper results into an earlier one.
+
         Returns:
             (best_actions, best_reward, best_states, best_footprints, best_igs)
         """
-        # MCTS tree node structure: {state_key: {action: {visits, value, children}}}
-        tree = {}
+        tree: Dict[Tuple[str, ...], Dict[str, Dict[str, float]]] = {}
+        reward_low = float("inf")
+        reward_high = float("-inf")
 
-        def state_key(state):
-            """Convert state to hashable key."""
-            return (round(state[0], 2), round(state[1], 2), round(state[2], 2))
-
-        def ucb_score(parent_visits, child_visits, child_value):
-            """UCB1 formula for action selection."""
-            if child_visits == 0:
+        def ucb_score(parent_visits, child):
+            """UCB1 with the mean reward scaled to [0, 1] by the rewards seen so far."""
+            if child["visits"] == 0:
                 return float("inf")
-            exploitation = child_value / child_visits
-            exploration = self.ucb_c * math.sqrt(math.log(parent_visits) / child_visits)
+            span = reward_high - reward_low
+            mean = child["value"] / child["visits"]
+            exploitation = (mean - reward_low) / span if span > 0 else 0.0
+            exploration = self.ucb_c * math.sqrt(math.log(parent_visits) / child["visits"])
             return exploitation + exploration
 
-        def select_action(state_k, depth, pos, alt):
-            """Select action using UCB1 over admissible actions only."""
+        def select_action(prefix, pos, alt):
+            """Try each untried admissible action, then select by UCB1."""
             admissible = self._admissible_actions(pos, alt)
-            if state_k not in tree:
-                tree[state_k] = {}
-                return self._rng.choice(admissible)
-
-            node = tree[state_k]
-            if not node or depth >= self.horizon:
-                return self._rng.choice(admissible)
-
-            # Get total visits at this state
-            total_visits = sum(action_data["visits"] for action_data in node.values())
-
-            # Select action with highest UCB score (admissible actions only)
-            best_action = None
-            best_score = float("-inf")
+            node = tree.setdefault(prefix, {})
+            if not node:
+                return str(self._rng.choice(admissible))
             for action in admissible:
                 if action not in node:
                     return action
-                action_data = node[action]
-                score = ucb_score(
-                    total_visits, action_data["visits"], action_data["value"]
-                )
-                if score > best_score:
-                    best_score = score
-                    best_action = action
+            total_visits = sum(data["visits"] for data in node.values())
+            return max(admissible, key=lambda a: ucb_score(total_visits, node[a]))
 
-            return best_action if best_action else self._rng.choice(admissible)
-
-        # Run MCTS iterations
         best_reward = float("-inf")
         best_actions = []
         best_states = []
         best_footprints = []
         best_igs = []
 
-        # Save camera state
-        org = self.camera.get_x()
-        original_pos, original_alt = org.position, org.altitude
-
-        for iteration in range(self.num_iterations):
-            # Selection & Expansion & Simulation
-            state = current_state
-            state_k = state_key(state)
+        # Every root action is scored once, whatever the budget.
+        budget = max(
+            self.num_iterations,
+            len(self._admissible_actions((current_state[0], current_state[1]), current_state[2])),
+        )
+        for _ in range(budget):
+            pos, alt = (current_state[0], current_state[1]), current_state[2]
+            prefix = ()
             trajectory_actions = []
 
-            for depth in range(self.horizon):
-                # Select action (admissible only at current state)
-                action = select_action(state_k, depth, (state[0], state[1]), state[2])
+            for _depth in range(self.horizon):
+                action = select_action(prefix, pos, alt)
+                tree[prefix].setdefault(action, {"visits": 0, "value": 0.0})
                 trajectory_actions.append(action)
-
-                # Initialize node if needed
-                if state_k not in tree:
-                    tree[state_k] = {}
-                if action not in tree[state_k]:
-                    tree[state_k][action] = {"visits": 0, "value": 0.0}
-
-                # Get next state (no camera mutation)
-                result = self._apply_action((state[0], state[1]), state[2], action)
+                result = self._apply_action(pos, alt, action)
                 if result is None:
                     break
-                next_pos, next_alt = result
-                state = (next_pos[0], next_pos[1], next_alt)
-                state_k = state_key(state)
+                pos, alt = result
+                prefix = prefix + (action,)
 
-            # Evaluate trajectory
             reward, states, footprints, igs = self._simulate_trajectory(
-                current_state, trajectory_actions, coverage_discount
+                current_state, trajectory_actions, teammate_plans
             )
+            reward_low = min(reward_low, reward)
+            reward_high = max(reward_high, reward)
 
-            # Backpropagation
-            state = current_state
-            state_k = state_key(state)
+            prefix = ()
             for action in trajectory_actions:
-                if state_k in tree and action in tree[state_k]:
-                    tree[state_k][action]["visits"] += 1
-                    tree[state_k][action]["value"] += reward
+                tree[prefix][action]["visits"] += 1
+                tree[prefix][action]["value"] += reward
+                prefix = prefix + (action,)
 
-                # Move to next state (no camera mutation)
-                result = self._apply_action((state[0], state[1]), state[2], action)
-                if result is None:
-                    break
-                next_pos, next_alt = result
-                state = (next_pos[0], next_pos[1], next_alt)
-                state_k = state_key(state)
-
-            # Track best trajectory
-            if reward > best_reward:
+            if self._beats_best(reward, trajectory_actions, best_reward, best_actions):
                 best_reward = reward
                 best_actions = trajectory_actions
                 best_states = states
                 best_footprints = footprints
                 best_igs = igs
 
-        # Restore camera state
-        self.camera.set_position(original_pos)
-        self.camera.set_altitude(original_alt)
-
-        # Update MCTS action values for logging
-        root_key = state_key(current_state)
-        if root_key in tree:
-            for action, data in tree[root_key].items():
-                if data["visits"] > 0:
-                    self._mcts_action_values[action] = data["value"] / data["visits"]
+        for action, data in tree.get((), {}).items():
+            if data["visits"] > 0:
+                self._mcts_action_values[action] = data["value"] / data["visits"]
 
         return best_actions, best_reward, best_states, best_footprints, best_igs
 
@@ -812,7 +785,6 @@ class LowLevelPlanner:
         Returns:
             LLIntent with planned trajectory
         """
-        import time
 
         plan_start = time.time()
 
@@ -820,8 +792,7 @@ class LowLevelPlanner:
             # Return empty intent
             return LLIntent(agent_id=self.agent_id)
 
-        # Compute teammate coverage discount
-        coverage_discount = self._compute_teammate_coverage_mask()
+        teammate_plans = self._compute_teammate_coverage_mask(current_state)
 
         # Track MCTS action values for logging
         self._mcts_action_values = {
@@ -832,7 +803,7 @@ class LowLevelPlanner:
         if self.use_mcts_llp:
             # MCTS tree search for LLP
             best_actions, best_reward, best_states, best_footprints, best_igs = (
-                self._mcts_tree_search(current_state, coverage_discount)
+                self._mcts_tree_search(current_state, teammate_plans)
             )
         else:
             # Random rollout sampling (original approach)
@@ -842,13 +813,25 @@ class LowLevelPlanner:
             best_footprints = []
             best_igs = []
 
-            for _ in range(self.num_iterations):
+            # Cycle through the first actions so every one is scored once the budget allows.
+            first_actions = list(
+                self._admissible_actions(
+                    (current_state[0], current_state[1]), current_state[2]
+                )
+            )
+            self._rng.shuffle(first_actions)
+
+            # Every root action is scored once, whatever the budget.
+            for iteration in range(max(self.num_iterations, len(first_actions))):
                 # Random action sequence - only admissible actions at each simulated step
                 pos = (current_state[0], current_state[1])
                 alt = current_state[2]
                 actions = []
-                for _ in range(self.horizon):
-                    a = self._rng.choice(self._admissible_actions(pos, alt))
+                for depth in range(self.horizon):
+                    if depth == 0:
+                        a = first_actions[iteration % len(first_actions)]
+                    else:
+                        a = self._rng.choice(self._admissible_actions(pos, alt))
                     actions.append(a)
                     nxt = self._apply_action(pos, alt, a)
                     if nxt is not None:
@@ -856,7 +839,7 @@ class LowLevelPlanner:
 
                 # Simulate and evaluate
                 reward, states, footprints, igs = self._simulate_trajectory(
-                    current_state, actions, coverage_discount
+                    current_state, actions, teammate_plans
                 )
 
                 # Track best rollout value for each first action
@@ -864,7 +847,7 @@ class LowLevelPlanner:
                 if reward > self._mcts_action_values[first_action]:
                     self._mcts_action_values[first_action] = reward
 
-                if reward > best_reward:
+                if self._beats_best(reward, actions, best_reward, best_actions):
                     best_reward = reward
                     best_actions = actions
                     best_states = states
@@ -874,6 +857,7 @@ class LowLevelPlanner:
         # Create intent
         intent = LLIntent(
             agent_id=self.agent_id,
+            step=self._stats["plans_generated"] + 1,
             action_sequence=best_actions,
             state_sequence=best_states,
             footprint_sequence=best_footprints,
@@ -945,7 +929,7 @@ class HighLevelPlanner:
             horizon: Number of regions to plan ahead
             num_iterations: MCTS iterations per cycle
             ucb_c: UCB exploration constant
-            replan_interval: Minimum time between replans
+            replan_interval: Planning cycles (steps) between replans
             g2_mode: Which g2 implementation to use (stub|hl_aware|entropy_rate|eta_weighted)
             grid_info: Grid metadata object (has .length, .shape, .center) for g2 coordinate conversion
         """
@@ -974,11 +958,15 @@ class HighLevelPlanner:
         self._teammate_ll_intents: Dict[int, LLIntent] = {}
         self._teammate_hl_intents: Dict[int, HLIntent] = {}
 
+        # This agent's own low-level plan, so g2 starts from where this agent will be
+        self._own_ll_intent: Optional[LLIntent] = None
+
         # Current intent
         self.current_intent: Optional[HLIntent] = None
 
-        # Last replan time
-        self._last_replan_time: float = 0.0
+        # Planning cycles so far, and the cycle of the last replan
+        self._plan_calls: int = 0
+        self._last_replan_call: int = 0
 
         # Region coverage estimates
         self._region_coverage: Dict[int, float] = {
@@ -1066,19 +1054,20 @@ class HighLevelPlanner:
         self._teammate_hl_intents = hl_intents
         self._stats["intent_updates_received"] += 1
 
-    def _get_teammate_target_regions(self) -> Dict[int, Tuple[Set[int], float]]:
-        """Get regions each teammate is targeting with D-UCT staleness discount."""
-        targets = {}
-        for teammate_id, hl_intent in self._teammate_hl_intents.items():
-            if not hl_intent.is_stale():
-                staleness_discount = hl_intent.staleness_discount()
-                targets[teammate_id] = (
-                    hl_intent.get_target_regions(),
-                    staleness_discount,
-                )
-            else:
-                targets[teammate_id] = (set(), 0.0)
-        return targets
+    def update_own_ll_intent(self, ll_intent: LLIntent) -> None:
+        """Supply this agent's own low-level plan, which g2 executes before any region."""
+        self._own_ll_intent = ll_intent
+
+    def _all_ll_intents(self) -> Dict[int, LLIntent]:
+        """Teammates' low-level intents plus this agent's own."""
+        all_ll = dict(self._teammate_ll_intents)
+        if self._own_ll_intent is not None:
+            all_ll[self.agent_id] = self._own_ll_intent
+        return all_ll
+
+    def _is_open(self, region_id: int) -> bool:
+        """True while the region still holds uncertainty worth visiting it for."""
+        return 1.0 - self._region_coverage[region_id] > REGION_OPEN_ENTROPY
 
     def _estimate_region_completion_time(
         self,
@@ -1105,7 +1094,6 @@ class HighLevelPlanner:
         self,
         region_id: int,
         agent_position: Tuple[float, float],
-        teammate_targets: Dict[int, Tuple[Set[int], float]],
     ) -> float:
         """
         Compute marginal g2 score for a region.
@@ -1118,7 +1106,6 @@ class HighLevelPlanner:
         Args:
             region_id: Region to evaluate
             agent_position: Current agent position
-            teammate_targets: Dict of teammate HL intents
 
         Returns:
             Marginal contribution score (positive = helpful, negative = harmful)
@@ -1144,7 +1131,7 @@ class HighLevelPlanner:
         # Prepare env_state for g2 (include regions for hl_aware / eta_weighted modes)
         env_state = {
             "belief": self.belief,
-            "grid_info": None,
+            "grid_info": self.grid_info,
             "regions": self.regions,
         }
 
@@ -1156,7 +1143,7 @@ class HighLevelPlanner:
         all_hl_null[self.agent_id] = hl_null
 
         # Get LL intents (same for both scenarios)
-        all_ll = dict(self._teammate_ll_intents)
+        all_ll = self._all_ll_intents()
 
         # Compute g2 with and without this region
         g2_with = g2(
@@ -1173,14 +1160,11 @@ class HighLevelPlanner:
         return marginal_score
 
     def _should_replan(self) -> bool:
-        """Check if we should replan."""
+        """Replan once replan_interval planning cycles have passed since the last replan."""
         if self.current_intent is None:
             return True
 
-        if time.time() - self._last_replan_time < self.replan_interval:
-            return False
-
-        return True
+        return self._plan_calls - self._last_replan_call >= self.replan_interval
 
     def plan(self, current_position: Tuple[float, float]) -> HLIntent:
         """
@@ -1198,25 +1182,23 @@ class HighLevelPlanner:
         Returns:
             HLIntent with planned region sequence
         """
-        import time
 
         plan_start = time.time()
 
+        self._plan_calls += 1
         if not self._should_replan() and self.current_intent is not None:
             return self.current_intent
 
-        self._last_replan_time = time.time()
-
-        # Get teammate targets
-        teammate_targets = self._get_teammate_target_regions()
+        self._last_replan_call = self._plan_calls
 
         # Run MCTS over region sequences
-        best_sequence = self._run_mcts_region_search(current_position, teammate_targets)
+        best_sequence = self._run_mcts_region_search(current_position)
 
         if not best_sequence:
             # Fallback: no valid regions found
             intent = HLIntent(
                 agent_id=self.agent_id,
+                step=self._plan_calls,
                 region_sequence=[],
                 eta_sequence=[],
                 completion_sequence=[],
@@ -1242,7 +1224,7 @@ class HighLevelPlanner:
 
         for region_id in region_sequence:
             # Compute marginal score for this region
-            score = self._compute_region_score(region_id, pos, teammate_targets)
+            score = self._compute_region_score(region_id, pos)
 
             # Estimate completion time
             eta = self._estimate_region_completion_time(region_id, pos)
@@ -1263,6 +1245,7 @@ class HighLevelPlanner:
 
         intent = HLIntent(
             agent_id=self.agent_id,
+            step=self._plan_calls,
             region_sequence=region_sequence,
             eta_sequence=eta_sequence,
             completion_sequence=completion_sequence,
@@ -1286,7 +1269,6 @@ class HighLevelPlanner:
     def _run_mcts_region_search(
         self,
         start_position: Tuple[float, float],
-        teammate_targets: Dict[int, Tuple[Set[int], float]],
     ) -> List[int]:
         """
         Run MCTS tree search over region sequences.
@@ -1297,7 +1279,6 @@ class HighLevelPlanner:
 
         Args:
             start_position: Starting position
-            teammate_targets: Teammate region targets
 
         Returns:
             Best region sequence found
@@ -1313,7 +1294,7 @@ class HighLevelPlanner:
         for iteration in range(self.num_iterations):
             # Selection + Expansion + Simulation
             sequence, value = self._mcts_iteration(
-                tree, root_state, start_position, teammate_targets
+                tree, root_state, start_position
             )
 
             # Track best sequence found
@@ -1328,7 +1309,6 @@ class HighLevelPlanner:
         tree: Dict,
         root_state: frozenset,
         start_position: Tuple[float, float],
-        teammate_targets: Dict[int, Tuple[Set[int], float]],
     ) -> Tuple[List[int], float]:
         """
         Single MCTS iteration: selection, expansion, simulation, backpropagation.
@@ -1369,7 +1349,7 @@ class HighLevelPlanner:
 
                 # Rollout to get value estimate
                 completed, value = self._rollout_region_sequence(
-                    sequence, position, start_position, teammate_targets
+                    sequence, position, start_position
                 )
 
                 # Backpropagate
@@ -1388,15 +1368,15 @@ class HighLevelPlanner:
 
         # Terminal node reached (horizon limit or no more regions)
         value = self._evaluate_region_sequence(
-            sequence, start_position, teammate_targets
+            sequence, start_position
         )
         self._backpropagate(tree, path, value)
 
         return sequence, value
 
-    def _get_available_regions(self, visited: frozenset) -> List[int]:
-        """Get regions not yet visited in current path."""
-        return [r for r in self.regions.keys() if r not in visited]
+    def _get_available_regions(self, visited: Any) -> List[int]:
+        """Get open regions not yet visited in current path."""
+        return [r for r in self.regions if r not in visited and self._is_open(r)]
 
     def _select_best_region_ucb(self, node: Dict, available_regions: List[int]) -> int:
         """Select region using UCB formula."""
@@ -1431,7 +1411,6 @@ class HighLevelPlanner:
         current_sequence: List[int],
         current_position: Tuple[float, float],
         start_position: Tuple[float, float],
-        teammate_targets: Dict[int, Tuple[Set[int], float]],
     ) -> Tuple[List[int], float]:
         """
         Rollout policy: randomly complete region sequence to horizon.
@@ -1440,7 +1419,6 @@ class HighLevelPlanner:
             current_sequence: Regions selected so far
             current_position: Current position after current_sequence
             start_position: Initial starting position
-            teammate_targets: Teammate region targets
 
         Returns:
             (completed region sequence, total value estimate)
@@ -1450,7 +1428,7 @@ class HighLevelPlanner:
 
         # Random completion to horizon
         while len(sequence) < self.horizon:
-            available = [r for r in self.regions.keys() if r not in visited]
+            available = self._get_available_regions(visited)
             if not available:
                 break
 
@@ -1461,14 +1439,13 @@ class HighLevelPlanner:
 
         # Evaluate complete sequence
         return sequence, self._evaluate_region_sequence(
-            sequence, start_position, teammate_targets
+            sequence, start_position
         )
 
     def _evaluate_region_sequence(
         self,
         sequence: List[int],
         start_position: Tuple[float, float],
-        teammate_targets: Dict[int, Tuple[Set[int], float]],
     ) -> float:
         """
         Evaluate cumulative marginal g2 for a region sequence.
@@ -1476,7 +1453,6 @@ class HighLevelPlanner:
         Args:
             sequence: Region sequence to evaluate
             start_position: Starting position
-            teammate_targets: Teammate region targets
 
         Returns:
             Total marginal g2 value (higher is better)
@@ -1517,7 +1493,7 @@ class HighLevelPlanner:
         all_hl_null[self.agent_id] = hl_null
 
         # Get LL intents
-        all_ll = dict(self._teammate_ll_intents)
+        all_ll = self._all_ll_intents()
 
         # Compute marginal g2
         g2_with = g2(
@@ -1594,6 +1570,8 @@ class HierarchicalDecMCTSPlanner:
         g2_mode: str = "hl_aware",  # g2 mode: stub | hl_aware | entropy_rate | eta_weighted
         conf_dict: Optional[Dict] = None,
         seed: Optional[int] = None,
+        discount_teammates: bool = True,
+        comm_radius: Optional[Tuple[float, float, float]] = None,
     ):
         """
         Initialize hierarchical planner.
@@ -1612,7 +1590,7 @@ class HierarchicalDecMCTSPlanner:
             hlp_iterations: HLP MCTS iterations
             hlp_ucb_c: HLP UCB exploration constant
             tile_size: Region tile size for HLP
-            hlp_replan_interval: Minimum time between HLP replans
+            hlp_replan_interval: Planning cycles (steps) between HLP replans
             use_mcts_llp: If True, use MCTS tree search for LLP; if False, use random rollouts
             use_g2: If True, compute g2 mission time estimates (more accurate but slower)
             g2_mode: Which g2 implementation to use (stub|hl_aware|entropy_rate|eta_weighted)
@@ -1638,6 +1616,8 @@ class HierarchicalDecMCTSPlanner:
             use_g2=use_g2,
             g2_mode=g2_mode,
             seed=seed,
+            discount_teammates=discount_teammates,
+            comm_radius=comm_radius,
         )
 
         # Create HLP
@@ -1737,7 +1717,6 @@ class HierarchicalDecMCTSPlanner:
         Returns:
             (best_action, metrics_dict)
         """
-        import time
 
         if self._current_position is None:
             return "hover", {}
@@ -1753,14 +1732,25 @@ class HierarchicalDecMCTSPlanner:
             self.camera.grid.center,
         )
         hlp_start_time = time.perf_counter()
-        hlp_last_replan_before = (
-            self.hlp._last_replan_time
-        )  # Save timestamp before planning
+        self.hlp.update_own_ll_intent(
+            self.llp.current_intent
+            or LLIntent(
+                agent_id=self.agent_id,
+                state_sequence=[
+                    (
+                        self._current_position[0],
+                        self._current_position[1],
+                        self._current_altitude,
+                    )
+                ],
+            )
+        )
+        hlp_last_replan_before = self.hlp._last_replan_call
         hl_intent = self.hlp.plan((grid_pos[0], grid_pos[1]))
         hlp_end_time = time.perf_counter()
         hlp_time_ms = (hlp_end_time - hlp_start_time) * 1000.0
-        # Check if HLP actually ran MCTS (timestamp changed)
-        hlp_replanned = self.hlp._last_replan_time != hlp_last_replan_before
+        # Check if HLP actually ran MCTS this cycle
+        hlp_replanned = self.hlp._last_replan_call != hlp_last_replan_before
 
         # Step 3: Update LLP with HLP guidance
         # Convert target_center from grid coords to world coords for LLP
@@ -1950,6 +1940,8 @@ def create_hierarchical_planner(
     use_mcts_llp = config.get("use_mcts_llp", False)
     use_g2 = config.get("use_g2", False)
     g2_mode = config.get("g2_mode", "hl_aware")
+    discount_teammates = config.get("discount_teammates", True)
+    comm_radius = config.get("comm_radius")
 
     return HierarchicalDecMCTSPlanner(
         agent_id=agent_id,
@@ -1971,4 +1963,6 @@ def create_hierarchical_planner(
         g2_mode=g2_mode,
         conf_dict=conf_dict,
         seed=seed,
+        discount_teammates=discount_teammates,
+        comm_radius=comm_radius,
     )

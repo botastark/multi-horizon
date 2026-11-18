@@ -29,8 +29,7 @@ Compute: one reward evaluation is one footprint IG calculation or one g2 call, w
 makes it. Evaluations and planning wall time are logged per step. --eval-budget E sets each MCTS
 planner's iterations so it spends about E evaluations per decision, for comparison at equal
 evaluations, using pilots on a tune seed. Greedy stays at one evaluation per admissible action.
-The MH HLP replans on a wall-clock timer, so its share depends on machine speed and load: keep
---jobs low when wall time or MH evaluation counts matter.
+Keep --jobs low when wall time matters. Decisions depend on steps, not wall-clock time.
 
 Outputs go to experiments/temp/smoke/<split>/<case>[_e<budget>] after each planner finishes all its
 runs: planner_<name>.txt (step log), planner_path_<name>_run0.png (run 0 paths), planner_steps.csv,
@@ -875,7 +874,7 @@ def main():
     parser.add_argument("--steps", type=int, default=N_STEPS)
     parser.add_argument("--planners", nargs="+", choices=PLANNERS, default=list(PLANNERS))
     parser.add_argument("--eval-budget", type=int, help="reward evaluations per decision for the MCTS planners")
-    parser.add_argument("--jobs", type=int, default=1, help="parallel runs; wall time and MH counts shift under load")
+    parser.add_argument("--jobs", type=int, default=1, help="parallel runs; wall time shifts under load")
     parser.add_argument("--out", default=OUT_DIR)
     args = parser.parse_args()
 

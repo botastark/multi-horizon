@@ -19,7 +19,8 @@ Available g2 modes (selectable via `mode` parameter):
                    Simulates each agent walking its HL region sequence from
                    its LL end-position. Accounts for travel time + scan time
                    per region (scan_time = region_entropy / coverage_rate).
-                   g2 = max over agents (critical path bottleneck).
+                   Open regions outside every intent still have to be visited.
+                   g2 = mean agent completion time.
                    Requires env_state["regions"] for full accuracy.
 
   "entropy_rate" - Fast entropy-rate estimate. Does not use HL intents.
@@ -50,10 +51,13 @@ from collections import OrderedDict
 #
 # Key  : (id(belief), belief.shape, ll_key)  where ll_key is a tuple of
 #         (agent_id, id(intent)) sorted for stability.
-# Value: (belief_ref, heavy_result_tuple)   belief_ref keeps the array alive
-#         so that id() stays valid (Python GC cannot reuse the id).
+# Value: (belief_ref, intent_refs, heavy_result_tuple)   the references keep the
+#         objects alive so that id() stays valid (Python GC cannot reuse the id).
 _heavy_cache: "OrderedDict[tuple, tuple]" = OrderedDict()
 _HEAVY_CACHE_MAX = 8  # one slot per active agent + a few spare
+
+# Mean bits per cell above which a region still needs a visit.
+REGION_OPEN_ENTROPY = 0.1
 
 
 def _make_ll_key(ll_intents: Dict[int, Any]) -> tuple:
@@ -82,7 +86,7 @@ def _compute_heavy_parts(
     """
     cache_key = (id(belief), belief.shape, _make_ll_key(ll_intents))
     if cache_key in _heavy_cache:
-        cached_ref, result = _heavy_cache[cache_key]
+        cached_ref, _intent_refs, result = _heavy_cache[cache_key]
         if cached_ref is belief:  # same array object → id still valid
             _heavy_cache.move_to_end(cache_key)
             return result
@@ -147,7 +151,8 @@ def _compute_heavy_parts(
 
     if len(_heavy_cache) >= _HEAVY_CACHE_MAX:
         _heavy_cache.popitem(last=False)  # evict oldest
-    _heavy_cache[cache_key] = (belief, result)  # keep belief alive
+    # Holding the belief and intents keeps their ids from being reused while the entry lives.
+    _heavy_cache[cache_key] = (belief, tuple(ll_intents.values()), result)
     return result
 
 
@@ -245,14 +250,16 @@ def _g2_hl_aware(
     agent_id: Optional[int] = None,
 ) -> float:
     """
-    HL-intent aware critical path estimation.
+    HL-intent aware mission time estimation.
 
     Phase 1: Execute LL intents in parallel; record end-positions + covered cells.
-    Phase 2: Each agent walks its HL region sequence from its LL end-position.
+    Phase 2: Every open region must be visited by someone. The agent that is free first takes
+             the first open region of its HL intent, or the nearest open region once its
+             intent is used up.
              per-region cost = travel_time + scan_time
              scan_time  = region_remaining_entropy / nominal_cells_per_step
              travel_time = euclidean_dist / xy_speed
-    g2 = max over agents (critical path)
+    g2 = mean agent completion time (Seiler et al., Algorithm 2)
 
     Requires env_state["regions"] for full accuracy.
     Falls back gracefully to stub if regions are missing.
@@ -303,44 +310,68 @@ def _g2_hl_aware(
         total_remaining = float(np.sum(remaining_entropy_map))
         return 0.1 * (ll_execution_time + total_remaining / nominal_cells_per_step)
 
-    agent_completion_times = []
+    # Phase 1: every agent finishes its low-level plan first.
+    agent_ids = sorted(all_agent_ids)
+    times = {
+        aid: compute_ll_execution_time({aid: ll_intents[aid]}) if aid in ll_intents else 0.0
+        for aid in agent_ids
+    }
+    positions = {
+        aid: _to_grid(*ll_end_positions[aid]) if aid in ll_end_positions else None
+        for aid in agent_ids
+    }
 
-    for aid in all_agent_ids:
-        hl_intent = hl_intents.get(aid, None)
-        start_pos = ll_end_positions.get(aid, None)
+    open_ids = [
+        rid
+        for rid, region in regions.items()
+        if region_remaining_entropy.get(rid, 0.0) > REGION_OPEN_ENTROPY * _region_area(region)
+    ]
 
-        if hl_intent is None or not hl_intent.region_sequence or not regions:
-            agent_completion_times.append(ll_execution_time)
-            continue
+    if open_ids:
+        # Phase 2: until no region is open, the agent that is free first takes one: the first
+        # open region of its HL intent, or the nearest open region once its intent is used up.
+        index_of = {rid: k for k, rid in enumerate(open_ids)}
+        targets = np.array(
+            [region_hotspot_ij.get(rid, regions[rid]["center"]) for rid in open_ids],
+            dtype=float,
+        )
+        is_open = np.ones(len(open_ids), dtype=bool)
+        cursors = {aid: 0 for aid in agent_ids}
+        plans = {
+            aid: getattr(hl_intents.get(aid), "region_sequence", None) or []
+            for aid in agent_ids
+        }
 
-        agent_time = float(ll_execution_time)
-        # Convert LL end-position (world coords) to grid coords for consistent distance
-        pos = _to_grid(start_pos[0], start_pos[1]) if start_pos is not None else None
+        for _ in range(len(open_ids)):
+            aid = min(agent_ids, key=lambda a: (times[a], a))
+            plan, cursor = plans[aid], cursors[aid]
+            while cursor < len(plan) and (
+                plan[cursor] not in index_of or not is_open[index_of[plan[cursor]]]
+            ):
+                cursor += 1
+            cursors[aid] = cursor
 
-        for rid in hl_intent.region_sequence:
-            if rid not in regions:
-                continue
-            # Target: most-unexplored cell (grid coords), fallback to region centre
-            target = region_hotspot_ij.get(rid, regions[rid]["center"])
-
-            if pos is not None:
-                dist = np.sqrt((pos[0] - target[0]) ** 2 + (pos[1] - target[1]) ** 2)
-                travel_steps = dist / xy_speed
+            pos = positions[aid]
+            if cursor < len(plan):
+                k = index_of[plan[cursor]]
+            elif pos is None:
+                k = int(np.argmax(is_open))
             else:
-                travel_steps = 0.0
+                distances = np.sum((targets - np.asarray(pos)) ** 2, axis=1)
+                distances[~is_open] = np.inf
+                k = int(np.argmin(distances))
 
-            region_entropy = region_remaining_entropy.get(rid, 0.0)
-            scan_steps = region_entropy / nominal_cells_per_step
+            travel_steps = 0.0
+            if pos is not None:
+                travel_steps = float(np.hypot(*(np.asarray(pos) - targets[k]))) / xy_speed
+            scan_steps = region_remaining_entropy.get(open_ids[k], 0.0) / nominal_cells_per_step
 
-            agent_time += travel_steps + scan_steps
-            pos = target  # chain: next travel starts from this hotspot (grid coords)
+            times[aid] += travel_steps + scan_steps
+            positions[aid] = (float(targets[k, 0]), float(targets[k, 1]))
+            is_open[k] = False
 
-        agent_completion_times.append(agent_time)
-
-    critical_path = (
-        max(agent_completion_times) if agent_completion_times else ll_execution_time
-    )
-    return 0.1 * (critical_path + ll_overlap_penalty)
+    mean_completion = sum(times.values()) / len(times)
+    return 0.1 * (mean_completion + ll_overlap_penalty)
 
 
 # ---------------------------------------------------------------------------
@@ -527,6 +558,12 @@ def _occupancy_prob(belief: np.ndarray) -> np.ndarray:
 def _entropy(p: np.ndarray) -> np.ndarray:
     """Binary entropy map (base-2)."""
     return -p * np.log2(p) - (1 - p) * np.log2(1 - p)
+
+
+def _region_area(region: Dict[str, Any]) -> float:
+    """Number of cells in a region."""
+    (imin, imax), (jmin, jmax) = region["bounds"]
+    return float((imax - imin) * (jmax - jmin))
 
 
 def _region_entropy_sat(

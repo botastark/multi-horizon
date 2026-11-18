@@ -7,7 +7,7 @@ This module implements single-level Dec-MCTS planning as described in:
 The Dec-MCTS approach:
 1. MCTS-based trajectory planning with rollouts
 2. Multi-agent support with intent sharing
-3. D-UCT staleness discounting for async operation
+3. Teammate discounting of redundant information gain
 4. IG-based reward function for information gathering
 
 Key characteristics:
@@ -29,7 +29,14 @@ from dataclasses import dataclass, field
 import time
 import threading
 
-from helper import StalenessMixin, uav_position, H, expected_posterior
+from helper import (
+    uav_position,
+    expected_posterior,
+    information_gain,
+    select_canonical_action,
+    teammate_in_range,
+    teammate_overlap_discount,
+)
 from mcts import SearchNodeOps, copy_state
 
 
@@ -45,7 +52,7 @@ from mcts import SearchNodeOps, copy_state
 
 
 @dataclass
-class DecMCTSIntent(StalenessMixin):
+class DecMCTSIntent:
     """
     Intent for Dec-MCTS planner.
 
@@ -61,7 +68,7 @@ class DecMCTSIntent(StalenessMixin):
     )  # [(imin, imax, jmin, jmax), ...]
     ig_sequence: List[float] = field(default_factory=list)
     total_expected_ig: float = 0.0
-    timestamp: float = field(default_factory=time.time)
+    step: int = 0  # planning cycle that produced this intent
 
 # =============================================================================
 # Dec-MCTS Node
@@ -74,7 +81,7 @@ class DecMCTSNode(SearchNodeOps):
 
     Extended from MCTSNode to support:
     - Teammate intent-aware rewards
-    - D-UCT discounted overlap penalties
+    - IGd-style discounting of teammate overlap
     - IG-based rollout rewards
     """
 
@@ -120,15 +127,21 @@ class DecMCTSNode(SearchNodeOps):
             return False
         return self.state.get("remaining_steps", 1) <= 0
 
-    def best_child(self, c_param: float = 1.4) -> Optional["DecMCTSNode"]:
-        """Select best child using UCB1."""
+    def best_child(
+        self,
+        c_param: float = 1.4,
+        value_bounds: Optional[Tuple[float, float]] = None,
+    ) -> Optional["DecMCTSNode"]:
+        """Select best child using UCB1, with mean values scaled to [0, 1] by value_bounds."""
+        low, high = value_bounds if value_bounds is not None else (0.0, 1.0)
+        span = high - low if high > low else 1.0
         best_node, best_score = None, -float("inf")
 
         for action, child in self.children.items():
             if child.visit_count == 0:
                 ucb = float("inf")
             else:
-                exploitation = child.value / child.visit_count
+                exploitation = (child.value / child.visit_count - low) / span
                 exploration = c_param * np.sqrt(
                     2.0 * np.log(max(1, self.visit_count)) / child.visit_count
                 )
@@ -156,8 +169,8 @@ class DecMCTSNode(SearchNodeOps):
         self.children[action] = child
         return child
 
-    def observe(self, state: Dict) -> Optional[Tuple[float, float]]:
-        """Score the footprint at state's position and apply its observation to state's belief."""
+    def observe(self, state: Dict, rng=None) -> Optional[Tuple[float, float]]:
+        """Score the footprint at state's position and apply a sampled observation to its belief."""
         try:
             [[imin, imax], [jmin, jmax]] = self.camera.get_range(
                 position=state["uav_pos"].position,
@@ -168,13 +181,15 @@ class DecMCTSNode(SearchNodeOps):
             return None
 
         ig_reward = self.compute_ig_reward(state, imin, imax, jmin, jmax)
-        overlap_penalty = self.compute_overlap_penalty(state, imin, imax, jmin, jmax)
+        overlap_penalty = self.compute_overlap_penalty(
+            state, imin, imax, jmin, jmax, ig_reward
+        )
 
         prior = state["belief"][imin:imax, jmin:jmax, 1]
         s0, s1 = self._get_sensor_params(state["uav_pos"].altitude)
         Pz0, Pz1, p10, p11 = expected_posterior(prior, s0, s1)
         state["belief"] = self.belief_update(
-            state["belief"], imin, imax, jmin, jmax, Pz0, Pz1, p10, p11
+            state["belief"], imin, imax, jmin, jmax, Pz0, Pz1, p10, p11, rng
         )
 
         return ig_reward - overlap_penalty, ig_reward
@@ -201,15 +216,7 @@ class DecMCTSNode(SearchNodeOps):
         prior = state["belief"][imin:imax, jmin:jmax, 1]
         s0, s1 = self._get_sensor_params(state["uav_pos"].altitude)
 
-        # Expected posterior calculation
-        Pz0, Pz1, p10, p11 = expected_posterior(prior, s0, s1)
-
-        # Compute IG
-        curr_entropy = H(prior)
-        expected_entropy = Pz0 * H(p10) + Pz1 * H(p11)
-        ig = np.sum(curr_entropy - expected_entropy)
-
-        return float(ig)
+        return float(np.sum(information_gain(prior, s0, s1)))
 
     def compute_overlap_penalty(
         self,
@@ -218,27 +225,22 @@ class DecMCTSNode(SearchNodeOps):
         imax: int,
         jmin: int,
         jmax: int,
+        ig_reward: Optional[float] = None,
     ) -> float:
         """
-        Compute penalty for overlapping with teammate planned footprints.
+        Compute the part of this footprint's IG that teammates' plans make redundant.
 
-        Uses teammate_mask if available (set by planner from intents).
+        Uses state["teammate_mask"], the teammate plans from _compute_teammate_mask. At weight 1
+        the reward IG - penalty equals greedy IGd.
         """
-        if "teammate_mask" not in state:
+        plans = state.get("teammate_mask")
+        if not plans:
             return 0.0
 
-        mask = state["teammate_mask"]
-        overlap = np.sum(mask[imin:imax, jmin:jmax])
-        footprint_size = (imax - imin) * (jmax - jmin)
-
-        if footprint_size == 0:
-            return 0.0
-
-        # Normalize penalty
-        overlap_ratio = overlap / footprint_size
-        penalty_weight = self.config.get("overlap_penalty_weight", 0.3)
-
-        return penalty_weight * overlap_ratio
+        if ig_reward is None:
+            ig_reward = self.compute_ig_reward(state, imin, imax, jmin, jmax)
+        redundant = 1.0 - teammate_overlap_discount((imin, imax, jmin, jmax), plans)
+        return self.config.get("overlap_penalty_weight", 1.0) * ig_reward * redundant
 
     def rollout(
         self,
@@ -272,7 +274,7 @@ class DecMCTSNode(SearchNodeOps):
             # Apply action
             state = self.apply_action(state, action, copy_belief=False)
 
-            observed = self.observe(state)
+            observed = self.observe(state, rng)
             if observed is None:
                 continue
             reward, ig_reward = observed
@@ -320,7 +322,6 @@ class DecMCTSPlanner:
     Features:
     - Single-level MCTS planning (no hierarchical split)
     - Intent sharing for decentralized coordination
-    - D-UCT discounting for async operation
     - IG-based rollout rewards
 
     Configuration:
@@ -328,9 +329,9 @@ class DecMCTSPlanner:
     - iterations: Number of MCTS iterations
     - ucb_c: UCB1 exploration constant
     - discount_factor: Gamma for future rewards
-    - overlap_penalty_weight: Penalty for teammate overlap
-    - d_uct_decay: D-UCT staleness decay factor
-    - d_uct_threshold: D-UCT staleness threshold (seconds)
+    - overlap_penalty_weight: Share of redundant IG removed for teammate overlap (1 = IGd)
+    - discount_teammates: If False, teammate plans do not affect the reward (plain IG)
+    - comm_radius: (dx, dy, dz) limit for hearing a teammate; None means unlimited
     """
 
     def __init__(
@@ -364,11 +365,11 @@ class DecMCTSPlanner:
             "iterations": config.get("iterations", 100),
             "ucb_c": config.get("ucb_c", 1.4),
             "discount_factor": config.get("discount_factor", 0.95),
-            "overlap_penalty_weight": config.get("overlap_penalty_weight", 0.3),
-            "d_uct_decay": config.get("d_uct_decay", 0.9),
-            "d_uct_threshold": config.get("d_uct_threshold", 2.0),
+            "overlap_penalty_weight": config.get("overlap_penalty_weight", 1.0),
+            "discount_teammates": config.get("discount_teammates", True),
+            "comm_radius": config.get("comm_radius"),
             "parallel": config.get("parallel", 1),
-            "timeout": config.get("timeout", 5.0),
+            "timeout": config.get("timeout", 5.0),  # accepted but unused: iterations stop the search
         }
 
         # Current state
@@ -422,37 +423,31 @@ class DecMCTSPlanner:
         self._teammate_intents = intents
         self._stats["intent_updates_received"] += 1
 
-    def _compute_teammate_mask(self) -> np.ndarray:
+    def _compute_teammate_mask(self) -> List[List[Tuple[int, int, int, int]]]:
         """
-        Compute coverage mask from teammate intents with D-UCT discounting.
+        Collect the teammate plans that reduce this agent's reward.
 
         Returns:
-            2D mask where values indicate teammate coverage probability
+            One footprint list per teammate in communication range, nearest step first.
         """
-        H_grid, W_grid = self._require_state()[2].shape[:2]
-        mask = np.zeros((H_grid, W_grid), dtype=float)
+        if not self.config["discount_teammates"]:
+            return []
 
-        for teammate_id, intent in self._teammate_intents.items():
-            if intent.is_stale(max_age=self.config["d_uct_threshold"] * 2):
+        position, altitude, _ = self._require_state()
+        own_state = (position[0], position[1], altitude)
+        plans = []
+        for intent in self._teammate_intents.values():
+            # position_sequence[0] is the start; index 1 belongs to the first footprint.
+            teammate_state = None
+            if len(intent.position_sequence) > 1 and len(intent.altitude_sequence) > 1:
+                x, y = intent.position_sequence[1]
+                teammate_state = (x, y, intent.altitude_sequence[1])
+            if not teammate_in_range(own_state, teammate_state, self.config["comm_radius"]):
                 continue
 
-            # D-UCT staleness discount
-            discount = intent.staleness_discount(
-                decay_factor=self.config["d_uct_decay"],
-                threshold_sec=self.config["d_uct_threshold"],
-            )
+            plans.append(list(intent.footprint_sequence))
 
-            # Add discounted footprints to mask
-            for footprint in intent.footprint_sequence:
-                imin, imax, jmin, jmax = footprint
-                imin = max(0, min(imin, H_grid))
-                imax = max(0, min(imax, H_grid))
-                jmin = max(0, min(jmin, W_grid))
-                jmax = max(0, min(jmax, W_grid))
-
-                mask[imin:imax, jmin:jmax] += discount
-
-        return mask
+        return plans
 
     def plan(self) -> DecMCTSIntent:
         """
@@ -484,13 +479,12 @@ class DecMCTSPlanner:
 
         # Run MCTS iterations
         iterations = 0
-        timeout = self.config["timeout"]
-        max_iterations = self.config["iterations"]
+        self._return_bounds = None
+        gamma = self.config["discount_factor"]
+        # Every root action is scored once, whatever the budget.
+        max_iterations = max(self.config["iterations"], len(root.untried_actions))
 
         while iterations < max_iterations:
-            if time.perf_counter() - start_time >= timeout:
-                break
-
             # Selection
             node, path = self._tree_policy(root)
 
@@ -501,8 +495,18 @@ class DecMCTSPlanner:
                 discount_factor=self.config["discount_factor"],
             )
 
-            # Backpropagation
-            node.backpropagate(node.immediate_reward + reward)
+            # The whole episode's discounted return is credited to every node on the path.
+            episode_return = sum(
+                gamma**depth * step.immediate_reward
+                for depth, step in enumerate(path[1:])
+            ) + gamma ** (len(path) - 1) * reward
+            node.backpropagate(episode_return)
+
+            if self._return_bounds is None:
+                self._return_bounds = (episode_return, episode_return)
+            else:
+                low, high = self._return_bounds
+                self._return_bounds = (min(low, episode_return), max(high, episode_return))
 
             iterations += 1
 
@@ -544,7 +548,9 @@ class DecMCTSPlanner:
                 path.append(child)
                 return child, path
             else:
-                best_child = node.best_child(c_param=self.config["ucb_c"])
+                best_child = node.best_child(
+                    c_param=self.config["ucb_c"], value_bounds=self._return_bounds
+                )
                 if best_child is None:
                     raise RuntimeError("Fully expanded node has no selectable child")
                 node = best_child
@@ -565,8 +571,10 @@ class DecMCTSPlanner:
             else:
                 action_values[action] = 0.0
 
-        # Select action with highest average value
-        best_action = max(action_values, key=lambda a: action_values[a])
+        # Highest average value, with greedy's tie-break order
+        best_action = select_canonical_action(
+            {action: (value,) for action, value in action_values.items()}
+        )
 
         return best_action, action_values
 
@@ -649,7 +657,7 @@ class DecMCTSPlanner:
             footprint_sequence=footprint_sequence,
             ig_sequence=ig_sequence,
             total_expected_ig=total_ig,
-            timestamp=time.time(),
+            step=self._stats["plans_generated"] + 1,
         )
 
     def get_action_values(self) -> Dict[str, float]:

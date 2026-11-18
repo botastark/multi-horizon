@@ -361,7 +361,6 @@ class planning:
         This is a flat MCTS planner without the LLP/HLP hierarchy:
         - Single MCTS tree for action selection
         - Intent sharing for decentralized coordination
-        - D-UCT discounting for async operation
         - IG-based rollout rewards
 
         Use as comparison between greedy IG and multi-horizon planning.
@@ -389,7 +388,7 @@ class planning:
             # Extract config
             dec_mcts_config = self.experiment_config.get("dec_mcts", {})
             dec_config = self.experiment_config.get("decentralized", {})
-            d_uct_config = dec_config.get("d_uct", {})
+            discount_teammates, comm_radius = self._teammate_coordination_settings()
 
             config = {
                 "horizon": dec_mcts_config.get(
@@ -404,9 +403,9 @@ class planning:
                 "discount_factor": dec_mcts_config.get(
                     "discount_factor", self.mcts_params.get("discount_factor", 0.95)
                 ),
-                "overlap_penalty_weight": dec_config.get("overlap_penalty_weight", 0.3),
-                "d_uct_decay": d_uct_config.get("decay_factor", 0.9),
-                "d_uct_threshold": d_uct_config.get("threshold_sec", 2.0),
+                "overlap_penalty_weight": dec_config.get("overlap_penalty_weight", 1.0),
+                "discount_teammates": discount_teammates,
+                "comm_radius": comm_radius,
                 "parallel": dec_mcts_config.get(
                     "parallel", self.mcts_params.get("parallel", 1)
                 ),
@@ -429,9 +428,6 @@ class planning:
                 print(f"\n[DEC-MCTS] Agent {self.agent_id} initialized")
                 print(
                     f"  Horizon: {config['horizon']}, Iterations: {config['iterations']}"
-                )
-                print(
-                    f"  D-UCT decay: {config['d_uct_decay']}, threshold: {config['d_uct_threshold']}s\n"
                 )
 
         planner = self._dec_mcts_planner
@@ -476,6 +472,29 @@ class planning:
         action = intent.action_sequence[0] if intent.action_sequence else "hover"
         return action, action_scores
 
+    def _teammate_coordination_settings(self):
+        """
+        Return (discount_teammates, comm_radius) for the MCTS planners, matching greedy.
+
+        A plain IG mode (IG, IG_BS) ignores teammates and an IGd mode discounts them. The mode
+        comes from the coordinator, else the config's mode label. Without one, planners discount.
+        comm_radius is the same per-axis limit greedy IGd uses; None means unlimited.
+        """
+        mode = getattr(self.coordinator, "mode", None)
+        if mode is None:
+            labels = self.experiment_config.get("mode_labels") or [None]
+            mode = labels[0]
+        discount_teammates = (
+            "IGd" in mode if isinstance(mode, str) and mode.startswith("IG") else True
+        )
+
+        decentralized = self.experiment_config.get("decentralized", {})
+        multiplier = decentralized.get("radius_multiplier")
+        if multiplier is None or multiplier == -1:
+            return discount_teammates, None
+        xy_limit = multiplier * self.uav.xy_step
+        return discount_teammates, (xy_limit, xy_limit, multiplier * self.uav.h_step)
+
     def hierarchical_dec_mcts_decision(self, visited_x, use_mcts_llp=False):
         """
         Run Multi-Horizon Dec-MCTS planning with shared beliefs and intents.
@@ -513,6 +532,7 @@ class planning:
 
             # Extract config - prefer hierarchical_dec_mcts section, fallback to mcts_params
             hier_config = self.experiment_config.get("hierarchical_dec_mcts", {})
+            discount_teammates, comm_radius = self._teammate_coordination_settings()
             horizon_weights = self.mcts_params.get("horizon_weights", {})
 
             config = {
@@ -539,6 +559,8 @@ class planning:
                 "use_mcts_llp": use_mcts_llp,
                 "use_g2": hier_config.get("use_g2", False),
                 "g2_mode": hier_config.get("g2_mode", "hl_aware"),
+                "discount_teammates": discount_teammates,
+                "comm_radius": comm_radius,
             }
 
             num_agents = 1
@@ -646,6 +668,5 @@ class planning:
         action, score = mcts_planner.search(
             num_iterations=params["num_iterations"],
             return_action_scores=True,
-            timeout=params["timeout"],
         )
         return action, score

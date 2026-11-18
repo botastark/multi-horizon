@@ -136,6 +136,14 @@ class Simulator:
             (self.grid_info.shape[0], self.grid_info.shape[1], 2), 0.5
         )
 
+    def _decision_order(self):
+        """Agent indices in deciding order: IGd uses one seeded random order, others are fixed."""
+        if getattr(self.coordinator, "mode", None) == "IGd_BM" and len(self.agents) > 1:
+            if not hasattr(self, "_baseline_agent_decision_order_rng"):
+                self._baseline_agent_decision_order_rng = np.random.default_rng(17)
+            return self._baseline_agent_decision_order_rng.permutation(len(self.agents))
+        return range(len(self.agents))
+
     def _require_coordinator(self):
         """Return the coordinator, which every multi-agent code path needs."""
         if self.coordinator is None:
@@ -374,7 +382,8 @@ class Simulator:
             self._select_greedy_baseline_actions(step)
             return
 
-        for agent in self.agents:
+        for agent_index in self._decision_order():
+            agent = self.agents[agent_index]
             agent_id = agent["agent_id"]
             camera = agent["camera"]
             planner = agent["planner"]
@@ -663,9 +672,6 @@ class Simulator:
                 d["_timing_start_ms"] = None
                 d["_timing_end_ms"] = None
 
-            if not hasattr(self, "_baseline_agent_decision_order_rng"):
-                self._baseline_agent_decision_order_rng = np.random.default_rng(17)
-
             predicted_states = np.array(
                 [
                     [
@@ -678,9 +684,7 @@ class Simulator:
                 dtype=float,
             )
             selected_actions = ["hover"] * len(self.agents)
-            decision_order = self._baseline_agent_decision_order_rng.permutation(
-                len(self.agents)
-            )
+            decision_order = self._decision_order()
             h_disp = self.agents[0]["camera"].xy_step
             v_disp = self.agents[0]["camera"].h_step
             radius_multiplier = self._require_coordinator().config.get("decentralized", {}).get(
